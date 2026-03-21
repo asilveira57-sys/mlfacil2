@@ -1584,8 +1584,22 @@ function classifyCatalog(item: any): { inCatalog: boolean; confirmed: boolean; c
 }
 
 function computeSubScores(item: any, photos: { count: number; hasVideo: boolean }, titleLen: number, coverageDays: number, visits7d: number, visits30d: number, sales30d: number): Record<string, number> {
-  // Traffic
-  const traffic = visits30d >= 300 ? 100 : visits30d >= 150 ? 80 : visits30d >= 50 ? 60 : visits30d >= 15 ? 40 : visits30d > 0 ? 20 : 0;
+  // Traffic base
+  let traffic = visits30d >= 300 ? 100 : visits30d >= 150 ? 80 : visits30d >= 50 ? 60 : visits30d >= 15 ? 40 : visits30d > 0 ? 20 : 0;
+  
+  // RULE 2: ADS active with low visits → reduce penalty (max -5)
+  if (item.is_ads_active === true && traffic < 40) {
+    traffic = Math.max(traffic, 35); // cap penalty at -5 from baseline 40
+  }
+  // RULE 3: Promotion active → +5 traffic bonus
+  if (item.is_promotion_active === true) {
+    traffic = Math.min(traffic + 5, 100);
+  }
+  // RULE 4: ADS + Promotion → +10 combined bonus (total, not stacked on rule 3)
+  if (item.is_ads_active === true && item.is_promotion_active === true) {
+    traffic = Math.min(traffic + 5, 100); // +5 extra beyond rule 3's +5 = +10 total
+  }
+  
   // Conversion
   const convRate = visits30d > 0 ? (sales30d / visits30d) * 100 : 0;
   const conversion = visits30d < 10 ? 50 : convRate >= 5 ? 100 : convRate >= 3 ? 85 : convRate >= 1.5 ? 70 : convRate >= 0.5 ? 50 : convRate > 0 ? 30 : 0;
@@ -1595,6 +1609,11 @@ function computeSubScores(item: any, photos: { count: number; hasVideo: boolean 
   if (photos.hasVideo) content += 25;
   if (titleLen >= 40) content += 25; else if (titleLen >= 20) content += 15;
   content = Math.min(content, 100);
+  // SEO integration into content score
+  const seoScore = item.seo_score || 0;
+  if (seoScore > 0) {
+    content = Math.round(content * 0.7 + seoScore * 0.3); // 70% media + 30% SEO
+  }
   // Stock
   const stock = (item.available_quantity ?? null) === null ? 50 : item.available_quantity === 0 ? 0 : item.available_quantity < 3 ? 30 : item.available_quantity >= 10 ? 100 : 70;
   // Logistics
@@ -1631,10 +1650,25 @@ function classifyCoverage(daysWithData: number, daysReq: number): string {
   return pct >= 70 ? 'reliable' : pct >= 30 ? 'partial' : 'insufficient';
 }
 
-function determineMainProblem(scores: Record<string, number>, covStatus: string, visits30d: number, sales30d: number, stock: number | null): string {
+function determineMainProblem(scores: Record<string, number>, covStatus: string, visits30d: number, sales30d: number, stock: number | null, item: any = {}): string {
+  // NEW PRIORITY ORDER: data_coverage → exposure → traffic → conversion → content/SEO
+  
+  // 1. Data coverage first
   if (covStatus === 'insufficient') return 'data_coverage';
-  if (visits30d > 20 && sales30d === 0) return 'conversion';
+  
+  // 2. Exposure: low visits + no ADS + no promo = exposure problem
+  if (visits30d < 15 && item.is_ads_active !== true && item.is_promotion_active !== true) return 'exposure';
+  
+  // 3. Campaign performance: ADS active but still no traffic
+  if (visits30d < 15 && item.is_ads_active === true) return 'campaign_performance';
+  
+  // 4. Stock
   if (stock === 0) return 'stock';
+  
+  // 5. Conversion (only if has traffic)
+  if (visits30d > 20 && sales30d === 0) return 'conversion';
+  
+  // 6. Content/SEO/traffic by lowest score
   const candidates = [
     { key: 'discovery', score: scores.traffic },
     { key: 'conversion', score: scores.conversion },
@@ -1644,39 +1678,80 @@ function determineMainProblem(scores: Record<string, number>, covStatus: string,
   return candidates[0].score >= 70 ? 'healthy' : candidates[0].key;
 }
 
+function generateDiagnosticText(mainProblem: string, item: any, scores: Record<string, number>): string {
+  const v30d = item.visits_30d || item.visits_last * 4 || 0;
+  switch (mainProblem) {
+    case 'exposure':
+      return 'O anúncio não possui campanhas ou promoções ativas. A baixa visibilidade pode estar relacionada à falta de estratégias de exposição.';
+    case 'campaign_performance':
+      return 'O anúncio está em campanha, mas não está gerando tráfego relevante. Isso pode indicar necessidade de ajuste na campanha ou atratividade do anúncio.';
+    case 'content':
+      if ((item.seo_score || 0) < 40) return 'O título e os atributos não cobrem termos comuns da categoria, o que pode reduzir a descoberta. Conteúdo visual também precisa de atenção.';
+      return 'O conteúdo visual do anúncio (fotos, vídeo, título) precisa de melhorias para aumentar a conversão.';
+    case 'conversion':
+      return `O anúncio recebe ${v30d} visitas mas não converte. Revise preço, fotos, descrição e condições de venda.`;
+    case 'discovery':
+      return 'O anúncio está com baixa visibilidade orgânica. Considere melhorar o título, investir em ADS ou participar de promoções.';
+    case 'stock':
+      return 'Estoque zerado ou muito baixo. O anúncio perde posicionamento e não pode vender.';
+    case 'data_coverage':
+      return 'Dados insuficientes para diagnóstico confiável. Aguarde mais dias de coleta.';
+    case 'healthy':
+      return 'Anúncio operando de forma saudável. Continue monitorando.';
+    default:
+      return '';
+  }
+}
+
 function generateSmartRecs(item: any, scores: Record<string, number>, mainProblem: string, existing: string[]): any[] {
   const recs: any[] = [];
   const has = (t: string) => existing.includes(t);
   const logInfo = classifyLogisticType(item);
   const catInfo = classifyCatalog(item);
   const v30d = item.visits_30d || item.visits_last * 4 || 0;
+  const hasTraffic = v30d >= 20;
+  const isHealthy = (item.health_score || 0) > 80;
 
-  if (scores.content < 60) {
+  // EXPOSURE-first recommendations
+  if (v30d < 10 && !item.is_ads_active && !has('consider_ads'))
+    recs.push({ recommendation_type: 'consider_ads', priority: 'high', title: 'Ativar publicidade (ADS)', description: 'Sem tráfego e sem publicidade ativa. ADS pode acelerar a descoberta.', category: 'exposure', estimated_impact: 'alto' });
+  
+  if (item.is_ads_active && v30d < 15 && !has('review_campaign'))
+    recs.push({ recommendation_type: 'review_campaign', priority: 'high', title: 'Revisar campanha ADS', description: 'ADS ativo mas sem gerar tráfego. Ajuste a campanha ou atratividade do anúncio.', category: 'exposure', estimated_impact: 'alto' });
+
+  // Promo — good conversion, has traffic
+  if (!item.is_promotion_active && scores.conversion >= 60 && hasTraffic && !has('consider_promo'))
+    recs.push({ recommendation_type: 'consider_promo', priority: 'low', title: 'Considerar promoção', description: 'Anúncio com boa conversão pode se beneficiar de promoções para escalar vendas.', category: 'exposure', estimated_impact: 'médio' });
+
+  // BLOCK: Content/media suggestions ONLY if has traffic
+  if (hasTraffic && scores.content < 60) {
     const pc = item.photos_count || 0;
     if (pc === 0 && !has('add_photos')) recs.push({ recommendation_type: 'add_photos', priority: 'critical', title: 'Adicionar fotos', description: 'Anúncio sem fotos. Adicione pelo menos 6 fotos de qualidade.', category: 'content', estimated_impact: 'alto' });
-    else if (pc < 4 && !has('more_photos')) recs.push({ recommendation_type: 'more_photos', priority: 'high', title: 'Adicionar mais fotos', description: `Apenas ${pc} foto(s). Recomendado: pelo menos 6.`, category: 'content', estimated_impact: 'médio' });
-    if (!item.has_video && !has('add_video')) recs.push({ recommendation_type: 'add_video', priority: 'medium', title: 'Adicionar vídeo', description: 'Anúncios com vídeo convertem até 20% mais.', category: 'content', estimated_impact: 'médio' });
+    else if (pc < 4 && !has('more_photos')) recs.push({ recommendation_type: 'more_photos', priority: isHealthy ? 'low' : 'high', title: 'Adicionar mais fotos', description: `Apenas ${pc} foto(s). Recomendado: pelo menos 6.`, category: 'content', estimated_impact: 'médio' });
+    if (!item.has_video && !has('add_video')) recs.push({ recommendation_type: 'add_video', priority: isHealthy ? 'low' : 'medium', title: 'Adicionar vídeo', description: 'Anúncios com vídeo convertem até 20% mais.', category: 'content', estimated_impact: 'médio' });
   }
+
   // BLOCK: only suggest full if confirmed NOT full
   if (logInfo.confirmed && !logInfo.isFull && !has('consider_full'))
-    recs.push({ recommendation_type: 'consider_full', priority: 'medium', title: 'Considerar Fulfillment', description: 'Anúncio não usa Full. Fulfillment melhora conversão.', category: 'logistics', estimated_impact: 'alto' });
+    recs.push({ recommendation_type: 'consider_full', priority: isHealthy ? 'low' : 'medium', title: 'Considerar Fulfillment', description: 'Anúncio não usa Full. Fulfillment melhora conversão.', category: 'logistics', estimated_impact: 'alto' });
   // BLOCK: only suggest catalog if confirmed NOT in catalog
   if (catInfo.confirmed && !catInfo.inCatalog && !has('join_catalog'))
-    recs.push({ recommendation_type: 'join_catalog', priority: 'medium', title: 'Vincular ao catálogo', description: 'Anúncio fora do catálogo. Catálogo dá exposição extra.', category: 'catalog', estimated_impact: 'médio' });
+    recs.push({ recommendation_type: 'join_catalog', priority: isHealthy ? 'low' : 'medium', title: 'Vincular ao catálogo', description: 'Anúncio fora do catálogo. Catálogo dá exposição extra.', category: 'catalog', estimated_impact: 'médio' });
   if ((item.available_quantity ?? 0) === 0 && !has('restock'))
     recs.push({ recommendation_type: 'restock', priority: 'critical', title: 'Repor estoque', description: 'Estoque zerado. Anúncio invisível nas buscas.', category: 'stock', estimated_impact: 'crítico' });
   else if ((item.available_quantity ?? 0) < 3 && !has('low_stock_warning'))
     recs.push({ recommendation_type: 'low_stock_warning', priority: 'high', title: 'Estoque baixo', description: `Apenas ${item.available_quantity} un. Reponha para evitar perda.`, category: 'stock', estimated_impact: 'alto' });
-  if (scores.traffic < 30 && !has('improve_seo'))
+  if (scores.traffic < 30 && hasTraffic && !has('improve_seo'))
     recs.push({ recommendation_type: 'improve_seo', priority: 'high', title: 'Melhorar visibilidade', description: 'Poucas visitas. Revise título e considere publicidade.', category: 'traffic', estimated_impact: 'alto' });
   // BLOCK: only suggest conversion improvement if there IS traffic
-  if (mainProblem === 'conversion' && v30d >= 20 && !has('improve_conversion'))
+  if (mainProblem === 'conversion' && hasTraffic && !has('improve_conversion'))
     recs.push({ recommendation_type: 'improve_conversion', priority: 'high', title: 'Melhorar conversão', description: 'Recebe visitas mas não converte. Revise preço, fotos e descrição.', category: 'conversion', estimated_impact: 'alto' });
-  // NEW: Exposure-based recommendations
-  if (v30d < 10 && !item.is_ads_active && !has('consider_ads'))
-    recs.push({ recommendation_type: 'consider_ads', priority: 'medium', title: 'Considerar publicidade (ADS)', description: 'Anúncio sem tráfego e sem publicidade ativa. ADS pode acelerar a descoberta.', category: 'exposure', estimated_impact: 'alto' });
-  if (!item.is_promotion_active && scores.conversion >= 60 && v30d >= 20 && !has('consider_promo'))
-    recs.push({ recommendation_type: 'consider_promo', priority: 'low', title: 'Considerar promoção', description: 'Anúncio com boa conversão pode se beneficiar de promoções para escalar vendas.', category: 'exposure', estimated_impact: 'médio' });
+
+  // Healthy items → classify as "otimização leve"
+  if (isHealthy) {
+    recs.forEach(r => { if (r.priority !== 'critical') r.priority = 'low'; });
+  }
+
   return recs;
 }
 
@@ -1811,7 +1886,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false };
         const covDays = covByItem.get(item.item_id) || 0;
         const title = listing.title || item.title || '';
-        const merged = { ...item, ...listing };
+        const merged = { ...item, ...listing, is_ads_active: adsActiveSet.has(item.item_id) || null, is_promotion_active: promoActiveSet.has(item.item_id) || null };
         const covStatus = classifyCoverage(covDays, 30);
 
         const v7d = item.visits_7d || item.visits_last || 0;
@@ -1822,10 +1897,11 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const scores = computeSubScores(merged, photos, title.length, covDays, v7d, v30d, s30d);
         const hScore = computeHealthScore(scores);
         const hStatus = classifyHealthStatus(hScore);
-        const mainProb = determineMainProblem(scores, covStatus, v30d, s30d, item.available_quantity);
+        const mainProb = determineMainProblem(scores, covStatus, v30d, s30d, item.available_quantity, merged);
+        const diagnosticText = generateDiagnosticText(mainProb, merged, scores);
 
         // Recommendations with smart blocking
-        const recs = generateSmartRecs({ ...item, photos_count: photos.count, has_video: photos.hasVideo }, scores, mainProb, exRecMap.get(item.item_id) || []);
+        const recs = generateSmartRecs({ ...merged, photos_count: photos.count, has_video: photos.hasVideo, health_score: hScore }, scores, mainProb, exRecMap.get(item.item_id) || []);
         for (const r of recs) newRecs.push({ seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId, ...r });
 
         // Alerts
@@ -1864,6 +1940,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           logistic_type: logInfo.logisticLabel, catalog_product_id: catInfo.catalogId,
           visits_7d: v7d, visits_30d: v30d, conversion_rate_30d: Number(convRate.toFixed(3)),
           health_score: hScore, health_status: hStatus, main_problem: mainProb,
+          diagnostic_text: diagnosticText,
           data_coverage_days: covDays, data_coverage_status: covStatus,
           is_ads_active: isAdsActive, ads_status: adsStatus,
           is_promotion_active: isPromoActive, promotion_status: promoStatus,

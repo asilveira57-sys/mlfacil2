@@ -6852,6 +6852,7 @@ export type Database = {
           data_coverage_days: number | null
           data_coverage_status: string | null
           days_without_sale: number | null
+          diagnostic_text: string | null
           free_shipping: boolean | null
           has_video: boolean | null
           health_score: number | null
@@ -6912,6 +6913,7 @@ export type Database = {
           data_coverage_days?: number | null
           data_coverage_status?: string | null
           days_without_sale?: number | null
+          diagnostic_text?: string | null
           free_shipping?: boolean | null
           has_video?: boolean | null
           health_score?: number | null
@@ -6972,6 +6974,7 @@ export type Database = {
           data_coverage_days?: number | null
           data_coverage_status?: string | null
           days_without_sale?: number | null
+          diagnostic_text?: string | null
           free_shipping?: boolean | null
           has_video?: boolean | null
           health_score?: number | null

@@ -99,6 +99,8 @@ export interface HealthCurrentItem {
   ads_status: string | null;
   is_promotion_active: boolean | null;
   promotion_status: string | null;
+  // Diagnostic
+  diagnostic_text: string | null;
   // Period-based metrics (from RPC)
   visits_period?: number | null;
   sales_period?: number | null;
@@ -254,12 +256,15 @@ export function getChangeLabel(type: string): string {
 
 // Problem labels
 export const MAIN_PROBLEM_LABELS: Record<string, { label: string; color: string }> = {
+  data_coverage: { label: "Dados insuficientes", color: "text-slate-400" },
+  exposure: { label: "Exposição", color: "text-orange-400" },
   discovery: { label: "Descoberta", color: "text-blue-400" },
   conversion: { label: "Conversão", color: "text-amber-400" },
-  competitiveness: { label: "Competitividade", color: "text-orange-400" },
   content: { label: "Conteúdo", color: "text-violet-400" },
+  competitiveness: { label: "Competitividade", color: "text-orange-400" },
+  seo: { label: "SEO", color: "text-cyan-400" },
   stock: { label: "Estoque", color: "text-red-400" },
-  data_coverage: { label: "Dados insuficientes", color: "text-slate-400" },
+  campaign_performance: { label: "Performance ADS", color: "text-orange-400" },
   healthy: { label: "Saudável", color: "text-emerald-400" },
 };
 
