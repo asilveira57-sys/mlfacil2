@@ -113,11 +113,10 @@ export interface CoverageInfo {
 
 export function computeCoverage(series: VisitSeriesEntry[], daysRequested: number): CoverageInfo {
   const daysWithData = series.filter(s => s.visits > 0).length;
-  const totalDays = series.length; // includes zero-visit days from generate_series
-  const coverage_percent = daysRequested > 0 ? Math.round((totalDays / daysRequested) * 100) : 0;
+  const coverage_percent = daysRequested > 0 ? Math.round((daysWithData / daysRequested) * 100) : 0;
   return {
     days_requested: daysRequested,
-    days_with_data: totalDays,
+    days_with_data: daysWithData,
     coverage_percent: Math.min(coverage_percent, 100),
     status: coverage_percent >= 70 ? 'good' : coverage_percent >= 30 ? 'partial' : 'insufficient',
   };
