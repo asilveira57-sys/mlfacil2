@@ -44,6 +44,7 @@ interface Props {
   onPeriodChange: (p: PeriodDays) => void;
   collectionStatus?: string | null;
   collectionError?: string | null;
+  dataDaysAvailable?: number;
 }
 
 export function RadiographyItemList({
@@ -54,6 +55,7 @@ export function RadiographyItemList({
   onPeriodChange,
   collectionStatus,
   collectionError,
+  dataDaysAvailable = 0,
 }: Props) {
   const [search, setSearch] = useState("");
   const [healthFilter, setHealthFilter] = useState<string>("all");
