@@ -45,6 +45,7 @@ export function RadiographyItemList({
   const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("all");
   const [mainProblemFilter, setMainProblemFilter] = useState<MainProblemFilter>("all");
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+  const [exposureFilter, setExposureFilter] = useState<ExposureFilter>("all");
   const [sortBy, setSortBy] = useState<string>("health");
   const [page, setPage] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
