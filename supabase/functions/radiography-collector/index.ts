@@ -1584,8 +1584,22 @@ function classifyCatalog(item: any): { inCatalog: boolean; confirmed: boolean; c
 }
 
 function computeSubScores(item: any, photos: { count: number; hasVideo: boolean }, titleLen: number, coverageDays: number, visits7d: number, visits30d: number, sales30d: number): Record<string, number> {
-  // Traffic
-  const traffic = visits30d >= 300 ? 100 : visits30d >= 150 ? 80 : visits30d >= 50 ? 60 : visits30d >= 15 ? 40 : visits30d > 0 ? 20 : 0;
+  // Traffic base
+  let traffic = visits30d >= 300 ? 100 : visits30d >= 150 ? 80 : visits30d >= 50 ? 60 : visits30d >= 15 ? 40 : visits30d > 0 ? 20 : 0;
+  
+  // RULE 2: ADS active with low visits → reduce penalty (max -5)
+  if (item.is_ads_active === true && traffic < 40) {
+    traffic = Math.max(traffic, 35); // cap penalty at -5 from baseline 40
+  }
+  // RULE 3: Promotion active → +5 traffic bonus
+  if (item.is_promotion_active === true) {
+    traffic = Math.min(traffic + 5, 100);
+  }
+  // RULE 4: ADS + Promotion → +10 combined bonus (total, not stacked on rule 3)
+  if (item.is_ads_active === true && item.is_promotion_active === true) {
+    traffic = Math.min(traffic + 5, 100); // +5 extra beyond rule 3's +5 = +10 total
+  }
+  
   // Conversion
   const convRate = visits30d > 0 ? (sales30d / visits30d) * 100 : 0;
   const conversion = visits30d < 10 ? 50 : convRate >= 5 ? 100 : convRate >= 3 ? 85 : convRate >= 1.5 ? 70 : convRate >= 0.5 ? 50 : convRate > 0 ? 30 : 0;
@@ -1595,6 +1609,11 @@ function computeSubScores(item: any, photos: { count: number; hasVideo: boolean 
   if (photos.hasVideo) content += 25;
   if (titleLen >= 40) content += 25; else if (titleLen >= 20) content += 15;
   content = Math.min(content, 100);
+  // SEO integration into content score
+  const seoScore = item.seo_score || 0;
+  if (seoScore > 0) {
+    content = Math.round(content * 0.7 + seoScore * 0.3); // 70% media + 30% SEO
+  }
   // Stock
   const stock = (item.available_quantity ?? null) === null ? 50 : item.available_quantity === 0 ? 0 : item.available_quantity < 3 ? 30 : item.available_quantity >= 10 ? 100 : 70;
   // Logistics
