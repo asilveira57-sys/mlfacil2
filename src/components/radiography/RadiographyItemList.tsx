@@ -110,7 +110,7 @@ export function RadiographyItemList({
   }, [items, search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, exposureFilter, sortBy]);
 
   // Reset page on filter change
-  useMemo(() => setPage(0), [search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, sortBy]);
+  useMemo(() => setPage(0), [search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, exposureFilter, sortBy]);
 
   const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
   const pagedItems = filteredItems.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
