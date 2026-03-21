@@ -1555,6 +1555,278 @@ async function handleEnrichSales(supabase: any, sellerId: string) {
 }
 
 // ============================================================================
+// FLOW 7 — INTELLIGENT ANALYSIS ENGINE (Phase 2)
+// ============================================================================
+
+const HEALTH_WEIGHTS: Record<string, number> = {
+  traffic: 20, conversion: 25, content: 15, stock: 15, logistics: 10, catalog: 5, coverage: 10,
+};
+
+function classifyLogisticType(item: any): { isFull: boolean; confirmed: boolean; logisticLabel: string } {
+  const lt = (item.logistic_type || '').toLowerCase();
+  const sm = (item.shipping_mode || '').toLowerCase();
+  if (lt === 'fulfillment' || lt === 'full' || lt.includes('fulfillment'))
+    return { isFull: true, confirmed: true, logisticLabel: 'Fulfillment' };
+  if (lt === 'cross_docking' || lt === 'xd_drop_off' || lt.includes('cross'))
+    return { isFull: false, confirmed: true, logisticLabel: 'Coleta/Crossdocking' };
+  if (sm === 'me2' || sm === 'me1')
+    return { isFull: false, confirmed: true, logisticLabel: sm.toUpperCase() };
+  if (lt || sm)
+    return { isFull: false, confirmed: true, logisticLabel: lt || sm };
+  return { isFull: false, confirmed: false, logisticLabel: 'Não confirmado' };
+}
+
+function classifyCatalog(item: any): { inCatalog: boolean; confirmed: boolean; catalogId: string | null } {
+  const cpId = item.catalog_product_id || item.catalog_listing;
+  if (typeof cpId === 'string' && cpId.length > 0) return { inCatalog: true, confirmed: true, catalogId: cpId };
+  if (cpId === true) return { inCatalog: true, confirmed: true, catalogId: null };
+  return { inCatalog: false, confirmed: true, catalogId: null };
+}
+
+function computeSubScores(item: any, photos: { count: number; hasVideo: boolean }, titleLen: number, coverageDays: number, visits7d: number, visits30d: number, sales30d: number): Record<string, number> {
+  // Traffic
+  const traffic = visits30d >= 300 ? 100 : visits30d >= 150 ? 80 : visits30d >= 50 ? 60 : visits30d >= 15 ? 40 : visits30d > 0 ? 20 : 0;
+  // Conversion
+  const convRate = visits30d > 0 ? (sales30d / visits30d) * 100 : 0;
+  const conversion = visits30d < 10 ? 50 : convRate >= 5 ? 100 : convRate >= 3 ? 85 : convRate >= 1.5 ? 70 : convRate >= 0.5 ? 50 : convRate > 0 ? 30 : 0;
+  // Content
+  let content = 0;
+  if (photos.count >= 6) content += 50; else if (photos.count >= 3) content += 30; else if (photos.count >= 1) content += 15;
+  if (photos.hasVideo) content += 25;
+  if (titleLen >= 40) content += 25; else if (titleLen >= 20) content += 15;
+  content = Math.min(content, 100);
+  // Stock
+  const stock = (item.available_quantity ?? null) === null ? 50 : item.available_quantity === 0 ? 0 : item.available_quantity < 3 ? 30 : item.available_quantity >= 10 ? 100 : 70;
+  // Logistics
+  const logInfo = classifyLogisticType(item);
+  let logistics = logInfo.confirmed ? (logInfo.isFull ? 70 : 30) : 50;
+  if (item.free_shipping) logistics = Math.min(logistics + 30, 100);
+  // Catalog
+  const catInfo = classifyCatalog(item);
+  const catalog = catInfo.inCatalog ? 100 : 30;
+  // Coverage
+  const covPct = 30 > 0 ? (coverageDays / 30) * 100 : 0;
+  const coverage = covPct >= 80 ? 100 : covPct >= 50 ? 70 : covPct >= 20 ? 40 : 10;
+
+  return { traffic, conversion, content, stock, logistics, catalog, coverage };
+}
+
+function computeHealthScore(scores: Record<string, number>): number {
+  let total = 0, wSum = 0;
+  for (const [k, w] of Object.entries(HEALTH_WEIGHTS)) { total += (scores[k] || 0) * w; wSum += w; }
+  return Math.round(total / wSum);
+}
+
+function classifyHealthStatus(score: number): string {
+  if (score >= 75) return 'healthy';
+  if (score >= 60) return 'stable';
+  if (score >= 45) return 'observation';
+  if (score >= 30) return 'alert';
+  return 'critical';
+}
+
+function classifyCoverage(daysWithData: number, daysReq: number): string {
+  if (daysReq === 0) return 'unknown';
+  const pct = (daysWithData / daysReq) * 100;
+  return pct >= 70 ? 'reliable' : pct >= 30 ? 'partial' : 'insufficient';
+}
+
+function determineMainProblem(scores: Record<string, number>, covStatus: string, visits30d: number, sales30d: number, stock: number | null): string {
+  if (covStatus === 'insufficient') return 'data_coverage';
+  if (visits30d > 20 && sales30d === 0) return 'conversion';
+  if (stock === 0) return 'stock';
+  const candidates = [
+    { key: 'discovery', score: scores.traffic },
+    { key: 'conversion', score: scores.conversion },
+    { key: 'content', score: scores.content },
+    { key: 'stock', score: scores.stock },
+  ].sort((a, b) => a.score - b.score);
+  return candidates[0].score >= 70 ? 'healthy' : candidates[0].key;
+}
+
+function generateSmartRecs(item: any, scores: Record<string, number>, mainProblem: string, existing: string[]): any[] {
+  const recs: any[] = [];
+  const has = (t: string) => existing.includes(t);
+  const logInfo = classifyLogisticType(item);
+  const catInfo = classifyCatalog(item);
+
+  if (scores.content < 60) {
+    const pc = item.photos_count || 0;
+    if (pc === 0 && !has('add_photos')) recs.push({ recommendation_type: 'add_photos', priority: 'critical', title: 'Adicionar fotos', description: 'Anúncio sem fotos. Adicione pelo menos 6 fotos de qualidade.', category: 'content', estimated_impact: 'alto' });
+    else if (pc < 4 && !has('more_photos')) recs.push({ recommendation_type: 'more_photos', priority: 'high', title: 'Adicionar mais fotos', description: `Apenas ${pc} foto(s). Recomendado: pelo menos 6.`, category: 'content', estimated_impact: 'médio' });
+    if (!item.has_video && !has('add_video')) recs.push({ recommendation_type: 'add_video', priority: 'medium', title: 'Adicionar vídeo', description: 'Anúncios com vídeo convertem até 20% mais.', category: 'content', estimated_impact: 'médio' });
+  }
+  // BLOCK: only suggest full if confirmed NOT full
+  if (logInfo.confirmed && !logInfo.isFull && !has('consider_full'))
+    recs.push({ recommendation_type: 'consider_full', priority: 'medium', title: 'Considerar Fulfillment', description: 'Anúncio não usa Full. Fulfillment melhora conversão.', category: 'logistics', estimated_impact: 'alto' });
+  // BLOCK: only suggest catalog if confirmed NOT in catalog
+  if (catInfo.confirmed && !catInfo.inCatalog && !has('join_catalog'))
+    recs.push({ recommendation_type: 'join_catalog', priority: 'medium', title: 'Vincular ao catálogo', description: 'Anúncio fora do catálogo. Catálogo dá exposição extra.', category: 'catalog', estimated_impact: 'médio' });
+  if ((item.available_quantity ?? 0) === 0 && !has('restock'))
+    recs.push({ recommendation_type: 'restock', priority: 'critical', title: 'Repor estoque', description: 'Estoque zerado. Anúncio invisível nas buscas.', category: 'stock', estimated_impact: 'crítico' });
+  else if ((item.available_quantity ?? 0) < 3 && !has('low_stock_warning'))
+    recs.push({ recommendation_type: 'low_stock_warning', priority: 'high', title: 'Estoque baixo', description: `Apenas ${item.available_quantity} un. Reponha para evitar perda.`, category: 'stock', estimated_impact: 'alto' });
+  if (scores.traffic < 30 && !has('improve_seo'))
+    recs.push({ recommendation_type: 'improve_seo', priority: 'high', title: 'Melhorar visibilidade', description: 'Poucas visitas. Revise título e considere publicidade.', category: 'traffic', estimated_impact: 'alto' });
+  if (mainProblem === 'conversion' && !has('improve_conversion'))
+    recs.push({ recommendation_type: 'improve_conversion', priority: 'high', title: 'Melhorar conversão', description: 'Recebe visitas mas não converte. Revise preço, fotos e descrição.', category: 'conversion', estimated_impact: 'alto' });
+  return recs;
+}
+
+async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
+  const startTime = Date.now();
+  console.log(`[rad-collector] ANALYZE started for ${sellerId}${itemId ? ` item ${itemId}` : ' (all)'}`);
+
+  await supabase.from('listing_health_logs').insert({
+    seller_id: sellerId, item_id: itemId || null, log_type: 'analysis', log_level: 'info',
+    action: 'analyze_started', message: `Analysis started`, metadata_json: { scope: itemId ? 'single' : 'all' },
+  }).catch(() => {});
+
+  try {
+    let query = supabase.from('listing_health_current').select('*').eq('seller_id', sellerId);
+    if (itemId) query = query.eq('item_id', itemId);
+    const { data: items, error: fetchErr } = await query;
+    if (fetchErr) throw new Error(fetchErr.message);
+    if (!items || items.length === 0) return { success: true, analyzed: 0 };
+
+    // Coverage data
+    const { data: covRows } = await supabase.from('seller_item_visits').select('item_id, visit_date')
+      .eq('seller_id', sellerId).gte('visit_date', new Date(Date.now() - 30*86400000).toISOString().split('T')[0]);
+    const covByItem = new Map<string, number>();
+    if (covRows) {
+      const m = new Map<string, Set<string>>();
+      for (const r of covRows) { const s = m.get(r.item_id) || new Set(); s.add(r.visit_date); m.set(r.item_id, s); }
+      for (const [id, s] of m) covByItem.set(id, s.size);
+    }
+
+    // Listing details
+    const allIds = items.map((i: any) => i.item_id);
+    const detailMap = new Map<string, any>();
+    for (let i = 0; i < allIds.length; i += 500) {
+      const { data } = await supabase.from('meli_listings_cache').select('item_id, title, thumbnail, permalink, catalog_product_id, logistic_type, shipping_mode')
+        .eq('seller_id', sellerId).in('item_id', allIds.slice(i, i + 500));
+      if (data) for (const r of data) if (!detailMap.has(r.item_id)) detailMap.set(r.item_id, r);
+    }
+
+    // Photos from API
+    const token = await getValidToken(supabase, sellerId);
+    const photosMap = new Map<string, { count: number; hasVideo: boolean }>();
+    if (token) {
+      for (let i = 0; i < allIds.length; i += 20) {
+        try {
+          const resp = await fetch(`https://api.mercadolibre.com/items?ids=${allIds.slice(i,i+20).join(',')}&attributes=id,pictures,video_id`, { headers: { Authorization: `Bearer ${token}` } });
+          if (resp.ok) { const d = await resp.json(); for (const e of d) if (e.code===200&&e.body) photosMap.set(e.body.id, { count: Array.isArray(e.body.pictures)?e.body.pictures.length:0, hasVideo: !!e.body.video_id }); }
+        } catch {}
+        await sleep(200);
+        if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 10000) break;
+      }
+    }
+
+    // Existing recs
+    const { data: exRecs } = await supabase.from('listing_health_recommendations').select('item_id, recommendation_type').eq('seller_id', sellerId).eq('status', 'pending');
+    const exRecMap = new Map<string, string[]>();
+    if (exRecs) for (const r of exRecs) { const a = exRecMap.get(r.item_id) || []; a.push(r.recommendation_type); exRecMap.set(r.item_id, a); }
+
+    // Tenant
+    const { data: acct } = await supabase.from('ml_accounts').select('user_id').eq('ml_user_id', String(sellerId)).eq('is_active', true).maybeSingle();
+    let tenantId: string | null = null;
+    if (acct?.user_id) { const { data: mem } = await supabase.from('company_members').select('company_id').eq('user_id', acct.user_id).limit(1).maybeSingle(); tenantId = mem?.company_id || null; }
+
+    let analyzed = 0, errCount = 0;
+    const newAlerts: any[] = [], newRecs: any[] = [], updateRows: any[] = [], mediaRows: any[] = [];
+
+    for (const item of items) {
+      try {
+        const listing = detailMap.get(item.item_id) || {};
+        const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false };
+        const covDays = covByItem.get(item.item_id) || 0;
+        const title = listing.title || item.title || '';
+        const merged = { ...item, ...listing };
+        const covStatus = classifyCoverage(covDays, 30);
+
+        const v7d = item.visits_7d || item.visits_last || 0;
+        const v30d = item.visits_30d || v7d * 4;
+        const s30d = item.sales_count_30d || 0;
+        const convRate = v30d > 0 ? (s30d / v30d) * 100 : 0;
+
+        const scores = computeSubScores(merged, photos, title.length, covDays, v7d, v30d, s30d);
+        const hScore = computeHealthScore(scores);
+        const hStatus = classifyHealthStatus(hScore);
+        const mainProb = determineMainProblem(scores, covStatus, v30d, s30d, item.available_quantity);
+
+        // Recommendations with smart blocking
+        const recs = generateSmartRecs({ ...item, photos_count: photos.count, has_video: photos.hasVideo }, scores, mainProb, exRecMap.get(item.item_id) || []);
+        for (const r of recs) newRecs.push({ seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId, ...r });
+
+        // Alerts
+        if (hStatus === 'critical' || hStatus === 'alert') {
+          const statusLabel = hStatus === 'critical' ? 'em estado crítico' : 'requer atenção';
+          newAlerts.push({
+            seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId,
+            alert_type: `health_${hStatus}`, severity: hStatus === 'critical' ? 'critical' : 'warning',
+            title: `Anúncio ${statusLabel}`,
+            message: `Score ${hScore}/100. Problema principal: ${mainProb}. ${covStatus === 'partial' ? 'Dados parciais.' : ''}`,
+            data_json: { health_score: hScore, main_problem: mainProb, scores },
+          });
+        }
+
+        // Media
+        mediaRows.push({
+          seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId,
+          photos_count: photos.count, has_video: photos.hasVideo,
+          quality_score: photos.count >= 6 && photos.hasVideo ? 100 : photos.count >= 6 ? 70 : photos.count >= 3 ? 50 : photos.count >= 1 ? 25 : 0,
+          analysis_json: { photos_count: photos.count, has_video: photos.hasVideo, title_length: title.length },
+          analyzed_at: new Date().toISOString(),
+        });
+
+        // Update row
+        const logInfo = classifyLogisticType(merged);
+        const catInfo = classifyCatalog(merged);
+        updateRows.push({
+          seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId,
+          photos_count: photos.count, has_video: photos.hasVideo,
+          thumbnail: listing.thumbnail || item.thumbnail || null,
+          title: title || null, permalink: listing.permalink || item.permalink || null,
+          logistic_type: logInfo.logisticLabel, catalog_product_id: catInfo.catalogId,
+          visits_7d: v7d, visits_30d: v30d, conversion_rate_30d: Number(convRate.toFixed(3)),
+          health_score: hScore, health_status: hStatus, main_problem: mainProb,
+          data_coverage_days: covDays, data_coverage_status: covStatus,
+        });
+        analyzed++;
+      } catch (e) { errCount++; console.warn(`[rad-collector] ANALYZE item ${item.item_id} err:`, e); }
+    }
+
+    // Persist
+    for (let i = 0; i < updateRows.length; i += 100) {
+      const { error } = await supabase.from('listing_health_current').upsert(updateRows.slice(i, i+100), { onConflict: 'seller_id,item_id' });
+      if (error) console.warn(`[rad-collector] ANALYZE upsert err:`, error.message);
+    }
+    if (newAlerts.length > 0) await supabase.from('listing_health_alerts').insert(newAlerts).catch((e: any) => console.warn(e));
+    if (newRecs.length > 0) await supabase.from('listing_health_recommendations').insert(newRecs).catch((e: any) => console.warn(e));
+    if (mediaRows.length > 0) {
+      if (!itemId) await supabase.from('listing_media_analysis').delete().eq('seller_id', sellerId);
+      else await supabase.from('listing_media_analysis').delete().eq('seller_id', sellerId).eq('item_id', itemId);
+      for (let i = 0; i < mediaRows.length; i += 200) await supabase.from('listing_media_analysis').insert(mediaRows.slice(i,i+200)).catch(() => {});
+    }
+
+    const dur = Date.now() - startTime;
+    await supabase.from('listing_health_logs').insert({
+      seller_id: sellerId, log_type: 'analysis', log_level: 'info', action: 'analyze_finished',
+      message: `Done: ${analyzed} items, ${newAlerts.length} alerts, ${newRecs.length} recs`,
+      metadata_json: { analyzed, errors: errCount, alerts: newAlerts.length, recs: newRecs.length, media: mediaRows.length },
+      duration_ms: dur, items_processed: analyzed, errors_count: errCount,
+    }).catch(() => {});
+
+    console.log(`[rad-collector] ANALYZE done: ${analyzed} items, ${newAlerts.length} alerts, ${newRecs.length} recs, ${dur}ms`);
+    return { success: true, analyzed, alerts_generated: newAlerts.length, recommendations_generated: newRecs.length, media_analyzed: mediaRows.length, errors: errCount, duration_ms: dur };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown';
+    await supabase.from('listing_health_logs').insert({ seller_id: sellerId, item_id: itemId||null, log_type:'analysis', log_level:'error', action:'analyze_failed', message: msg, duration_ms: Date.now()-startTime }).catch(()=>{});
+    return { success: false, error: msg };
+  }
+}
+
+// ============================================================================
 // NIGHTLY CRON — with seller cursor and self-chain for continuation
 // ============================================================================
 async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, skipSync?: boolean) {
