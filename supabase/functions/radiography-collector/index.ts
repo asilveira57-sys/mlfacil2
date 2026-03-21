@@ -1898,6 +1898,9 @@ async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, 
         selfChain(sellerId, "backfill", { chain_depth: 0 });
       }
 
+      // Run intelligent analysis after collection
+      selfChain(sellerId, "analyze");
+
       results.push({ seller_id: sellerId, collection: collResult });
       lastProcessed = sellerId;
     } catch (err) {
