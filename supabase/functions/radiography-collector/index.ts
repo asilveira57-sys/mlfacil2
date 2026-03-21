@@ -1650,10 +1650,25 @@ function classifyCoverage(daysWithData: number, daysReq: number): string {
   return pct >= 70 ? 'reliable' : pct >= 30 ? 'partial' : 'insufficient';
 }
 
-function determineMainProblem(scores: Record<string, number>, covStatus: string, visits30d: number, sales30d: number, stock: number | null): string {
+function determineMainProblem(scores: Record<string, number>, covStatus: string, visits30d: number, sales30d: number, stock: number | null, item: any = {}): string {
+  // NEW PRIORITY ORDER: data_coverage → exposure → traffic → conversion → content/SEO
+  
+  // 1. Data coverage first
   if (covStatus === 'insufficient') return 'data_coverage';
-  if (visits30d > 20 && sales30d === 0) return 'conversion';
+  
+  // 2. Exposure: low visits + no ADS + no promo = exposure problem
+  if (visits30d < 15 && item.is_ads_active !== true && item.is_promotion_active !== true) return 'exposure';
+  
+  // 3. Campaign performance: ADS active but still no traffic
+  if (visits30d < 15 && item.is_ads_active === true) return 'campaign_performance';
+  
+  // 4. Stock
   if (stock === 0) return 'stock';
+  
+  // 5. Conversion (only if has traffic)
+  if (visits30d > 20 && sales30d === 0) return 'conversion';
+  
+  // 6. Content/SEO/traffic by lowest score
   const candidates = [
     { key: 'discovery', score: scores.traffic },
     { key: 'conversion', score: scores.conversion },
