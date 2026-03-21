@@ -1,106 +1,67 @@
 
+Diagnóstico confirmado (com evidência do banco)
 
-# Plano: Corrigir Nome do Cliente + PDF Completo + Regeneração Individual
+1) A análise inteligente não está sendo executada no fluxo manual de atualização.
+- Hoje o botão “Atualizar Dados” chama `full` + `enrich_sales`, mas não chama `analyze`.
+- Resultado direto: `listing_health_current` fica com defaults (`health_score=0`, `photos_count=0`, `has_video=false`, `catalog_product_id=null`).
 
-## Diagnóstico
+2) O estado atual está “zerado” globalmente.
+- `listing_health_current`: 1653/1653 com score 0 e fotos 0.
+- `listing_media_analysis`: 0 linhas.
+- Para seller `1411095727`: 162/162 com score 0 e foto 0.
 
-### Problema 1 — Nome do cliente sempre "—"
-**Causa raiz: RLS.** A tabela `companies` tem política `auth.uid() = user_id` e `profiles` tem `auth.uid() = id`. O admin consegue ler `retrospectives` (tem policy admin), mas NÃO consegue ler `companies` nem `profiles` de OUTROS usuários. O join retorna NULL para tudo que não é do admin logado.
+3) Catálogo está falso-negativo por fonte errada/insuficiente.
+- Exemplo `MLB4024945991`: em `meli_listings_cache` existe `catalog_product_id`, mas em `listing_health_current` está `null`.
+- A recomendação usa `listing_health_current`; por isso sugere “vincular catálogo” mesmo quando já está vinculado.
 
-**Evidência no banco:**
-- 49 retrospectivas têm `company_id` preenchido, 15 são consolidadas
-- Todas as 64 têm `summary_json->>'company_name'` = NULL (engine não gravava esse campo)
-- Tenant names existem: "ADX", "Adeconex Etiquetas", "raffaelvon", etc.
+Plano cirúrgico de correção
 
-### Problema 2 — PDF básico, sem ADS/ABC/Onboarding/Logo
-**Causa raiz:** Todas as 64 retrospectivas foram geradas ANTES do código que inclui `onboarding_context`, `ads_snapshot`, `abc_analysis` e `company_logo_url` no `summary_json`. Confirmado: 0 de 64 têm esses campos.
+Fase A — Corrigir pipeline para nunca ficar zerado
+1. Backend (`supabase/functions/radiography-collector/index.ts`)
+- No `action: "full"`, encadear também `analyze` (além de backfill), para todo refresh manual recalcular score/mídia/catálogo.
+- Ajustar `enrich_sales` para logar em `metadata_json` (não `metadata`) e não deixar log “running” preso.
 
-O botão "Regenerar" atual (`useGenerateRetrospectiveReports`) chama `retrospective-report-gen` que apenas regenera HTML/Slides a partir do `summary_json` existente — NÃO recalcula os dados.
+2. Frontend (`src/hooks/useRadiographyData.ts`)
+- No `triggerUpdate`, garantir sequência operacional: `full` -> `enrich_sales` -> `analyze` (ou `full` com chain assíncrono + polling leve de status).
+- Refetch só após confirmação de término da análise.
 
-### Problema 3 — Assinatura usa "Marketplace Fácil" em vez de "MKTP Fácil"
+Fase B — Corrigir diagnóstico de mídia e catálogo na origem
+3. Análise de item no collector
+- Expandir fetch de detalhes por item para usar dados confiáveis da API no `analyze`:
+  - `catalog_product_id`, `shipping/logistic_type`, `pictures`, `video_id`, `title`, `thumbnail`, `permalink`.
+- Priorizar API no merge (cache apenas fallback).
+- Persistir em `listing_health_current`: `catalog_product_id`, `catalog_listing`, `logistic_type`, `shipping_mode`, `photos_count`, `has_video`, `health_score`, `health_status`, `main_problem`.
 
----
+4. Mídia avançada (requisito 1200x1200 + fundo branco)
+- Em `listing_media_analysis.analysis_json`, salvar:
+  - `photos_count`, `has_video`,
+  - `first_image_resolution`, `min_resolution_ok (>=1200x1200)`,
+  - `white_background_status` (heurística clara/escura com confiança + `unknown` quando não for possível validar).
+- Consolidar no item atual (campos derivados) para lista rápida e sem recalcular no frontend.
 
-## Correções
+Fase C — UI fiel ao dado real
+5. Lista + detalhe
+- `src/components/radiography/RadiographyItemList.tsx`
+  - badges/filtros “Com vídeo/Sem vídeo”, “Poucas fotos”, “Score” baseados nos campos já consolidados.
+- `src/components/radiography/RadiographyDetailPanel.tsx`
+  - seção Mídia mostrar:
+    - quantidade de fotos,
+    - vídeo sim/não,
+    - resolução da 1ª imagem e status 1200x1200,
+    - status de fundo branco (ou “não avaliado”).
+- Recomendações:
+  - bloquear “vincular catálogo” se `catalog_product_id` existir.
+  - bloquear “considerar Full” se já for Full.
 
-### 1. Migration — Admin pode ler companies e profiles de todos
+Fase D — Reprocessamento e validação imediata
+6. Reprocessar dados já coletados (sem apagar histórico)
+- Executar análise completa para todos sellers ativos e, com prioridade, seller ADECONEX.
+- Confirmar que os campos deixam de ficar zerados.
 
-Adicionar policies de SELECT para admin:
-```sql
-CREATE POLICY "admin_read_all_companies" ON companies FOR SELECT
-  USING (has_role(auth.uid(), 'admin'));
-
-CREATE POLICY "admin_read_all_profiles" ON profiles FOR SELECT
-  USING (has_role(auth.uid(), 'admin'));
-```
-
-Isso resolve instantaneamente a coluna "Cliente" para o admin.
-
-### 2. Coluna Cliente — fallback para consolidados
-
-No `useAllRetrospectives` (AdminRetrospectives.tsx), para linhas sem `company_id` (consolidadas):
-- Mostrar o nome do tenant (já funciona no código, só falhava por RLS)
-- Resultado: "ADX", "Adeconex Etiquetas", "raffaelvon", etc.
-
-### 3. Regeneração Individual — re-executar o engine para 1 retrospectiva
-
-Criar botão "Regenerar Dados" que:
-1. Chama `retrospective-engine` com `mode: 'force'`, `company_id` e `tenant_id` da retrospectiva
-2. O engine já tem skip-duplicate, então precisa **deletar a retrospectiva antiga antes** e re-gerar
-3. Como o usuário quer "criar nova versão": manter a original e gerar uma nova com dados atualizados
-
-**Implementação:**
-- No `AdminRetrospectives.tsx`, adicionar botão "Regenerar Completo" 
-- Chama `useTriggerRetrospectiveEngine` com `{ mode: 'force', tenant_id, company_id }`
-- O engine roda `buildSummaryJson` com o código atualizado (que inclui onboarding, ADS, ABC, logo)
-- Nova retrospectiva é criada com todos os dados enriquecidos
-
-### 4. Assinatura — trocar para "MKTP Fácil"
-
-Substituir "Marketplace Fácil" por "MKTP Fácil" em:
-- `RetrospectiveEnginePdfExporter.ts` (2 ocorrências: header e footer)
-- `TrialRetrospectiveViewer.tsx` (1 ocorrência: assinatura no header)
-- `retrospective-report-gen/index.ts` (footer do HTML e slides)
-
-### 5. Seção Promoções — mostrar com aviso quando sem dados
-
-No `RetrospectiveEnginePdfExporter.ts`, `TrialRetrospectiveViewer.tsx` e `retrospective-report-gen`:
-- Se `summary_json.promotions_snapshot` existir: exibir dados
-- Se não existir: exibir seção "Central de Promoções" com texto "Dados de promoções serão incluídos após sincronização do módulo de Promoções."
-
-No `retrospective-engine/index.ts`, adicionar coleta de `promotion_snapshots`:
-- Buscar da tabela `promotion_snapshots` por `seller_id` no período
-- Incluir no `summary_json` como `promotions_snapshot` com: promoções ativas, tipo, itens, período
-
-### 6. Engine — garantir company_name e logo_url no summary_json
-
-O `buildSummaryJson` já grava `company_name` e `company_logo_url` (linhas 608-609), mas os dados antigos não têm. Após a regeneração, os novos registros terão.
-
----
-
-## Arquivos modificados
-
-1. **Migration SQL** — admin policies em `companies` e `profiles`
-2. **`src/pages/admin/AdminRetrospectives.tsx`** — botão "Regenerar Completo" individual
-3. **`src/components/retrospective/RetrospectiveEnginePdfExporter.ts`** — "MKTP Fácil" + seção promoções
-4. **`src/components/retrospective/TrialRetrospectiveViewer.tsx`** — "MKTP Fácil" + seção promoções
-5. **`supabase/functions/retrospective-engine/index.ts`** — coleta de promoções
-6. **`supabase/functions/retrospective-report-gen/index.ts`** — "MKTP Fácil" + seção promoções no HTML/Slides
-
-## Ordem de execução
-
-1. Migration (RLS) — nome aparece imediatamente
-2. Assinatura "MKTP Fácil" — rápido
-3. Seção promoções no engine + viewers
-4. Botão de regeneração individual
-5. Deploy edge functions
-6. Testar regeneração da ADX
-
-## Resultado esperado
-
-- Admin vê nome do cliente em TODAS as linhas
-- Botão de regeneração individual recria com dados completos (ADS, ABC, onboarding, promoções, logo)
-- PDF/HTML/Slides com logo do seller + "Desenvolvido por MKTP Fácil"
-- Seção de promoções presente (com dados ou aviso)
-- Versões anteriores mantidas no histórico
-
+Checklist de aceite (obrigatório)
+- Score: deixa de ser 0 em massa.
+- Foto: deixa de ser 0 em massa.
+- Vídeo: filtro “Com vídeo” passa a retornar itens quando houver.
+- Catálogo: item já vinculado não recebe recomendação de vincular novamente.
+- Exemplo validado: anúncio informado pelo link de catálogo deve aparecer como “Catálogo: Sim”.
+- Detalhe exibe 1200x1200 e fundo branco com status honesto (ou “não avaliado”).
