@@ -226,6 +226,9 @@ export default function AdminPlanos() {
             <TabsTrigger value="mp-sync">
               <Zap className="w-3.5 h-3.5 mr-1.5" /> MP Sync
             </TabsTrigger>
+            <TabsTrigger value="modules">
+              <Blocks className="w-3.5 h-3.5 mr-1.5" /> Módulos
+            </TabsTrigger>
           </TabsList>
 
           {/* ─── TIERS ─── */}
