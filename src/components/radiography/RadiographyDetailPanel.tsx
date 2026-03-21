@@ -9,7 +9,7 @@ import {
   Eye, TrendingUp, TrendingDown, Package, ExternalLink, HeartPulse,
   Activity, AlertTriangle, Stethoscope, Siren, ShoppingCart, Clock,
   BarChart3, ArrowUpDown, AlertOctagon, Lightbulb, Search, Check,
-  X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck,
+  X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck, Megaphone,
 } from "lucide-react";
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
