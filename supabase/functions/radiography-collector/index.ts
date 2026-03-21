@@ -1727,6 +1727,69 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     const exRecMap = new Map<string, string[]>();
     if (exRecs) for (const r of exRecs) { const a = exRecMap.get(r.item_id) || []; a.push(r.recommendation_type); exRecMap.set(r.item_id, a); }
 
+    // --- EXPOSURE DATA: ADS + PROMOTIONS ---
+    // Check which items have active ADS
+    const adsActiveSet = new Set<string>();
+    const adsStatusMap = new Map<string, string>();
+    try {
+      let adsFrom = 0;
+      while (true) {
+        const { data: adsRows } = await supabase
+          .from('ads_items')
+          .select('item_id, status')
+          .eq('seller_id', sellerId)
+          .range(adsFrom, adsFrom + 999);
+        if (!adsRows || adsRows.length === 0) break;
+        for (const r of adsRows) {
+          adsStatusMap.set(r.item_id, r.status);
+          if (r.status === 'active') adsActiveSet.add(r.item_id);
+        }
+        if (adsRows.length < 1000) break;
+        adsFrom += 1000;
+      }
+      console.log(`[rad-collector] ANALYZE: ADS data loaded — ${adsActiveSet.size} active, ${adsStatusMap.size} total`);
+      await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'info', action: 'ADS_STATUS_DETECTED', message: `ADS: ${adsActiveSet.size} active of ${adsStatusMap.size} total` });
+    } catch (adsErr) {
+      console.warn(`[rad-collector] ANALYZE: ADS lookup failed:`, adsErr);
+      await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'warn', action: 'EXPOSURE_DATA_INSUFFICIENT', message: `ADS lookup failed: ${adsErr}` });
+    }
+
+    // Check which items are in active promotions
+    const promoActiveSet = new Set<string>();
+    const promoStatusMap = new Map<string, string>();
+    try {
+      // Get active promotion IDs first
+      const { data: activePromos } = await supabase
+        .from('promotion_snapshots')
+        .select('promotion_id, status')
+        .eq('seller_id', sellerId)
+        .in('status', ['started', 'active']);
+      const activePromoIds = (activePromos || []).map((p: any) => p.promotion_id);
+
+      if (activePromoIds.length > 0) {
+        // Get items in active promotions
+        for (let pi = 0; pi < activePromoIds.length; pi += 50) {
+          const promoChunk = activePromoIds.slice(pi, pi + 50);
+          const { data: promoItems } = await supabase
+            .from('promotion_items_snapshots')
+            .select('item_id, item_status')
+            .eq('seller_id', sellerId)
+            .in('promotion_id', promoChunk);
+          if (promoItems) {
+            for (const r of promoItems) {
+              promoStatusMap.set(r.item_id, r.item_status);
+              if (r.item_status === 'candidate' || r.item_status === 'active') promoActiveSet.add(r.item_id);
+            }
+          }
+        }
+      }
+      console.log(`[rad-collector] ANALYZE: Promo data loaded — ${promoActiveSet.size} active, ${promoStatusMap.size} total`);
+      await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'info', action: 'PROMOTION_STATUS_DETECTED', message: `Promos: ${promoActiveSet.size} active of ${promoStatusMap.size} total` });
+    } catch (promoErr) {
+      console.warn(`[rad-collector] ANALYZE: Promo lookup failed:`, promoErr);
+      await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'warn', action: 'EXPOSURE_DATA_INSUFFICIENT', message: `Promo lookup failed: ${promoErr}` });
+    }
+
     // Tenant
     const { data: acct } = await supabase.from('ml_accounts').select('user_id').eq('ml_user_id', String(sellerId)).eq('is_active', true).maybeSingle();
     let tenantId: string | null = null;
