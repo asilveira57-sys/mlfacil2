@@ -6840,6 +6840,7 @@ export type Database = {
       }
       listing_health_current: {
         Row: {
+          ads_status: string | null
           alerts_json: Json | null
           anomaly_flags: string[] | null
           available_quantity: number | null
@@ -6856,6 +6857,8 @@ export type Database = {
           health_score: number | null
           health_status: string | null
           id: string
+          is_ads_active: boolean | null
+          is_promotion_active: boolean | null
           item_id: string
           last_collected_at: string | null
           last_sale_at: string | null
@@ -6872,6 +6875,7 @@ export type Database = {
           prev_shipping_mode: string | null
           prev_visits: number | null
           price: number | null
+          promotion_status: string | null
           revenue_30d: number | null
           revenue_60d: number | null
           sales_count_30d: number | null
@@ -6896,6 +6900,7 @@ export type Database = {
           visits_last: number | null
         }
         Insert: {
+          ads_status?: string | null
           alerts_json?: Json | null
           anomaly_flags?: string[] | null
           available_quantity?: number | null
@@ -6912,6 +6917,8 @@ export type Database = {
           health_score?: number | null
           health_status?: string | null
           id?: string
+          is_ads_active?: boolean | null
+          is_promotion_active?: boolean | null
           item_id: string
           last_collected_at?: string | null
           last_sale_at?: string | null
@@ -6928,6 +6935,7 @@ export type Database = {
           prev_shipping_mode?: string | null
           prev_visits?: number | null
           price?: number | null
+          promotion_status?: string | null
           revenue_30d?: number | null
           revenue_60d?: number | null
           sales_count_30d?: number | null
@@ -6952,6 +6960,7 @@ export type Database = {
           visits_last?: number | null
         }
         Update: {
+          ads_status?: string | null
           alerts_json?: Json | null
           anomaly_flags?: string[] | null
           available_quantity?: number | null
@@ -6968,6 +6977,8 @@ export type Database = {
           health_score?: number | null
           health_status?: string | null
           id?: string
+          is_ads_active?: boolean | null
+          is_promotion_active?: boolean | null
           item_id?: string
           last_collected_at?: string | null
           last_sale_at?: string | null
@@ -6984,6 +6995,7 @@ export type Database = {
           prev_shipping_mode?: string | null
           prev_visits?: number | null
           price?: number | null
+          promotion_status?: string | null
           revenue_30d?: number | null
           revenue_60d?: number | null
           sales_count_30d?: number | null
