@@ -223,7 +223,7 @@ export function RadiographyItemList({
 
           {/* Advanced filters panel */}
           {showFilters && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 p-3 rounded-lg bg-slate-800/30 border border-slate-700/50">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2 p-3 rounded-lg bg-slate-800/30 border border-slate-700/50">
               <Select value={logisticsFilter} onValueChange={(v) => setLogisticsFilter(v as LogisticsFilter)}>
                 <SelectTrigger className="bg-slate-800/50 border-slate-700 text-slate-200 text-xs h-8">
                   <Zap className="h-3 w-3 mr-1 text-slate-400" />
@@ -275,6 +275,19 @@ export function RadiographyItemList({
                   <SelectItem value="few_photos" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Poucas fotos</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={exposureFilter} onValueChange={(v) => setExposureFilter(v as ExposureFilter)}>
+                <SelectTrigger className="bg-slate-800/50 border-slate-700 text-slate-200 text-xs h-8">
+                  <Megaphone className="h-3 w-3 mr-1 text-slate-400" />
+                  <SelectValue placeholder="Exposição" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-700">
+                  <SelectItem value="all" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Todas</SelectItem>
+                  <SelectItem value="with_ads" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Com ADS</SelectItem>
+                  <SelectItem value="without_ads" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Sem ADS</SelectItem>
+                  <SelectItem value="with_promo" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Em promoção</SelectItem>
+                  <SelectItem value="without_promo" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Sem promoção</SelectItem>
+                </SelectContent>
+              </Select>
               <Select value={anomalyFilter} onValueChange={(v) => setAnomalyFilter(v as AnomalyFilter)}>
                 <SelectTrigger className="bg-slate-800/50 border-slate-700 text-slate-200 text-xs h-8">
                   <AlertTriangle className="h-3 w-3 mr-1 text-slate-400" />
@@ -295,9 +308,10 @@ export function RadiographyItemList({
                     setCatalogFilter("all");
                     setMainProblemFilter("all");
                     setMediaFilter("all");
+                    setExposureFilter("all");
                     setAnomalyFilter("all");
                   }}
-                  className="text-xs text-slate-400 hover:text-slate-200 col-span-2 md:col-span-5"
+                  className="text-xs text-slate-400 hover:text-slate-200 col-span-2 md:col-span-6"
                 >
                   Limpar filtros
                 </Button>
