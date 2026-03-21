@@ -1940,6 +1940,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           logistic_type: logInfo.logisticLabel, catalog_product_id: catInfo.catalogId,
           visits_7d: v7d, visits_30d: v30d, conversion_rate_30d: Number(convRate.toFixed(3)),
           health_score: hScore, health_status: hStatus, main_problem: mainProb,
+          diagnostic_text: diagnosticText,
           data_coverage_days: covDays, data_coverage_status: covStatus,
           is_ads_active: isAdsActive, ads_status: adsStatus,
           is_promotion_active: isPromoActive, promotion_status: promoStatus,
