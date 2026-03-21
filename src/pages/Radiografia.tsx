@@ -144,6 +144,7 @@ export default function Radiografia() {
                 onPeriodChange={setSelectedPeriod}
                 collectionStatus={diagnostics?.lastCollectionStatus ?? null}
                 collectionError={diagnostics?.lastCollectionError ?? null}
+                dataDaysAvailable={diagnostics?.dataDaysAvailable ?? 0}
               />
 
               {/* Detail Panel */}

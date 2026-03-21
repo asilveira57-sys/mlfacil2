@@ -113,11 +113,10 @@ export interface CoverageInfo {
 
 export function computeCoverage(series: VisitSeriesEntry[], daysRequested: number): CoverageInfo {
   const daysWithData = series.filter(s => s.visits > 0).length;
-  const totalDays = series.length; // includes zero-visit days from generate_series
-  const coverage_percent = daysRequested > 0 ? Math.round((totalDays / daysRequested) * 100) : 0;
+  const coverage_percent = daysRequested > 0 ? Math.round((daysWithData / daysRequested) * 100) : 0;
   return {
     days_requested: daysRequested,
-    days_with_data: totalDays,
+    days_with_data: daysWithData,
     coverage_percent: Math.min(coverage_percent, 100),
     status: coverage_percent >= 70 ? 'good' : coverage_percent >= 30 ? 'partial' : 'insufficient',
   };
@@ -138,6 +137,8 @@ export interface DiagnosticSummary {
   backfillStatus: string | null;
   backfillProgress: number | null;
   backfillError: string | null;
+  dataStartDate: string | null; // earliest visit_date in seller_item_visits
+  dataDaysAvailable: number; // distinct days with visit data
 }
 
 export type AnomalyFilter = "all" | "with_anomaly" | "without_anomaly";
@@ -320,10 +321,11 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
           lastCollectionAt: null, lastCollectionStatus: null, lastCollectionError: null,
           lastCollectionProcessed: 0, lastCollectionFailed: 0,
           backfillStatus: null, backfillProgress: null, backfillError: null,
+          dataStartDate: null, dataDaysAvailable: 0,
         };
       }
 
-      const [distinctRes, historyRes, anomalyRes, lastSyncRes, lastCollectionSuccessRes, lastCollectionAnyRes, backfillRes] = await Promise.all([
+      const [distinctRes, historyRes, anomalyRes, lastSyncRes, lastCollectionSuccessRes, lastCollectionAnyRes, backfillRes, visitCoverageRes] = await Promise.all([
         supabase.rpc("count_distinct_active_items", { p_seller_id: sellerId }),
         supabase.from("listing_health_history").select("id", { count: "exact", head: true }).eq("seller_id", sellerId),
         supabase.from("listing_health_current").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).not("anomaly_flags", "eq", "{}"),
@@ -331,12 +333,21 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
         supabase.from("radiography_collection_logs").select("finished_at").eq("seller_id", sellerId).eq("job_type", "collection").eq("status", "success").order("finished_at", { ascending: false }).limit(1),
         supabase.from("radiography_collection_logs").select("status, error_message, items_processed, items_failed, finished_at, created_at").eq("seller_id", sellerId).eq("job_type", "collection").order("created_at", { ascending: false }).limit(1),
         supabase.from("radiography_backfill_control").select("status, progress_percent, error_message").eq("seller_id", sellerId).limit(1).maybeSingle(),
+        supabase.from("seller_item_visits").select("visit_date").eq("seller_id", sellerId).order("visit_date", { ascending: true }).limit(1),
       ]);
 
       const distinctData = distinctRes.data?.[0];
       const totalActive = Number(distinctData?.total_distinct || 0);
       const recentCount = Number(distinctData?.updated_recently || 0);
       const lastCollectionAny = lastCollectionAnyRes.data?.[0];
+
+      // Calculate days of data available
+      const earliestDate = visitCoverageRes.data?.[0]?.visit_date || null;
+      let dataDaysAvailable = 0;
+      if (earliestDate) {
+        const diffMs = Date.now() - new Date(earliestDate).getTime();
+        dataDaysAvailable = Math.max(1, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
+      }
 
       return {
         totalActive,
@@ -353,6 +364,8 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
         backfillStatus: backfillRes.data?.status || null,
         backfillProgress: backfillRes.data?.progress_percent || null,
         backfillError: backfillRes.data?.error_message || null,
+        dataStartDate: earliestDate,
+        dataDaysAvailable,
       };
     },
     enabled: !!sellerId,
