@@ -1991,8 +1991,13 @@ Deno.serve(async (req) => {
         result = await handleEnrichSales(supabase, seller_id);
         break;
 
+      case "analyze":
+        if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await handleAnalyze(supabase, seller_id, body.item_id);
+        break;
+
       default:
-        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full, enrich_sales` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full, enrich_sales, analyze` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
