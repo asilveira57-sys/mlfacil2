@@ -9,7 +9,7 @@ import {
   Eye, TrendingUp, TrendingDown, Package, ExternalLink, HeartPulse,
   Activity, AlertTriangle, Stethoscope, Siren, ShoppingCart, Clock,
   BarChart3, ArrowUpDown, AlertOctagon, Lightbulb, Search, Check,
-  X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck,
+  X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck, Megaphone,
 } from "lucide-react";
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -294,6 +294,22 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
     detail: item.has_video ? "Presente" : "Ausente",
   });
 
+  // Exposure - ADS
+  healthFactors.push({
+    label: "ADS",
+    icon: <Megaphone className="h-3.5 w-3.5" />,
+    status: item.is_ads_active ? "good" : item.is_ads_active === false ? "neutral" : "neutral",
+    detail: item.is_ads_active ? "Ativo" : item.is_ads_active === false ? "Inativo" : "Sem dados",
+  });
+
+  // Exposure - Promo
+  healthFactors.push({
+    label: "Promoção",
+    icon: <BarChart3 className="h-3.5 w-3.5" />,
+    status: item.is_promotion_active ? "good" : "neutral",
+    detail: item.is_promotion_active ? "Em promoção" : item.is_promotion_active === false ? "Sem promoção" : "Sem dados",
+  });
+
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl p-0 bg-slate-900 border-slate-700">
@@ -410,6 +426,40 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
                   <div>
                     <span className="font-medium">Frete</span>
                     <span className="ml-1.5 opacity-80">{item.free_shipping ? "Grátis" : "Normal"}</span>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* SECTION 2.5 — Exposure (ADS + Promoções) */}
+            <SectionCard title="Exposição" icon={<Megaphone className="h-4 w-4 text-orange-400" />}>
+              <div className="grid grid-cols-2 gap-2">
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${
+                  item.is_ads_active ? factorStatusStyles.good :
+                  item.is_ads_active === false ? factorStatusStyles.neutral : factorStatusStyles.neutral
+                }`}>
+                  <Megaphone className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">ADS</span>
+                    <span className="ml-1.5 opacity-80">
+                      {item.is_ads_active === true ? "Ativo" :
+                       item.is_ads_active === false ? (item.ads_status || "Inativo") :
+                       "Sem dados"}
+                    </span>
+                  </div>
+                </div>
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${
+                  item.is_promotion_active ? factorStatusStyles.good :
+                  item.is_promotion_active === false ? factorStatusStyles.neutral : factorStatusStyles.neutral
+                }`}>
+                  <BarChart3 className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">Promoção</span>
+                    <span className="ml-1.5 opacity-80">
+                      {item.is_promotion_active === true ? "Em promoção" :
+                       item.is_promotion_active === false ? "Sem promoção" :
+                       "Sem dados"}
+                    </span>
                   </div>
                 </div>
               </div>

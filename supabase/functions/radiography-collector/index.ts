@@ -1649,6 +1649,7 @@ function generateSmartRecs(item: any, scores: Record<string, number>, mainProble
   const has = (t: string) => existing.includes(t);
   const logInfo = classifyLogisticType(item);
   const catInfo = classifyCatalog(item);
+  const v30d = item.visits_30d || item.visits_last * 4 || 0;
 
   if (scores.content < 60) {
     const pc = item.photos_count || 0;
@@ -1668,8 +1669,14 @@ function generateSmartRecs(item: any, scores: Record<string, number>, mainProble
     recs.push({ recommendation_type: 'low_stock_warning', priority: 'high', title: 'Estoque baixo', description: `Apenas ${item.available_quantity} un. Reponha para evitar perda.`, category: 'stock', estimated_impact: 'alto' });
   if (scores.traffic < 30 && !has('improve_seo'))
     recs.push({ recommendation_type: 'improve_seo', priority: 'high', title: 'Melhorar visibilidade', description: 'Poucas visitas. Revise título e considere publicidade.', category: 'traffic', estimated_impact: 'alto' });
-  if (mainProblem === 'conversion' && !has('improve_conversion'))
+  // BLOCK: only suggest conversion improvement if there IS traffic
+  if (mainProblem === 'conversion' && v30d >= 20 && !has('improve_conversion'))
     recs.push({ recommendation_type: 'improve_conversion', priority: 'high', title: 'Melhorar conversão', description: 'Recebe visitas mas não converte. Revise preço, fotos e descrição.', category: 'conversion', estimated_impact: 'alto' });
+  // NEW: Exposure-based recommendations
+  if (v30d < 10 && !item.is_ads_active && !has('consider_ads'))
+    recs.push({ recommendation_type: 'consider_ads', priority: 'medium', title: 'Considerar publicidade (ADS)', description: 'Anúncio sem tráfego e sem publicidade ativa. ADS pode acelerar a descoberta.', category: 'exposure', estimated_impact: 'alto' });
+  if (!item.is_promotion_active && scores.conversion >= 60 && v30d >= 20 && !has('consider_promo'))
+    recs.push({ recommendation_type: 'consider_promo', priority: 'low', title: 'Considerar promoção', description: 'Anúncio com boa conversão pode se beneficiar de promoções para escalar vendas.', category: 'exposure', estimated_impact: 'médio' });
   return recs;
 }
 
@@ -1727,6 +1734,69 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     const exRecMap = new Map<string, string[]>();
     if (exRecs) for (const r of exRecs) { const a = exRecMap.get(r.item_id) || []; a.push(r.recommendation_type); exRecMap.set(r.item_id, a); }
 
+    // --- EXPOSURE DATA: ADS + PROMOTIONS ---
+    // Check which items have active ADS
+    const adsActiveSet = new Set<string>();
+    const adsStatusMap = new Map<string, string>();
+    try {
+      let adsFrom = 0;
+      while (true) {
+        const { data: adsRows } = await supabase
+          .from('ads_items')
+          .select('item_id, status')
+          .eq('seller_id', sellerId)
+          .range(adsFrom, adsFrom + 999);
+        if (!adsRows || adsRows.length === 0) break;
+        for (const r of adsRows) {
+          adsStatusMap.set(r.item_id, r.status);
+          if (r.status === 'active') adsActiveSet.add(r.item_id);
+        }
+        if (adsRows.length < 1000) break;
+        adsFrom += 1000;
+      }
+      console.log(`[rad-collector] ANALYZE: ADS data loaded — ${adsActiveSet.size} active, ${adsStatusMap.size} total`);
+      await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'info', action: 'ADS_STATUS_DETECTED', message: `ADS: ${adsActiveSet.size} active of ${adsStatusMap.size} total` });
+    } catch (adsErr) {
+      console.warn(`[rad-collector] ANALYZE: ADS lookup failed:`, adsErr);
+      await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'warn', action: 'EXPOSURE_DATA_INSUFFICIENT', message: `ADS lookup failed: ${adsErr}` });
+    }
+
+    // Check which items are in active promotions
+    const promoActiveSet = new Set<string>();
+    const promoStatusMap = new Map<string, string>();
+    try {
+      // Get active promotion IDs first
+      const { data: activePromos } = await supabase
+        .from('promotion_snapshots')
+        .select('promotion_id, status')
+        .eq('seller_id', sellerId)
+        .in('status', ['started', 'active']);
+      const activePromoIds = (activePromos || []).map((p: any) => p.promotion_id);
+
+      if (activePromoIds.length > 0) {
+        // Get items in active promotions
+        for (let pi = 0; pi < activePromoIds.length; pi += 50) {
+          const promoChunk = activePromoIds.slice(pi, pi + 50);
+          const { data: promoItems } = await supabase
+            .from('promotion_items_snapshots')
+            .select('item_id, item_status')
+            .eq('seller_id', sellerId)
+            .in('promotion_id', promoChunk);
+          if (promoItems) {
+            for (const r of promoItems) {
+              promoStatusMap.set(r.item_id, r.item_status);
+              if (r.item_status === 'candidate' || r.item_status === 'active') promoActiveSet.add(r.item_id);
+            }
+          }
+        }
+      }
+      console.log(`[rad-collector] ANALYZE: Promo data loaded — ${promoActiveSet.size} active, ${promoStatusMap.size} total`);
+      await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'info', action: 'PROMOTION_STATUS_DETECTED', message: `Promos: ${promoActiveSet.size} active of ${promoStatusMap.size} total` });
+    } catch (promoErr) {
+      console.warn(`[rad-collector] ANALYZE: Promo lookup failed:`, promoErr);
+      await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'warn', action: 'EXPOSURE_DATA_INSUFFICIENT', message: `Promo lookup failed: ${promoErr}` });
+    }
+
     // Tenant
     const { data: acct } = await supabase.from('ml_accounts').select('user_id').eq('ml_user_id', String(sellerId)).eq('is_active', true).maybeSingle();
     let tenantId: string | null = null;
@@ -1782,6 +1852,10 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         // Update row
         const logInfo = classifyLogisticType(merged);
         const catInfo = classifyCatalog(merged);
+        const isAdsActive = adsStatusMap.has(item.item_id) ? adsActiveSet.has(item.item_id) : null;
+        const adsStatus = adsStatusMap.get(item.item_id) || null;
+        const isPromoActive = promoStatusMap.has(item.item_id) ? promoActiveSet.has(item.item_id) : null;
+        const promoStatus = promoStatusMap.get(item.item_id) || null;
         updateRows.push({
           seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId,
           photos_count: photos.count, has_video: photos.hasVideo,
@@ -1791,6 +1865,8 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           visits_7d: v7d, visits_30d: v30d, conversion_rate_30d: Number(convRate.toFixed(3)),
           health_score: hScore, health_status: hStatus, main_problem: mainProb,
           data_coverage_days: covDays, data_coverage_status: covStatus,
+          is_ads_active: isAdsActive, ads_status: adsStatus,
+          is_promotion_active: isPromoActive, promotion_status: promoStatus,
         });
         analyzed++;
       } catch (e) { errCount++; console.warn(`[rad-collector] ANALYZE item ${item.item_id} err:`, e); }

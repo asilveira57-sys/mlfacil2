@@ -94,6 +94,11 @@ export interface HealthCurrentItem {
   free_shipping: boolean | null;
   data_coverage_days: number | null;
   data_coverage_status: string | null;
+  // Exposure
+  is_ads_active: boolean | null;
+  ads_status: string | null;
+  is_promotion_active: boolean | null;
+  promotion_status: string | null;
   // Period-based metrics (from RPC)
   visits_period?: number | null;
   sales_period?: number | null;
@@ -166,6 +171,7 @@ export type LogisticsFilter = "all" | "full" | "not_full" | "unconfirmed";
 export type CatalogFilter = "all" | "with_catalog" | "without_catalog";
 export type MainProblemFilter = "all" | "discovery" | "conversion" | "competitiveness" | "content" | "stock" | "data_coverage" | "healthy";
 export type MediaFilter = "all" | "with_video" | "without_video" | "few_photos";
+export type ExposureFilter = "all" | "with_ads" | "without_ads" | "with_promo" | "without_promo";
 
 // --- Health classification from real data ---
 

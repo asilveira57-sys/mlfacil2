@@ -9,7 +9,7 @@ import {
   Search, Package, Eye, HeartPulse, Activity, AlertTriangle,
   Stethoscope, Siren, Scan, ExternalLink, ShoppingCart, Clock,
   AlertOctagon, ChevronLeft, ChevronRight, AlertCircle,
-  Zap, Tag, Video, Image, Filter,
+  Zap, Tag, Video, Image, Filter, Megaphone, BarChart3,
 } from "lucide-react";
 import {
   HEALTH_STATUS_CONFIG,
@@ -17,7 +17,7 @@ import {
 } from "@/types/radiography";
 import {
   HealthCurrentItem, classifyHealth, AnomalyFilter, PeriodDays,
-  LogisticsFilter, CatalogFilter, MainProblemFilter, MediaFilter,
+  LogisticsFilter, CatalogFilter, MainProblemFilter, MediaFilter, ExposureFilter,
   MAIN_PROBLEM_LABELS, getLogisticsLabel,
 } from "@/hooks/useRadiographyData";
 
@@ -45,6 +45,7 @@ export function RadiographyItemList({
   const [catalogFilter, setCatalogFilter] = useState<CatalogFilter>("all");
   const [mainProblemFilter, setMainProblemFilter] = useState<MainProblemFilter>("all");
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+  const [exposureFilter, setExposureFilter] = useState<ExposureFilter>("all");
   const [sortBy, setSortBy] = useState<string>("health");
   const [page, setPage] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
@@ -81,6 +82,12 @@ export function RadiographyItemList({
       if (mediaFilter === "without_video" && item.has_video) return false;
       if (mediaFilter === "few_photos" && (item.photos_count == null || item.photos_count >= 5)) return false;
 
+      // Exposure filter
+      if (exposureFilter === "with_ads" && !item.is_ads_active) return false;
+      if (exposureFilter === "without_ads" && item.is_ads_active) return false;
+      if (exposureFilter === "with_promo" && !item.is_promotion_active) return false;
+      if (exposureFilter === "without_promo" && item.is_promotion_active) return false;
+
       return true;
     });
 
@@ -100,10 +107,10 @@ export function RadiographyItemList({
       return 0;
     });
     return result;
-  }, [items, search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, sortBy]);
+  }, [items, search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, exposureFilter, sortBy]);
 
   // Reset page on filter change
-  useMemo(() => setPage(0), [search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, sortBy]);
+  useMemo(() => setPage(0), [search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, exposureFilter, sortBy]);
 
   const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
   const pagedItems = filteredItems.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
@@ -124,6 +131,7 @@ export function RadiographyItemList({
   const activeFilterCount = [
     logisticsFilter !== "all", catalogFilter !== "all",
     mainProblemFilter !== "all", mediaFilter !== "all", anomalyFilter !== "all",
+    exposureFilter !== "all",
   ].filter(Boolean).length;
 
   return (
@@ -215,7 +223,7 @@ export function RadiographyItemList({
 
           {/* Advanced filters panel */}
           {showFilters && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 p-3 rounded-lg bg-slate-800/30 border border-slate-700/50">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2 p-3 rounded-lg bg-slate-800/30 border border-slate-700/50">
               <Select value={logisticsFilter} onValueChange={(v) => setLogisticsFilter(v as LogisticsFilter)}>
                 <SelectTrigger className="bg-slate-800/50 border-slate-700 text-slate-200 text-xs h-8">
                   <Zap className="h-3 w-3 mr-1 text-slate-400" />
@@ -267,6 +275,19 @@ export function RadiographyItemList({
                   <SelectItem value="few_photos" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Poucas fotos</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={exposureFilter} onValueChange={(v) => setExposureFilter(v as ExposureFilter)}>
+                <SelectTrigger className="bg-slate-800/50 border-slate-700 text-slate-200 text-xs h-8">
+                  <Megaphone className="h-3 w-3 mr-1 text-slate-400" />
+                  <SelectValue placeholder="Exposição" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-700">
+                  <SelectItem value="all" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Todas</SelectItem>
+                  <SelectItem value="with_ads" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Com ADS</SelectItem>
+                  <SelectItem value="without_ads" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Sem ADS</SelectItem>
+                  <SelectItem value="with_promo" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Em promoção</SelectItem>
+                  <SelectItem value="without_promo" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Sem promoção</SelectItem>
+                </SelectContent>
+              </Select>
               <Select value={anomalyFilter} onValueChange={(v) => setAnomalyFilter(v as AnomalyFilter)}>
                 <SelectTrigger className="bg-slate-800/50 border-slate-700 text-slate-200 text-xs h-8">
                   <AlertTriangle className="h-3 w-3 mr-1 text-slate-400" />
@@ -287,9 +308,10 @@ export function RadiographyItemList({
                     setCatalogFilter("all");
                     setMainProblemFilter("all");
                     setMediaFilter("all");
+                    setExposureFilter("all");
                     setAnomalyFilter("all");
                   }}
-                  className="text-xs text-slate-400 hover:text-slate-200 col-span-2 md:col-span-5"
+                  className="text-xs text-slate-400 hover:text-slate-200 col-span-2 md:col-span-6"
                 >
                   Limpar filtros
                 </Button>
@@ -480,6 +502,18 @@ function ItemCard({ item, onSelectItem, selectedPeriod }: { item: HealthCurrentI
           {(item.catalog_listing || item.catalog_product_id) && (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-violet-500/30 text-violet-400">
               <Tag className="h-2.5 w-2.5 mr-0.5" />Cat
+            </Badge>
+          )}
+          {/* ADS badge */}
+          {item.is_ads_active && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-500/30 text-orange-400">
+              <Megaphone className="h-2.5 w-2.5 mr-0.5" />ADS
+            </Badge>
+          )}
+          {/* Promo badge */}
+          {item.is_promotion_active && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-pink-500/30 text-pink-400">
+              <BarChart3 className="h-2.5 w-2.5 mr-0.5" />Promo
             </Badge>
           )}
           {/* Video badge */}
