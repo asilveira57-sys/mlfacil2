@@ -1801,12 +1801,12 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       const { error } = await supabase.from('listing_health_current').upsert(updateRows.slice(i, i+100), { onConflict: 'seller_id,item_id' });
       if (error) console.warn(`[rad-collector] ANALYZE upsert err:`, error.message);
     }
-    if (newAlerts.length > 0) await supabase.from('listing_health_alerts').insert(newAlerts).catch((e: any) => console.warn(e));
-    if (newRecs.length > 0) await supabase.from('listing_health_recommendations').insert(newRecs).catch((e: any) => console.warn(e));
+    if (newAlerts.length > 0) { const { error: ae } = await supabase.from('listing_health_alerts').insert(newAlerts); if (ae) console.warn('[rad-collector] alerts insert err:', ae.message); }
+    if (newRecs.length > 0) { const { error: re } = await supabase.from('listing_health_recommendations').insert(newRecs); if (re) console.warn('[rad-collector] recs insert err:', re.message); }
     if (mediaRows.length > 0) {
       if (!itemId) await supabase.from('listing_media_analysis').delete().eq('seller_id', sellerId);
       else await supabase.from('listing_media_analysis').delete().eq('seller_id', sellerId).eq('item_id', itemId);
-      for (let i = 0; i < mediaRows.length; i += 200) await supabase.from('listing_media_analysis').insert(mediaRows.slice(i,i+200)).catch(() => {});
+      for (let i = 0; i < mediaRows.length; i += 200) { const { error: me } = await supabase.from('listing_media_analysis').insert(mediaRows.slice(i,i+200)); if (me) console.warn('[rad-collector] media insert err:', me.message); }
     }
 
     const dur = Date.now() - startTime;
