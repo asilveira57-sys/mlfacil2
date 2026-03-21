@@ -1649,6 +1649,7 @@ function generateSmartRecs(item: any, scores: Record<string, number>, mainProble
   const has = (t: string) => existing.includes(t);
   const logInfo = classifyLogisticType(item);
   const catInfo = classifyCatalog(item);
+  const v30d = item.visits_30d || item.visits_last * 4 || 0;
 
   if (scores.content < 60) {
     const pc = item.photos_count || 0;
@@ -1668,8 +1669,14 @@ function generateSmartRecs(item: any, scores: Record<string, number>, mainProble
     recs.push({ recommendation_type: 'low_stock_warning', priority: 'high', title: 'Estoque baixo', description: `Apenas ${item.available_quantity} un. Reponha para evitar perda.`, category: 'stock', estimated_impact: 'alto' });
   if (scores.traffic < 30 && !has('improve_seo'))
     recs.push({ recommendation_type: 'improve_seo', priority: 'high', title: 'Melhorar visibilidade', description: 'Poucas visitas. Revise título e considere publicidade.', category: 'traffic', estimated_impact: 'alto' });
-  if (mainProblem === 'conversion' && !has('improve_conversion'))
+  // BLOCK: only suggest conversion improvement if there IS traffic
+  if (mainProblem === 'conversion' && v30d >= 20 && !has('improve_conversion'))
     recs.push({ recommendation_type: 'improve_conversion', priority: 'high', title: 'Melhorar conversão', description: 'Recebe visitas mas não converte. Revise preço, fotos e descrição.', category: 'conversion', estimated_impact: 'alto' });
+  // NEW: Exposure-based recommendations
+  if (v30d < 10 && !item.is_ads_active && !has('consider_ads'))
+    recs.push({ recommendation_type: 'consider_ads', priority: 'medium', title: 'Considerar publicidade (ADS)', description: 'Anúncio sem tráfego e sem publicidade ativa. ADS pode acelerar a descoberta.', category: 'exposure', estimated_impact: 'alto' });
+  if (!item.is_promotion_active && scores.conversion >= 60 && v30d >= 20 && !has('consider_promo'))
+    recs.push({ recommendation_type: 'consider_promo', priority: 'low', title: 'Considerar promoção', description: 'Anúncio com boa conversão pode se beneficiar de promoções para escalar vendas.', category: 'exposure', estimated_impact: 'médio' });
   return recs;
 }
 
