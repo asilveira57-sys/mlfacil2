@@ -1821,7 +1821,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     return { success: true, analyzed, alerts_generated: newAlerts.length, recommendations_generated: newRecs.length, media_analyzed: mediaRows.length, errors: errCount, duration_ms: dur };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown';
-    await supabase.from('listing_health_logs').insert({ seller_id: sellerId, item_id: itemId||null, log_type:'analysis', log_level:'error', action:'analyze_failed', message: msg, duration_ms: Date.now()-startTime }).catch(()=>{});
+    await supabase.from('listing_health_logs').insert({ seller_id: sellerId, item_id: itemId||null, log_type:'analysis', log_level:'error', action:'analyze_failed', message: msg, duration_ms: Date.now()-startTime });
     return { success: false, error: msg };
   }
 }
