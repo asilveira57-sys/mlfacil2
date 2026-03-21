@@ -415,6 +415,40 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               </div>
             </SectionCard>
 
+            {/* SECTION 2.5 — Exposure (ADS + Promoções) */}
+            <SectionCard title="Exposição" icon={<Megaphone className="h-4 w-4 text-orange-400" />}>
+              <div className="grid grid-cols-2 gap-2">
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${
+                  item.is_ads_active ? factorStatusStyles.good :
+                  item.is_ads_active === false ? factorStatusStyles.neutral : factorStatusStyles.neutral
+                }`}>
+                  <Megaphone className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">ADS</span>
+                    <span className="ml-1.5 opacity-80">
+                      {item.is_ads_active === true ? "Ativo" :
+                       item.is_ads_active === false ? (item.ads_status || "Inativo") :
+                       "Sem dados"}
+                    </span>
+                  </div>
+                </div>
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${
+                  item.is_promotion_active ? factorStatusStyles.good :
+                  item.is_promotion_active === false ? factorStatusStyles.neutral : factorStatusStyles.neutral
+                }`}>
+                  <BarChart3 className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">Promoção</span>
+                    <span className="ml-1.5 opacity-80">
+                      {item.is_promotion_active === true ? "Em promoção" :
+                       item.is_promotion_active === false ? "Sem promoção" :
+                       "Sem dados"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
             {/* SECTION 3 — Media */}
             <SectionCard title="Mídia" icon={<Camera className="h-4 w-4 text-violet-400" />}>
               <div className="grid grid-cols-3 gap-2">

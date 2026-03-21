@@ -504,6 +504,18 @@ function ItemCard({ item, onSelectItem, selectedPeriod }: { item: HealthCurrentI
               <Tag className="h-2.5 w-2.5 mr-0.5" />Cat
             </Badge>
           )}
+          {/* ADS badge */}
+          {item.is_ads_active && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-orange-500/30 text-orange-400">
+              <Megaphone className="h-2.5 w-2.5 mr-0.5" />ADS
+            </Badge>
+          )}
+          {/* Promo badge */}
+          {item.is_promotion_active && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-pink-500/30 text-pink-400">
+              <BarChart3 className="h-2.5 w-2.5 mr-0.5" />Promo
+            </Badge>
+          )}
           {/* Video badge */}
           {item.has_video && (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-cyan-500/30 text-cyan-400">
