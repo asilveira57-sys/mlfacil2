@@ -107,7 +107,7 @@ export function RadiographyItemList({
       return 0;
     });
     return result;
-  }, [items, search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, sortBy]);
+  }, [items, search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, exposureFilter, sortBy]);
 
   // Reset page on filter change
   useMemo(() => setPage(0), [search, healthFilter, anomalyFilter, logisticsFilter, catalogFilter, mainProblemFilter, mediaFilter, sortBy]);
