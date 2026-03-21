@@ -466,9 +466,10 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
     [sellerId]
   );
 
-  // 4. Trigger update
+  // 4. Trigger update (full -> enrich_sales -> analyze chains automatically via backend)
   const triggerUpdate = useCallback(async () => {
     if (!sellerId) return;
+    // full already chains analyze in backend, but we also run enrich_sales
     await supabase.functions.invoke("radiography-collector", {
       body: { action: "full", seller_id: sellerId },
     });

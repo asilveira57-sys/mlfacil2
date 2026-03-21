@@ -1983,7 +1983,9 @@ Deno.serve(async (req) => {
         const syncRes = await handleSync(supabase, seller_id, startTime);
         const collRes = await handleCollection(supabase, seller_id, Date.now(), 0);
         selfChain(seller_id, "backfill", { chain_depth: 0 });
-        result = { sync: syncRes, collection: collRes, backfill: "triggered_async" };
+        // Chain analyze to compute scores, media, catalog after collection
+        selfChain(seller_id, "analyze");
+        result = { sync: syncRes, collection: collRes, backfill: "triggered_async", analyze: "triggered_async" };
         break;
 
       case "enrich_sales":
