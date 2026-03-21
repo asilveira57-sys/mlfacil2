@@ -294,6 +294,22 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
     detail: item.has_video ? "Presente" : "Ausente",
   });
 
+  // Exposure - ADS
+  healthFactors.push({
+    label: "ADS",
+    icon: <Megaphone className="h-3.5 w-3.5" />,
+    status: item.is_ads_active ? "good" : item.is_ads_active === false ? "neutral" : "neutral",
+    detail: item.is_ads_active ? "Ativo" : item.is_ads_active === false ? "Inativo" : "Sem dados",
+  });
+
+  // Exposure - Promo
+  healthFactors.push({
+    label: "Promoção",
+    icon: <BarChart3 className="h-3.5 w-3.5" />,
+    status: item.is_promotion_active ? "good" : "neutral",
+    detail: item.is_promotion_active ? "Em promoção" : item.is_promotion_active === false ? "Sem promoção" : "Sem dados",
+  });
+
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl p-0 bg-slate-900 border-slate-700">
