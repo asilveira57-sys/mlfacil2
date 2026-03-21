@@ -11,8 +11,9 @@ import { formatPriceBRL, getPeriodLabel } from "@/hooks/useTierOffers";
 import { supabase } from "@/integrations/supabase/client";
 import {
   ArrowLeft, Save, Eye, EyeOff, Check, X, RefreshCw, Zap, CheckCircle, AlertCircle, Loader2,
-  Package, Printer, CreditCard, Repeat, Tag,
+  Package, Printer, CreditCard, Repeat, Tag, Blocks,
 } from "lucide-react";
+import { PlanModulesTab } from "@/components/admin/plans/PlanModulesTab";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import type { AdminOffer, AdminAddonOffer } from "@/hooks/useBillingAdminTiers";
