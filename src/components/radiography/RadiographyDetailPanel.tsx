@@ -486,6 +486,13 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
                   </div>
                 </div>
               </div>
+              {/* Diagnostic text */}
+              {item.diagnostic_text && (
+                <div className="mt-2 px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700/50 text-xs text-slate-300 leading-relaxed">
+                  <Lightbulb className="h-3.5 w-3.5 text-amber-400 inline mr-1.5" />
+                  {item.diagnostic_text}
+                </div>
+              )}
             </SectionCard>
 
             {/* SECTION 3 — Media */}
