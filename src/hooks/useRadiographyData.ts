@@ -321,6 +321,7 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
           lastCollectionAt: null, lastCollectionStatus: null, lastCollectionError: null,
           lastCollectionProcessed: 0, lastCollectionFailed: 0,
           backfillStatus: null, backfillProgress: null, backfillError: null,
+          dataStartDate: null, dataDaysAvailable: 0,
         };
       }
 
