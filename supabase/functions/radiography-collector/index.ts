@@ -1886,7 +1886,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false };
         const covDays = covByItem.get(item.item_id) || 0;
         const title = listing.title || item.title || '';
-        const merged = { ...item, ...listing };
+        const merged = { ...item, ...listing, is_ads_active: adsActiveSet.has(item.item_id) || null, is_promotion_active: promoActiveSet.has(item.item_id) || null };
         const covStatus = classifyCoverage(covDays, 30);
 
         const v7d = item.visits_7d || item.visits_last || 0;
@@ -1897,10 +1897,11 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const scores = computeSubScores(merged, photos, title.length, covDays, v7d, v30d, s30d);
         const hScore = computeHealthScore(scores);
         const hStatus = classifyHealthStatus(hScore);
-        const mainProb = determineMainProblem(scores, covStatus, v30d, s30d, item.available_quantity);
+        const mainProb = determineMainProblem(scores, covStatus, v30d, s30d, item.available_quantity, merged);
+        const diagnosticText = generateDiagnosticText(mainProb, merged, scores);
 
         // Recommendations with smart blocking
-        const recs = generateSmartRecs({ ...item, photos_count: photos.count, has_video: photos.hasVideo }, scores, mainProb, exRecMap.get(item.item_id) || []);
+        const recs = generateSmartRecs({ ...merged, photos_count: photos.count, has_video: photos.hasVideo, health_score: hScore }, scores, mainProb, exRecMap.get(item.item_id) || []);
         for (const r of recs) newRecs.push({ seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId, ...r });
 
         // Alerts
