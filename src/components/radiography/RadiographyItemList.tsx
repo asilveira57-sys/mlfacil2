@@ -82,6 +82,12 @@ export function RadiographyItemList({
       if (mediaFilter === "without_video" && item.has_video) return false;
       if (mediaFilter === "few_photos" && (item.photos_count == null || item.photos_count >= 5)) return false;
 
+      // Exposure filter
+      if (exposureFilter === "with_ads" && !item.is_ads_active) return false;
+      if (exposureFilter === "without_ads" && item.is_ads_active) return false;
+      if (exposureFilter === "with_promo" && !item.is_promotion_active) return false;
+      if (exposureFilter === "without_promo" && item.is_promotion_active) return false;
+
       return true;
     });
 
