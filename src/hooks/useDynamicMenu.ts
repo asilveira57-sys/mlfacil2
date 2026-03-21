@@ -31,6 +31,7 @@ interface UseDynamicMenuReturn {
 export function useDynamicMenu(): UseDynamicMenuReturn {
   const { isAdmin } = useUserRole();
   const { mlConnected } = useUserAccessState();
+  const { keys: planModuleKeys, hasConfig: hasPlanConfig } = usePlanAllowedModuleKeys();
 
   const { data: modules, isLoading, error, refetch } = useQuery({
     queryKey: ['dynamic-menu-system-modules'],
