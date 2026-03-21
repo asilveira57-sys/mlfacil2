@@ -1547,7 +1547,7 @@ async function handleEnrichSales(supabase: any, sellerId: string) {
       items_processed: totalEnriched,
       items_failed: totalFailed,
       duration_ms: duration,
-      metadata: { action: "enrich_sales" },
+      metadata_json: { action: "enrich_sales" },
     });
   }).catch(() => {});
 
