@@ -137,6 +137,9 @@ export interface DiagnosticSummary {
   backfillStatus: string | null;
   backfillProgress: number | null;
   backfillError: string | null;
+  dataStartDate: string | null; // earliest visit_date in seller_item_visits
+  dataDaysAvailable: number; // distinct days with visit data
+}
 }
 
 export type AnomalyFilter = "all" | "with_anomaly" | "without_anomaly";
