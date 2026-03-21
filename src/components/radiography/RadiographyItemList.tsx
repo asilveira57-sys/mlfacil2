@@ -9,7 +9,7 @@ import {
   Search, Package, Eye, HeartPulse, Activity, AlertTriangle,
   Stethoscope, Siren, Scan, ExternalLink, ShoppingCart, Clock,
   AlertOctagon, ChevronLeft, ChevronRight, AlertCircle,
-  Zap, Tag, Video, Image, Filter,
+  Zap, Tag, Video, Image, Filter, Megaphone, BarChart3,
 } from "lucide-react";
 import {
   HEALTH_STATUS_CONFIG,
