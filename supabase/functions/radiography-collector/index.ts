@@ -1815,7 +1815,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       message: `Done: ${analyzed} items, ${newAlerts.length} alerts, ${newRecs.length} recs`,
       metadata_json: { analyzed, errors: errCount, alerts: newAlerts.length, recs: newRecs.length, media: mediaRows.length },
       duration_ms: dur, items_processed: analyzed, errors_count: errCount,
-    }).catch(() => {});
+    });
 
     console.log(`[rad-collector] ANALYZE done: ${analyzed} items, ${newAlerts.length} alerts, ${newRecs.length} recs, ${dur}ms`);
     return { success: true, analyzed, alerts_generated: newAlerts.length, recommendations_generated: newRecs.length, media_analyzed: mediaRows.length, errors: errCount, duration_ms: dur };
