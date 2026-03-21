@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -11,8 +11,9 @@ import { formatPriceBRL, getPeriodLabel } from "@/hooks/useTierOffers";
 import { supabase } from "@/integrations/supabase/client";
 import {
   ArrowLeft, Save, Eye, EyeOff, Check, X, RefreshCw, Zap, CheckCircle, AlertCircle, Loader2,
-  Package, Printer, CreditCard, Repeat, Tag,
+  Package, Printer, CreditCard, Repeat, Tag, Blocks,
 } from "lucide-react";
+import { PlanModulesTab } from "@/components/admin/plans/PlanModulesTab";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import type { AdminOffer, AdminAddonOffer } from "@/hooks/useBillingAdminTiers";
@@ -225,6 +226,9 @@ export default function AdminPlanos() {
             <TabsTrigger value="mp-sync">
               <Zap className="w-3.5 h-3.5 mr-1.5" /> MP Sync
             </TabsTrigger>
+            <TabsTrigger value="modules">
+              <Blocks className="w-3.5 h-3.5 mr-1.5" /> Módulos
+            </TabsTrigger>
           </TabsList>
 
           {/* ─── TIERS ─── */}
@@ -406,6 +410,19 @@ export default function AdminPlanos() {
                     <p className="text-sm">Clique em "Buscar" para iniciar</p>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ─── MODULES ─── */}
+          <TabsContent value="modules">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Módulos por Plano</CardTitle>
+                <CardDescription>Selecione quais módulos cada plano terá acesso.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <PlanModulesTab />
               </CardContent>
             </Card>
           </TabsContent>

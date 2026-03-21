@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useUserRole } from './useUserRole';
 import { useUserAccessState } from './useUserAccessState';
+import { usePlanAllowedModuleKeys } from './useCanAccessModule';
 import { useMemo } from 'react';
 
 export interface DynamicMenuItem {
@@ -30,6 +31,7 @@ interface UseDynamicMenuReturn {
 export function useDynamicMenu(): UseDynamicMenuReturn {
   const { isAdmin } = useUserRole();
   const { mlConnected } = useUserAccessState();
+  const { keys: planModuleKeys, hasConfig: hasPlanConfig } = usePlanAllowedModuleKeys();
 
   const { data: modules, isLoading, error, refetch } = useQuery({
     queryKey: ['dynamic-menu-system-modules'],
@@ -53,8 +55,11 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
     // Filter: hide internal-only items for non-admins
     const filtered = modules.filter(m => {
       if (m.is_internal_only && !isAdmin) return false;
-      // Admin layer only for admins
       if (m.layer === 'admin' && !isAdmin) return false;
+      // Plan-based module filtering (complementary — only if config exists)
+      if (hasPlanConfig && !isAdmin && m.route) {
+        if (!planModuleKeys.has(m.key)) return false;
+      }
       return true;
     });
 
@@ -106,7 +111,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
     const pruned = prune(roots);
     sortTree(pruned);
     return pruned;
-  }, [modules, isAdmin]);
+  }, [modules, isAdmin, hasPlanConfig, planModuleKeys]);
 
   return {
     menuTree,

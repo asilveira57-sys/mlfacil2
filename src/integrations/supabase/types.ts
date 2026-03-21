@@ -10822,6 +10822,51 @@ export type Database = {
           },
         ]
       }
+      plan_access_logs: {
+        Row: {
+          access_granted: boolean | null
+          action_type: string
+          created_at: string
+          entity_id: string | null
+          entity_type: string | null
+          id: string
+          module_code: string | null
+          payload_after: Json | null
+          payload_before: Json | null
+          reason: string | null
+          tenant_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          access_granted?: boolean | null
+          action_type: string
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          module_code?: string | null
+          payload_after?: Json | null
+          payload_before?: Json | null
+          reason?: string | null
+          tenant_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          access_granted?: boolean | null
+          action_type?: string
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          module_code?: string | null
+          payload_after?: Json | null
+          payload_before?: Json | null
+          reason?: string | null
+          tenant_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       plan_addon_offers: {
         Row: {
           addon_id: string
@@ -10913,6 +10958,54 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      plan_modules: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          is_enabled: boolean
+          module_id: string
+          plan_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_enabled?: boolean
+          module_id: string
+          plan_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_enabled?: boolean
+          module_id?: string
+          plan_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "plan_modules_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: false
+            referencedRelation: "system_modules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "plan_modules_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plan_tiers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       plan_offers: {
         Row: {
@@ -11070,6 +11163,7 @@ export type Database = {
         Row: {
           code: string
           created_at: string
+          created_by: string | null
           description: string | null
           display_name: string | null
           display_order: number
@@ -11080,10 +11174,15 @@ export type Database = {
           mercado_pago_plan_id: string | null
           min_orders_30d: number
           name: string
+          plan_group: string | null
+          requires_marketplace_connection: boolean | null
+          updated_at: string | null
+          updated_by: string | null
         }
         Insert: {
           code: string
           created_at?: string
+          created_by?: string | null
           description?: string | null
           display_name?: string | null
           display_order?: number
@@ -11094,10 +11193,15 @@ export type Database = {
           mercado_pago_plan_id?: string | null
           min_orders_30d?: number
           name: string
+          plan_group?: string | null
+          requires_marketplace_connection?: boolean | null
+          updated_at?: string | null
+          updated_by?: string | null
         }
         Update: {
           code?: string
           created_at?: string
+          created_by?: string | null
           description?: string | null
           display_name?: string | null
           display_order?: number
@@ -11108,6 +11212,10 @@ export type Database = {
           mercado_pago_plan_id?: string | null
           min_orders_30d?: number
           name?: string
+          plan_group?: string | null
+          requires_marketplace_connection?: boolean | null
+          updated_at?: string | null
+          updated_by?: string | null
         }
         Relationships: []
       }
@@ -16507,6 +16615,7 @@ export type Database = {
       }
       system_modules: {
         Row: {
+          category: string | null
           created_at: string
           description: string | null
           icon_key: string | null
@@ -16517,12 +16626,14 @@ export type Database = {
           layer: Database["public"]["Enums"]["module_layer"]
           name: string
           parent_module_id: string | null
+          requires_connection: boolean | null
           route: string | null
           sort_order: number
           status: string
           updated_at: string
         }
         Insert: {
+          category?: string | null
           created_at?: string
           description?: string | null
           icon_key?: string | null
@@ -16533,12 +16644,14 @@ export type Database = {
           layer?: Database["public"]["Enums"]["module_layer"]
           name: string
           parent_module_id?: string | null
+          requires_connection?: boolean | null
           route?: string | null
           sort_order?: number
           status?: string
           updated_at?: string
         }
         Update: {
+          category?: string | null
           created_at?: string
           description?: string | null
           icon_key?: string | null
@@ -16549,6 +16662,7 @@ export type Database = {
           layer?: Database["public"]["Enums"]["module_layer"]
           name?: string
           parent_module_id?: string | null
+          requires_connection?: boolean | null
           route?: string | null
           sort_order?: number
           status?: string
