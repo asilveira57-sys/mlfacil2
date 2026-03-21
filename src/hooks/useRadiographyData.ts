@@ -261,10 +261,21 @@ export const MAIN_PROBLEM_LABELS: Record<string, { label: string; color: string 
 export function getLogisticsLabel(item: HealthCurrentItem): { label: string; isFull: boolean; confirmed: boolean } {
   const lt = item.logistic_type?.toLowerCase() || "";
   const sm = item.shipping_mode?.toLowerCase() || "";
-  const ltype = item.listing_type?.toLowerCase() || "";
   
-  if (lt.includes("fulfillment") || lt.includes("full") || sm === "me2" || ltype === "gold_pro") {
+  // Only mark as Full if logistic_type explicitly says fulfillment
+  if (lt === "fulfillment" || lt === "full" || lt.includes("fulfillment")) {
     return { label: "Full", isFull: true, confirmed: true };
+  }
+  // Cross-docking / drop-off
+  if (lt.includes("cross") || lt === "xd_drop_off") {
+    return { label: "Coleta/Crossdocking", isFull: false, confirmed: true };
+  }
+  // me2 = Mercado Envios standard, NOT Full
+  if (sm === "me2") {
+    return { label: "Mercado Envios", isFull: false, confirmed: true };
+  }
+  if (sm === "me1") {
+    return { label: "Envio pelo vendedor", isFull: false, confirmed: true };
   }
   if (sm || lt) {
     return { label: sm || lt, isFull: false, confirmed: true };
