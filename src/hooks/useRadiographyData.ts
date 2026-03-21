@@ -99,6 +99,8 @@ export interface HealthCurrentItem {
   ads_status: string | null;
   is_promotion_active: boolean | null;
   promotion_status: string | null;
+  // Diagnostic
+  diagnostic_text: string | null;
   // Period-based metrics (from RPC)
   visits_period?: number | null;
   sales_period?: number | null;

@@ -1,0 +1,1 @@
+ALTER TABLE public.listing_health_current ADD COLUMN IF NOT EXISTS diagnostic_text text DEFAULT null;
