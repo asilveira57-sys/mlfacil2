@@ -259,6 +259,16 @@ export function RadiographyItemList({
           </div>
         ) : (
           <>
+            {/* Coverage warning when period exceeds available data */}
+            {dataDaysAvailable > 0 && dataDaysAvailable < selectedPeriod && (
+              <div className="flex items-center gap-2 px-3 py-2 mb-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
+                <Activity className="h-3.5 w-3.5 flex-shrink-0" />
+                <span>
+                  Histórico de visitas disponível para os últimos <strong>{dataDaysAvailable} dias</strong>.
+                  {selectedPeriod > dataDaysAvailable && ` Período de ${selectedPeriod}d mostra dados parciais — a cobertura melhora automaticamente a cada dia.`}
+                </span>
+              </div>
+            )}
             <div className="space-y-1.5">
               {pagedItems.map((item) => {
                 const health = classifyHealth(item);
