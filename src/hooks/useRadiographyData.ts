@@ -44,21 +44,31 @@ export interface HealthCurrentItem {
   item_id: string;
   seller_id: string;
   visits_last: number | null;
+  visits_7d: number | null;
+  visits_30d: number | null;
+  visits_60d: number | null;
   price: number | null;
   available_quantity: number | null;
   listing_status: string | null;
   listing_type: string | null;
   shipping_mode: string | null;
   catalog_listing: boolean | null;
+  catalog_product_id: string | null;
+  logistic_type: string | null;
   anomaly_flags: string[] | null;
   last_collected_at: string | null;
   updated_at: string;
-  // Sales enrichment
+  // Sales
   sales_count_7d: number | null;
   units_sold_7d: number | null;
   sales_count_30d: number | null;
   units_sold_30d: number | null;
+  sales_count_60d: number | null;
+  units_sold_60d: number | null;
+  revenue_30d: number | null;
+  revenue_60d: number | null;
   conversion_rate_7d: number | null;
+  conversion_rate_30d: number | null;
   days_without_sale: number | null;
   last_sale_at: string | null;
   // Change detection
@@ -72,11 +82,18 @@ export interface HealthCurrentItem {
   seo_keywords_found: string[] | null;
   seo_keywords_missing: string[] | null;
   seo_analysis_json: SeoAnalysis | null;
-  // joined from meli_listings_cache
-  title?: string | null;
-  thumbnail?: string | null;
-  permalink?: string | null;
-  logistic_type?: string | null;
+  // Direct from table (Phase 1)
+  title: string | null;
+  thumbnail: string | null;
+  permalink: string | null;
+  health_score: number | null;
+  health_status: string | null;
+  main_problem: string | null;
+  photos_count: number | null;
+  has_video: boolean | null;
+  free_shipping: boolean | null;
+  data_coverage_days: number | null;
+  data_coverage_status: string | null;
   // Period-based metrics (from RPC)
   visits_period?: number | null;
   sales_period?: number | null;
@@ -137,16 +154,23 @@ export interface DiagnosticSummary {
   backfillStatus: string | null;
   backfillProgress: number | null;
   backfillError: string | null;
-  dataStartDate: string | null; // earliest visit_date in seller_item_visits
-  dataDaysAvailable: number; // distinct days with visit data
+  dataStartDate: string | null;
+  dataDaysAvailable: number;
 }
 
 export type AnomalyFilter = "all" | "with_anomaly" | "without_anomaly";
 export type PeriodDays = 7 | 15 | 30 | 60 | 150;
 
+// Filter types for Phase 3
+export type LogisticsFilter = "all" | "full" | "not_full" | "unconfirmed";
+export type CatalogFilter = "all" | "with_catalog" | "without_catalog";
+export type MainProblemFilter = "all" | "discovery" | "conversion" | "competitiveness" | "content" | "stock" | "data_coverage" | "healthy";
+export type MediaFilter = "all" | "with_video" | "without_video" | "few_photos";
+
 // --- Health classification from real data ---
 
 export function classifyHealth(item: {
+  health_status?: string | null;
   visits_last?: number | null;
   visits_period?: number | null;
   available_quantity?: number | null;
@@ -160,7 +184,13 @@ export function classifyHealth(item: {
   sales_period?: number | null;
   conversion_rate_7d?: number | null;
   conversion_period?: number | null;
+  health_score?: number | null;
 }): RadiographyHealthStatus {
+  // Use backend-computed status if available
+  if (item.health_status && ["healthy", "stable", "observation", "alert", "critical"].includes(item.health_status)) {
+    return item.health_status as RadiographyHealthStatus;
+  }
+
   const flags = item.anomaly_flags || [];
   const visits = item.visits_period ?? item.visits_last ?? -1;
   const stock = item.available_quantity ?? -1;
@@ -168,24 +198,18 @@ export function classifyHealth(item: {
   const sales = item.sales_period ?? item.sales_count_30d ?? null;
   
   if (!item.last_collected_at && visits < 0) return "stable";
-
   if (stock === 0 || flags.includes("consistent_decline")) return "critical";
   if (daysNoSale !== null && daysNoSale > 30 && visits < 20) return "critical";
-
   if (flags.includes("visit_drop") || flags.includes("zero_visits")) return "alert";
   if (flags.includes("visits_no_conversion") || flags.includes("no_sales_30d")) return "alert";
-
   if (flags.includes("high_stock_low_traction") || flags.includes("low_conversion")) return "observation";
   if (flags.includes("no_sales_14d")) return "observation";
-
   if (visits > 10 && stock > 0 && (sales === null || sales > 0)) {
     const hasFulfillment = item.shipping_mode === "me2" || item.listing_type === "gold_pro";
     if (hasFulfillment || item.catalog_listing) return "healthy";
     return "stable";
   }
-
   if (visits >= 0 && stock > 0) return "stable";
-
   return "stable";
 }
 
@@ -222,10 +246,36 @@ export function getChangeLabel(type: string): string {
   return CHANGE_ICONS[type] || type;
 }
 
+// Problem labels
+export const MAIN_PROBLEM_LABELS: Record<string, { label: string; color: string }> = {
+  discovery: { label: "Descoberta", color: "text-blue-400" },
+  conversion: { label: "Conversão", color: "text-amber-400" },
+  competitiveness: { label: "Competitividade", color: "text-orange-400" },
+  content: { label: "Conteúdo", color: "text-violet-400" },
+  stock: { label: "Estoque", color: "text-red-400" },
+  data_coverage: { label: "Dados insuficientes", color: "text-slate-400" },
+  healthy: { label: "Saudável", color: "text-emerald-400" },
+};
+
+// --- Logistics helpers ---
+export function getLogisticsLabel(item: HealthCurrentItem): { label: string; isFull: boolean; confirmed: boolean } {
+  const lt = item.logistic_type?.toLowerCase() || "";
+  const sm = item.shipping_mode?.toLowerCase() || "";
+  const ltype = item.listing_type?.toLowerCase() || "";
+  
+  if (lt.includes("fulfillment") || lt.includes("full") || sm === "me2" || ltype === "gold_pro") {
+    return { label: "Full", isFull: true, confirmed: true };
+  }
+  if (sm || lt) {
+    return { label: sm || lt, isFull: false, confirmed: true };
+  }
+  return { label: "Não confirmado", isFull: false, confirmed: false };
+}
+
 // --- Main hook ---
 
 export function useRadiographyData(sellerId: string | null, selectedPeriod: PeriodDays = 30) {
-  // 1. Fetch current health + listing info + period metrics
+  // 1. Fetch current health (now includes title, thumbnail, permalink, health_score, etc.)
   const {
     data: items,
     isLoading: itemsLoading,
@@ -263,27 +313,25 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
         }
       }
 
-      // Get listing cache for titles/thumbnails (deduplicated by item_id)
-      const itemIds = [...new Set(healthRes.data.map((r) => r.item_id))];
+      // For items without title/thumbnail on listing_health_current, fallback to meli_listings_cache
+      const missingTitleIds = healthRes.data.filter(h => !h.title).map(h => h.item_id);
       const listings: Record<string, any> = {};
-      for (let i = 0; i < itemIds.length; i += 100) {
-        const batch = itemIds.slice(i, i + 100);
-        const { data: cacheRows } = await supabase
-          .from("meli_listings_cache")
-          .select("item_id, title, thumbnail, permalink, logistic_type")
-          .in("item_id", batch)
-          .eq("seller_id", sellerId);
-        
-        if (cacheRows) {
-          for (const row of cacheRows) {
-            if (!listings[row.item_id]) {
-              listings[row.item_id] = row;
+      if (missingTitleIds.length > 0) {
+        for (let i = 0; i < missingTitleIds.length; i += 100) {
+          const batch = missingTitleIds.slice(i, i + 100);
+          const { data: cacheRows } = await supabase
+            .from("meli_listings_cache")
+            .select("item_id, title, thumbnail, permalink, logistic_type")
+            .in("item_id", batch)
+            .eq("seller_id", sellerId);
+          if (cacheRows) {
+            for (const row of cacheRows) {
+              if (!listings[row.item_id]) listings[row.item_id] = row;
             }
           }
         }
       }
 
-      // Merge
       return healthRes.data.map((h) => {
         const cache = listings[h.item_id];
         const metrics = metricsMap[h.item_id];
@@ -292,10 +340,10 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
           change_flags: (h.change_flags as any as ChangeFlag[]) || [],
           alerts_json: (h.alerts_json as any as StructuredAlert[]) || [],
           seo_analysis_json: (h.seo_analysis_json as any as SeoAnalysis) || null,
-          title: cache?.title || null,
-          thumbnail: cache?.thumbnail || null,
-          permalink: cache?.permalink || null,
-          logistic_type: cache?.logistic_type || null,
+          title: h.title || cache?.title || null,
+          thumbnail: h.thumbnail || cache?.thumbnail || null,
+          permalink: h.permalink || cache?.permalink || null,
+          logistic_type: h.logistic_type || cache?.logistic_type || null,
           visits_period: metrics?.visits_period ?? null,
           sales_period: metrics?.sales_period ?? null,
           units_period: metrics?.units_period ?? null,
@@ -341,7 +389,6 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
       const recentCount = Number(distinctData?.updated_recently || 0);
       const lastCollectionAny = lastCollectionAnyRes.data?.[0];
 
-      // Calculate days of data available
       const earliestDate = visitCoverageRes.data?.[0]?.visit_date || null;
       let dataDaysAvailable = 0;
       if (earliestDate) {
@@ -372,7 +419,7 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
     staleTime: 5 * 60 * 1000,
   });
 
-  // 3. Fetch visit time series for a specific item (real daily data)
+  // 3. Visit series
   const fetchItemVisitSeries = useCallback(
     async (itemId: string, days: PeriodDays = 30): Promise<VisitSeriesEntry[]> => {
       if (!sellerId) return [];
@@ -390,7 +437,7 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
     [sellerId]
   );
 
-  // 3b. Fetch history snapshots (price/stock overlay)
+  // 3b. History snapshots
   const fetchItemHistory = useCallback(
     async (itemId: string, days: PeriodDays = 30): Promise<HealthHistoryEntry[]> => {
       if (!sellerId) return [];
@@ -408,7 +455,7 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
     [sellerId]
   );
 
-  // 4. Trigger update (edge function)
+  // 4. Trigger update
   const triggerUpdate = useCallback(async () => {
     if (!sellerId) return;
     await supabase.functions.invoke("radiography-collector", {

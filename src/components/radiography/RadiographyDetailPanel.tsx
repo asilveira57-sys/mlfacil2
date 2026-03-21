@@ -5,13 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import {
   Eye, TrendingUp, TrendingDown, Package, ExternalLink, HeartPulse,
   Activity, AlertTriangle, Stethoscope, Siren, ShoppingCart, Clock,
   BarChart3, ArrowUpDown, AlertOctagon, Lightbulb, Search, Check,
-  X, Target, Scan, ChevronRight, Zap, Image, Video, FileText,
-  ListChecks, Tag,
+  X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck,
 } from "lucide-react";
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -23,6 +21,7 @@ import { HEALTH_STATUS_CONFIG, RadiographyHealthStatus } from "@/types/radiograp
 import {
   HealthCurrentItem, HealthHistoryEntry, VisitSeriesEntry, StructuredAlert, ChangeFlag,
   SeoAnalysis, classifyHealth, getAnomalyLabel, PeriodDays, CoverageInfo, computeCoverage,
+  MAIN_PROBLEM_LABELS, getLogisticsLabel,
 } from "@/hooks/useRadiographyData";
 
 interface Props {
@@ -34,101 +33,7 @@ interface Props {
   selectedPeriod: PeriodDays;
 }
 
-// --- Health score breakdown ---
-interface HealthFactor {
-  label: string;
-  icon: React.ReactNode;
-  status: "good" | "warning" | "bad" | "neutral";
-  detail: string;
-}
-
-function getHealthBreakdown(item: HealthCurrentItem): HealthFactor[] {
-  const factors: HealthFactor[] = [];
-  const visits = item.visits_last;
-  const stock = item.available_quantity;
-  const sales30 = item.sales_count_30d;
-  const conv = item.conversion_rate_7d;
-  const daysNoSale = item.days_without_sale;
-  const seo = item.seo_score;
-
-  // Traffic
-  if (visits == null || visits < 0) {
-    factors.push({ label: "Tráfego", icon: <Eye className="h-3.5 w-3.5" />, status: "neutral", detail: "Sem dados" });
-  } else if (visits === 0) {
-    factors.push({ label: "Tráfego", icon: <Eye className="h-3.5 w-3.5" />, status: "bad", detail: "Zero visitas" });
-  } else if (visits < 10) {
-    factors.push({ label: "Tráfego", icon: <Eye className="h-3.5 w-3.5" />, status: "warning", detail: `${visits} visitas` });
-  } else {
-    factors.push({ label: "Tráfego", icon: <Eye className="h-3.5 w-3.5" />, status: "good", detail: `${visits} visitas` });
-  }
-
-  // Sales
-  if (sales30 == null) {
-    factors.push({ label: "Vendas (30d)", icon: <ShoppingCart className="h-3.5 w-3.5" />, status: "neutral", detail: "Sem dados" });
-  } else if (sales30 === 0) {
-    factors.push({ label: "Vendas (30d)", icon: <ShoppingCart className="h-3.5 w-3.5" />, status: "bad", detail: "Nenhuma venda" });
-  } else {
-    factors.push({ label: "Vendas (30d)", icon: <ShoppingCart className="h-3.5 w-3.5" />, status: "good", detail: `${sales30} vendas` });
-  }
-
-  // Conversion
-  if (conv != null && visits != null && visits > 20) {
-    if (conv < 0.5) {
-      factors.push({ label: "Conversão", icon: <BarChart3 className="h-3.5 w-3.5" />, status: "bad", detail: `${conv.toFixed(1)}%` });
-    } else if (conv < 2) {
-      factors.push({ label: "Conversão", icon: <BarChart3 className="h-3.5 w-3.5" />, status: "warning", detail: `${conv.toFixed(1)}%` });
-    } else {
-      factors.push({ label: "Conversão", icon: <BarChart3 className="h-3.5 w-3.5" />, status: "good", detail: `${conv.toFixed(1)}%` });
-    }
-  }
-
-  // Days without sale
-  if (daysNoSale != null && daysNoSale > 0) {
-    if (daysNoSale > 30) {
-      factors.push({ label: "Inatividade", icon: <Clock className="h-3.5 w-3.5" />, status: "bad", detail: `${daysNoSale} dias sem venda` });
-    } else if (daysNoSale > 14) {
-      factors.push({ label: "Inatividade", icon: <Clock className="h-3.5 w-3.5" />, status: "warning", detail: `${daysNoSale} dias sem venda` });
-    } else {
-      factors.push({ label: "Inatividade", icon: <Clock className="h-3.5 w-3.5" />, status: "neutral", detail: `${daysNoSale} dias sem venda` });
-    }
-  }
-
-  // Stock
-  if (stock === 0) {
-    factors.push({ label: "Estoque", icon: <Package className="h-3.5 w-3.5" />, status: "bad", detail: "Zerado" });
-  } else if (stock != null && stock < 3) {
-    factors.push({ label: "Estoque", icon: <Package className="h-3.5 w-3.5" />, status: "warning", detail: `${stock} unidades` });
-  } else if (stock != null) {
-    factors.push({ label: "Estoque", icon: <Package className="h-3.5 w-3.5" />, status: "good", detail: `${stock} unidades` });
-  }
-
-  // SEO
-  if (seo != null) {
-    if (seo < 40) {
-      factors.push({ label: "SEO", icon: <Search className="h-3.5 w-3.5" />, status: "bad", detail: `Score ${seo}` });
-    } else if (seo < 70) {
-      factors.push({ label: "SEO", icon: <Search className="h-3.5 w-3.5" />, status: "warning", detail: `Score ${seo}` });
-    } else {
-      factors.push({ label: "SEO", icon: <Search className="h-3.5 w-3.5" />, status: "good", detail: `Score ${seo}` });
-    }
-  }
-
-  // Logistics
-  if (item.shipping_mode === "me2" || item.listing_type === "gold_pro") {
-    factors.push({ label: "Logística", icon: <Zap className="h-3.5 w-3.5" />, status: "good", detail: "Full / Premium" });
-  } else if (item.shipping_mode) {
-    factors.push({ label: "Logística", icon: <Zap className="h-3.5 w-3.5" />, status: "neutral", detail: item.shipping_mode });
-  }
-
-  // Catalog
-  if (item.catalog_listing) {
-    factors.push({ label: "Catálogo", icon: <Tag className="h-3.5 w-3.5" />, status: "good", detail: "Participando" });
-  }
-
-  return factors;
-}
-
-// --- Recommendations ---
+// --- Smart Recommendations (with blocking logic) ---
 interface Recommendation {
   action: string;
   reason: string;
@@ -136,41 +41,61 @@ interface Recommendation {
   icon: React.ReactNode;
 }
 
-function buildRecommendations(item: HealthCurrentItem): Recommendation[] {
+function buildSmartRecommendations(item: HealthCurrentItem): Recommendation[] {
   const recs: Recommendation[] = [];
   const flags = item.anomaly_flags || [];
-  const alerts = item.alerts_json || [];
-  const seo = item.seo_score;
+  const isFull = getLogisticsLabel(item).isFull;
+  const hasCatalog = !!(item.catalog_listing || item.catalog_product_id);
+  const hasVideo = !!item.has_video;
+  const photosCount = item.photos_count ?? 0;
+  const coverageOk = item.data_coverage_status !== "insufficient";
 
+  // Traffic issues
   if (flags.includes("zero_visits") || flags.includes("visit_drop")) {
-    recs.push({ action: "Revisar título e fotos", reason: "Sem tráfego ou queda acentuada de visitas", priority: "high", icon: <Image className="h-4 w-4" /> });
+    recs.push({ action: "Revisar título e fotos para melhorar descoberta", reason: "Sem tráfego ou queda acentuada de visitas", priority: "high", icon: <Image className="h-4 w-4" /> });
   }
 
+  // Conversion issues
   if (flags.includes("visits_no_conversion") || flags.includes("low_conversion")) {
-    recs.push({ action: "Revisar preço e condições", reason: "Recebe visitas mas não converte em vendas", priority: "high", icon: <BarChart3 className="h-4 w-4" /> });
+    recs.push({ action: "Revisar preço, fotos e condições de venda", reason: "Recebe visitas mas não converte em vendas", priority: "high", icon: <BarChart3 className="h-4 w-4" /> });
   }
 
+  // No sales
   if (flags.includes("no_sales_30d") || flags.includes("no_sales_14d")) {
-    recs.push({ action: "Avaliar competitividade", reason: `Sem vendas há ${item.days_without_sale ?? "muitos"} dias`, priority: "high", icon: <ShoppingCart className="h-4 w-4" /> });
+    recs.push({ action: "Avaliar competitividade do anúncio", reason: `Sem vendas há ${item.days_without_sale ?? "muitos"} dias`, priority: "high", icon: <ShoppingCart className="h-4 w-4" /> });
   }
 
+  // Stock
   if (item.available_quantity === 0) {
-    recs.push({ action: "Reforçar estoque", reason: "Estoque zerado impede vendas", priority: "high", icon: <Package className="h-4 w-4" /> });
+    recs.push({ action: "Repor estoque imediatamente", reason: "Estoque zerado impede vendas e perde posicionamento", priority: "high", icon: <Package className="h-4 w-4" /> });
   }
 
-  if (seo != null && seo < 40) {
-    recs.push({ action: "Otimizar palavras-chave", reason: "Score de SEO baixo — título pode estar fraco", priority: "medium", icon: <Search className="h-4 w-4" /> });
+  // SEO
+  if (item.seo_score != null && item.seo_score < 40) {
+    recs.push({ action: "Otimizar título com palavras-chave relevantes", reason: "Score SEO baixo — título pode estar fraco para buscas", priority: "medium", icon: <Search className="h-4 w-4" /> });
   }
 
-  if (item.shipping_mode !== "me2" && item.listing_type !== "gold_pro") {
-    recs.push({ action: "Considerar Full ou Premium", reason: "Logística avançada melhora relevância", priority: "low", icon: <Zap className="h-4 w-4" /> });
+  // Media — video
+  if (!hasVideo) {
+    recs.push({ action: "Adicionar vídeo ao anúncio", reason: "Anúncios com vídeo convertem até 20% mais", priority: "medium", icon: <Video className="h-4 w-4" /> });
   }
 
-  if (!item.catalog_listing) {
-    recs.push({ action: "Tentar vincular ao catálogo", reason: "Catálogo aumenta exposição e confiança", priority: "low", icon: <Tag className="h-4 w-4" /> });
+  // Media — photos
+  if (photosCount < 5 && photosCount > 0) {
+    recs.push({ action: `Adicionar mais fotos (atualmente ${photosCount})`, reason: "Recomendado ter pelo menos 5 fotos de qualidade", priority: "medium", icon: <Camera className="h-4 w-4" /> });
   }
 
-  // Change-driven recommendations
+  // SMART BLOCK: Only suggest Full if NOT already Full and data is confirmed
+  if (!isFull && coverageOk) {
+    recs.push({ action: "Considerar envio por Fulfillment (Full)", reason: "Logística Full melhora relevância e tempo de entrega", priority: "low", icon: <Zap className="h-4 w-4" /> });
+  }
+
+  // SMART BLOCK: Only suggest Catalog if NOT already in catalog
+  if (!hasCatalog && coverageOk) {
+    recs.push({ action: "Tentar vincular ao catálogo oficial", reason: "Catálogo aumenta exposição e confiança do comprador", priority: "low", icon: <Tag className="h-4 w-4" /> });
+  }
+
+  // Price change monitoring
   const changes = item.change_flags || [];
   if (changes.some(c => c.type === "price_increased")) {
     recs.push({ action: "Monitorar impacto do aumento de preço", reason: "Preço subiu recentemente — pode afetar conversão", priority: "medium", icon: <TrendingUp className="h-4 w-4" /> });
@@ -188,6 +113,8 @@ const factorStatusStyles = {
   bad: "text-red-400 bg-red-500/10 border-red-500/20",
   neutral: "text-slate-400 bg-slate-500/10 border-slate-500/20",
 };
+
+type FactorStatus = "good" | "warning" | "bad" | "neutral";
 
 export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetchVisitSeries, selectedPeriod }: Props) {
   const [history, setHistory] = useState<HealthHistoryEntry[]>([]);
@@ -221,21 +148,14 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
     if (open && item) loadData();
   }, [period]);
 
-  // Chart data — use visit series (real daily) with price/stock overlay from history snapshots
+  // Chart data
   const chartData = useMemo(() => {
     if (!visitSeries.length) return [];
-    
-    // Build price/stock lookup from history snapshots by date
     const snapshotByDate = new Map<string, { price: number; stock: number }>();
     for (const h of history) {
       const dateKey = new Date(h.collected_at).toISOString().slice(0, 10);
-      snapshotByDate.set(dateKey, {
-        price: h.price ?? 0,
-        stock: h.available_quantity ?? 0,
-      });
+      snapshotByDate.set(dateKey, { price: h.price ?? 0, stock: h.available_quantity ?? 0 });
     }
-
-    // Use current item values as fallback
     const currentPrice = item?.price ?? 0;
     const currentStock = item?.available_quantity ?? 0;
     let lastKnownPrice = currentPrice;
@@ -244,10 +164,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
     return visitSeries.map((v) => {
       const dateKey = v.visit_date;
       const snapshot = snapshotByDate.get(dateKey);
-      if (snapshot) {
-        lastKnownPrice = snapshot.price;
-        lastKnownStock = snapshot.stock;
-      }
+      if (snapshot) { lastKnownPrice = snapshot.price; lastKnownStock = snapshot.stock; }
       return {
         date: format(new Date(dateKey), "dd/MM", { locale: ptBR }),
         fullDate: dateKey,
@@ -261,38 +178,29 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
   const hasMultipleDates = chartData.length >= 2;
   const hasAnyVisits = chartData.some(d => d.visits > 0);
 
-  // Coverage calculation
-  const coverage = useMemo<CoverageInfo>(() => {
-    return computeCoverage(visitSeries, period);
-  }, [visitSeries, period]);
-
-  const health = item ? classifyHealth(item) : ("stable" as RadiographyHealthStatus);
-  const config = HEALTH_STATUS_CONFIG[health];
-  const healthFactors = item ? getHealthBreakdown(item) : [];
-  const recommendations = item ? buildRecommendations(item) : [];
-  const allAlerts = useMemo(() => {
-    if (!item) return [];
-    return [
-      ...(item.alerts_json || []),
-      ...((item.anomaly_flags || [])
-        .filter(f => !(item.alerts_json || []).some(a => a.type === f))
-        .map(f => ({ type: f, severity: "medium", title: getAnomalyLabel(f), description: "", context: {} } as StructuredAlert))),
-    ];
-  }, [item]);
-  const changes = item?.change_flags || [];
+  const coverage = useMemo<CoverageInfo>(() => computeCoverage(visitSeries, period), [visitSeries, period]);
 
   if (!item) return null;
 
+  const health = classifyHealth(item);
+  const config = HEALTH_STATUS_CONFIG[health];
+  const logistics = getLogisticsLabel(item);
+  const hasCatalog = !!(item.catalog_listing || item.catalog_product_id);
+  const problem = item.main_problem ? MAIN_PROBLEM_LABELS[item.main_problem] : null;
+  const recommendations = buildSmartRecommendations(item);
+  const allAlerts = [
+    ...(item.alerts_json || []),
+    ...((item.anomaly_flags || [])
+      .filter(f => !(item.alerts_json || []).some(a => a.type === f))
+      .map(f => ({ type: f, severity: "medium", title: getAnomalyLabel(f), description: "", context: {} } as StructuredAlert))),
+  ];
+  const changes = item.change_flags || [];
 
   const HealthIcon = ({ status }: { status: RadiographyHealthStatus }) => {
     const iconMap = { healthy: HeartPulse, stable: Activity, observation: Stethoscope, alert: AlertTriangle, critical: Siren };
     const Icon = iconMap[status];
     return <Icon className="h-5 w-5" />;
   };
-
-  // Evolution
-  const calcDelta = (key: "visits" | "price" | "available_quantity") =>
-    history.length >= 2 ? ((history[history.length - 1][key] ?? 0) - (history[0][key] ?? 0)) : null;
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
@@ -308,6 +216,83 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
       </div>
     );
   };
+
+  // Health factors
+  const healthFactors: { label: string; icon: React.ReactNode; status: FactorStatus; detail: string }[] = [];
+
+  // Traffic
+  const visits = item.visits_period ?? item.visits_last;
+  if (visits == null || visits < 0) healthFactors.push({ label: "Tráfego", icon: <Eye className="h-3.5 w-3.5" />, status: "neutral", detail: "Sem dados" });
+  else if (visits === 0) healthFactors.push({ label: "Tráfego", icon: <Eye className="h-3.5 w-3.5" />, status: "bad", detail: "Zero visitas" });
+  else if (visits < 10) healthFactors.push({ label: "Tráfego", icon: <Eye className="h-3.5 w-3.5" />, status: "warning", detail: `${visits} visitas` });
+  else healthFactors.push({ label: "Tráfego", icon: <Eye className="h-3.5 w-3.5" />, status: "good", detail: `${visits.toLocaleString("pt-BR")} visitas` });
+
+  // Sales
+  const sales = item.sales_period ?? item.sales_count_30d;
+  if (sales == null) healthFactors.push({ label: `Vendas (${period}d)`, icon: <ShoppingCart className="h-3.5 w-3.5" />, status: "neutral", detail: "Sem dados" });
+  else if (sales === 0) healthFactors.push({ label: `Vendas (${period}d)`, icon: <ShoppingCart className="h-3.5 w-3.5" />, status: "bad", detail: "Nenhuma venda" });
+  else healthFactors.push({ label: `Vendas (${period}d)`, icon: <ShoppingCart className="h-3.5 w-3.5" />, status: "good", detail: `${sales} vendas` });
+
+  // Conversion
+  const conv = item.conversion_period ?? item.conversion_rate_7d;
+  if (conv != null && visits != null && visits > 20) {
+    if (conv < 0.5) healthFactors.push({ label: "Conversão", icon: <BarChart3 className="h-3.5 w-3.5" />, status: "bad", detail: `${conv.toFixed(1)}%` });
+    else if (conv < 2) healthFactors.push({ label: "Conversão", icon: <BarChart3 className="h-3.5 w-3.5" />, status: "warning", detail: `${conv.toFixed(1)}%` });
+    else healthFactors.push({ label: "Conversão", icon: <BarChart3 className="h-3.5 w-3.5" />, status: "good", detail: `${conv.toFixed(1)}%` });
+  }
+
+  // Inactivity
+  if (item.days_without_sale != null && item.days_without_sale > 0) {
+    if (item.days_without_sale > 30) healthFactors.push({ label: "Inatividade", icon: <Clock className="h-3.5 w-3.5" />, status: "bad", detail: `${item.days_without_sale} dias sem venda` });
+    else if (item.days_without_sale > 14) healthFactors.push({ label: "Inatividade", icon: <Clock className="h-3.5 w-3.5" />, status: "warning", detail: `${item.days_without_sale} dias sem venda` });
+    else healthFactors.push({ label: "Inatividade", icon: <Clock className="h-3.5 w-3.5" />, status: "neutral", detail: `${item.days_without_sale} dias sem venda` });
+  }
+
+  // Stock
+  if (item.available_quantity === 0) healthFactors.push({ label: "Estoque", icon: <Package className="h-3.5 w-3.5" />, status: "bad", detail: "Zerado" });
+  else if (item.available_quantity != null && item.available_quantity < 3) healthFactors.push({ label: "Estoque", icon: <Package className="h-3.5 w-3.5" />, status: "warning", detail: `${item.available_quantity} unidades` });
+  else if (item.available_quantity != null) healthFactors.push({ label: "Estoque", icon: <Package className="h-3.5 w-3.5" />, status: "good", detail: `${item.available_quantity} unidades` });
+
+  // SEO
+  if (item.seo_score != null) {
+    if (item.seo_score < 40) healthFactors.push({ label: "SEO", icon: <Search className="h-3.5 w-3.5" />, status: "bad", detail: `Score ${item.seo_score}` });
+    else if (item.seo_score < 70) healthFactors.push({ label: "SEO", icon: <Search className="h-3.5 w-3.5" />, status: "warning", detail: `Score ${item.seo_score}` });
+    else healthFactors.push({ label: "SEO", icon: <Search className="h-3.5 w-3.5" />, status: "good", detail: `Score ${item.seo_score}` });
+  }
+
+  // Logistics
+  healthFactors.push({
+    label: "Logística",
+    icon: <Truck className="h-3.5 w-3.5" />,
+    status: logistics.isFull ? "good" : logistics.confirmed ? "neutral" : "neutral",
+    detail: logistics.isFull ? "Full / Fulfillment" : logistics.confirmed ? logistics.label : "Não confirmado",
+  });
+
+  // Catalog
+  healthFactors.push({
+    label: "Catálogo",
+    icon: <Tag className="h-3.5 w-3.5" />,
+    status: hasCatalog ? "good" : "neutral",
+    detail: hasCatalog ? "Participando" : "Não vinculado",
+  });
+
+  // Media - Photos
+  if (item.photos_count != null) {
+    healthFactors.push({
+      label: "Fotos",
+      icon: <Camera className="h-3.5 w-3.5" />,
+      status: item.photos_count >= 5 ? "good" : item.photos_count >= 3 ? "warning" : "bad",
+      detail: `${item.photos_count} fotos`,
+    });
+  }
+
+  // Media - Video
+  healthFactors.push({
+    label: "Vídeo",
+    icon: <Video className="h-3.5 w-3.5" />,
+    status: item.has_video ? "good" : "warning",
+    detail: item.has_video ? "Presente" : "Ausente",
+  });
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -337,9 +322,26 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
                   </a>
                 )}
               </div>
-              <div className="flex items-center gap-1.5 mt-2">
+              {/* Badges */}
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                 <Badge className={`text-xs ${config.bgClass} ${config.colorClass} ${config.borderClass}`}>{config.label}</Badge>
-                {item.catalog_listing && <Badge variant="outline" className="text-xs border-violet-500/30 text-violet-400">Catálogo</Badge>}
+                {item.health_score != null && (
+                  <Badge variant="outline" className={`text-xs ${
+                    item.health_score >= 70 ? "border-emerald-500/30 text-emerald-400" :
+                    item.health_score >= 40 ? "border-amber-500/30 text-amber-400" :
+                    "border-red-500/30 text-red-400"
+                  }`}>
+                    Score: {item.health_score}
+                  </Badge>
+                )}
+                {problem && item.main_problem !== "healthy" && (
+                  <Badge variant="outline" className={`text-xs border-slate-600 ${problem.color}`}>
+                    {problem.label}
+                  </Badge>
+                )}
+                {logistics.isFull && <Badge variant="outline" className="text-xs border-blue-500/30 text-blue-400">Full</Badge>}
+                {hasCatalog && <Badge variant="outline" className="text-xs border-violet-500/30 text-violet-400">Catálogo</Badge>}
+                {item.has_video && <Badge variant="outline" className="text-xs border-cyan-500/30 text-cyan-400">Vídeo</Badge>}
                 {item.listing_status && item.listing_status !== "active" && (
                   <Badge variant="outline" className="text-xs border-red-500/30 text-red-400">{item.listing_status}</Badge>
                 )}
@@ -350,24 +352,31 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
 
         <ScrollArea className="h-[calc(100vh-160px)]">
           <div className="p-5 space-y-5">
-            {/* SECTION 1 — Summary metrics */}
-            <div className="grid grid-cols-4 gap-2">
-              <MiniStat label={`Visitas (${period}d)`} value={item.visits_period != null ? item.visits_period.toLocaleString("pt-BR") : (item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—")} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
-              <MiniStat label={`Vendas (${period}d)`} value={String(item.sales_period ?? item.sales_count_30d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
-              <MiniStat label="Conversão" value={
-                coverage.status === 'insufficient' ? "dados insuf." :
-                item.conversion_period != null ? `${item.conversion_period.toFixed(1)}%` :
-                (item.conversion_rate_7d != null ? `${item.conversion_rate_7d.toFixed(1)}%` : "—")
-              } icon={<BarChart3 className="h-3 w-3 text-violet-400" />} 
-                subtitle={coverage.status === 'partial' ? `base: ${coverage.days_with_data}d` : undefined}
-              />
-              <MiniStat label="Dias s/ venda" value={item.days_without_sale != null ? String(item.days_without_sale) : "—"} icon={<Clock className="h-3 w-3 text-amber-400" />} highlight={item.days_without_sale != null && item.days_without_sale > 14} />
-            </div>
+            {/* SECTION 1 — Commercial metrics */}
+            <SectionCard title="Comercial" icon={<ShoppingCart className="h-4 w-4 text-emerald-400" />}>
+              <div className="grid grid-cols-4 gap-2">
+                <MiniStat label={`Visitas (${period}d)`} value={visits != null ? visits.toLocaleString("pt-BR") : "—"} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
+                <MiniStat label={`Vendas (${period}d)`} value={String(sales ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
+                <MiniStat label="Conversão" value={
+                  coverage.status === 'insufficient' ? "dados insuf." :
+                  conv != null ? `${conv.toFixed(1)}%` : "—"
+                } icon={<BarChart3 className="h-3 w-3 text-violet-400" />}
+                  subtitle={coverage.status === 'partial' ? `base: ${coverage.days_with_data}d` : undefined}
+                />
+                <MiniStat label="Dias s/ venda" value={item.days_without_sale != null ? String(item.days_without_sale) : "—"} icon={<Clock className="h-3 w-3 text-amber-400" />} highlight={item.days_without_sale != null && item.days_without_sale > 14} />
+              </div>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                <MiniStat label="Preço" value={item.price != null ? `R$ ${item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"} />
+                <MiniStat label="Estoque" value={item.available_quantity != null ? String(item.available_quantity) : "—"} highlight={item.available_quantity === 0} />
+                <MiniStat label="Vendas (7d)" value={String(item.sales_count_7d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
+              </div>
+            </SectionCard>
+
             {/* Coverage indicator */}
             {coverage.status !== 'good' && coverage.days_with_data > 0 && (
               <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
-                coverage.status === 'insufficient' 
-                  ? 'bg-amber-500/10 border border-amber-500/20 text-amber-300' 
+                coverage.status === 'insufficient'
+                  ? 'bg-amber-500/10 border border-amber-500/20 text-amber-300'
                   : 'bg-cyan-500/5 border border-cyan-500/15 text-cyan-300'
               }`}>
                 <Activity className="h-3.5 w-3.5 flex-shrink-0" />
@@ -378,13 +387,65 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
                 </span>
               </div>
             )}
-            <div className="grid grid-cols-3 gap-2">
-              <MiniStat label="Preço" value={item.price != null ? `R$ ${item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"} />
-              <MiniStat label="Estoque" value={item.available_quantity != null ? String(item.available_quantity) : "—"} highlight={item.available_quantity === 0} />
-              <MiniStat label="Vendas (7d)" value={String(item.sales_count_7d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
-            </div>
 
-            {/* SECTION 2 — Health breakdown */}
+            {/* SECTION 2 — Structural */}
+            <SectionCard title="Estrutural" icon={<Truck className="h-4 w-4 text-blue-400" />}>
+              <div className="grid grid-cols-3 gap-2">
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${logistics.isFull ? factorStatusStyles.good : factorStatusStyles.neutral}`}>
+                  <Zap className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">Logística</span>
+                    <span className="ml-1.5 opacity-80">{logistics.isFull ? "Full" : logistics.confirmed ? logistics.label : "Não confirmado"}</span>
+                  </div>
+                </div>
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${hasCatalog ? factorStatusStyles.good : factorStatusStyles.neutral}`}>
+                  <Tag className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">Catálogo</span>
+                    <span className="ml-1.5 opacity-80">{hasCatalog ? "Participando" : "Não"}</span>
+                  </div>
+                </div>
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${item.free_shipping ? factorStatusStyles.good : factorStatusStyles.neutral}`}>
+                  <Truck className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">Frete</span>
+                    <span className="ml-1.5 opacity-80">{item.free_shipping ? "Grátis" : "Normal"}</span>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* SECTION 3 — Media */}
+            <SectionCard title="Mídia" icon={<Camera className="h-4 w-4 text-violet-400" />}>
+              <div className="grid grid-cols-3 gap-2">
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${
+                  (item.photos_count ?? 0) >= 5 ? factorStatusStyles.good :
+                  (item.photos_count ?? 0) >= 3 ? factorStatusStyles.warning : factorStatusStyles.bad
+                }`}>
+                  <Image className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">Fotos</span>
+                    <span className="ml-1.5 opacity-80">{item.photos_count ?? "?"}</span>
+                  </div>
+                </div>
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${item.has_video ? factorStatusStyles.good : factorStatusStyles.warning}`}>
+                  <Video className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">Vídeo</span>
+                    <span className="ml-1.5 opacity-80">{item.has_video ? "Sim" : "Não"}</span>
+                  </div>
+                </div>
+                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${factorStatusStyles.neutral}`}>
+                  <Image className="h-3.5 w-3.5" />
+                  <div>
+                    <span className="font-medium">1ª imagem</span>
+                    <span className="ml-1.5 opacity-80">{item.thumbnail ? "OK" : "Sem"}</span>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* SECTION 4 — Health breakdown */}
             <SectionCard title="Fatores de Saúde" icon={<HeartPulse className="h-4 w-4 text-cyan-400" />} subtitle={config.description}>
               <div className="grid grid-cols-2 gap-1.5">
                 {healthFactors.map((f, i) => (
@@ -399,7 +460,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               </div>
             </SectionCard>
 
-            {/* SECTION 3 — Alerts */}
+            {/* SECTION 5 — Alerts */}
             {allAlerts.length > 0 && (
               <SectionCard title={`Alertas (${allAlerts.length})`} icon={<AlertOctagon className="h-4 w-4 text-red-400" />}>
                 <div className="space-y-2.5">
@@ -427,7 +488,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               </SectionCard>
             )}
 
-            {/* SECTION 4 — Recent Changes */}
+            {/* SECTION 6 — Recent Changes */}
             {changes.length > 0 && (
               <SectionCard title="Mudanças Recentes" icon={<ArrowUpDown className="h-4 w-4 text-amber-400" />}>
                 <div className="space-y-2">
@@ -446,7 +507,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               </SectionCard>
             )}
 
-            {/* SECTION 5 — History Chart */}
+            {/* SECTION 7 — History Chart */}
             <SectionCard
               title="Histórico de Visitas"
               icon={<Scan className="h-4 w-4 text-cyan-400" />}
@@ -479,8 +540,8 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               ) : chartData.length === 0 || !hasAnyVisits ? (
                 <div className="h-[200px] flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
                   <BarChart3 className="h-8 w-8 text-slate-600" />
-                  <p>{chartData.length === 0 
-                    ? "Sem dados de visitas para este período." 
+                  <p>{chartData.length === 0
+                    ? "Sem dados de visitas para este período."
                     : `Dados históricos insuficientes para ${period} dias.`}
                   </p>
                   <p className="text-xs text-slate-600">Tente um período menor ou aguarde a próxima coleta.</p>
@@ -491,31 +552,12 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
                     <Activity className="h-4 w-4 text-cyan-400 flex-shrink-0" />
                     <div>
                       <p className="text-sm text-cyan-300">Primeiro exame realizado em {chartData[0]?.date}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {chartData[0]?.visits.toLocaleString("pt-BR")} visitas registradas. 
-                        A evolução será visível após a próxima coleta.
-                      </p>
-                    </div>
-                  </div>
-                  {/* Show current snapshot as single-point summary */}
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-lg bg-slate-800/50 border border-slate-700/40 p-2.5 text-center">
-                      <div className="text-[11px] text-slate-400">Visitas</div>
-                      <div className="text-sm font-bold font-mono text-cyan-400">{chartData[0]?.visits.toLocaleString("pt-BR")}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800/50 border border-slate-700/40 p-2.5 text-center">
-                      <div className="text-[11px] text-slate-400">Preço</div>
-                      <div className="text-sm font-bold font-mono text-slate-200">R$ {chartData[0]?.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800/50 border border-slate-700/40 p-2.5 text-center">
-                      <div className="text-[11px] text-slate-400">Estoque</div>
-                      <div className="text-sm font-bold font-mono text-slate-200">{chartData[0]?.stock}</div>
+                      <p className="text-xs text-slate-400 mt-0.5">{chartData[0]?.visits.toLocaleString("pt-BR")} visitas registradas.</p>
                     </div>
                   </div>
                 </div>
               ) : (
                 <>
-                  {/* Evolution deltas */}
                   <div className="flex items-center gap-3 mb-3">
                     <EvolutionPill label="Visitas" delta={chartData[chartData.length - 1].visits - chartData[0].visits} />
                     <EvolutionPill label="Preço" delta={chartData[chartData.length - 1].price - chartData[0].price} isCurrency />
@@ -541,12 +583,12 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               )}
             </SectionCard>
 
-            {/* SECTION 6 — SEO */}
+            {/* SECTION 8 — SEO */}
             {item.seo_analysis_json && (
               <SeoAnalysisCard seo={item.seo_analysis_json} score={item.seo_score} found={item.seo_keywords_found} missing={item.seo_keywords_missing} />
             )}
 
-            {/* SECTION 7 — Recommendations */}
+            {/* SECTION 9 — Recommendations */}
             {recommendations.length > 0 && (
               <SectionCard title="Recomendações" icon={<Lightbulb className="h-4 w-4 text-amber-400" />}>
                 <div className="space-y-2">
@@ -639,7 +681,6 @@ function EvolutionPill({ label, delta, isCurrency }: { label: string; delta: num
 function SeoAnalysisCard({ seo, score, found, missing }: { seo: SeoAnalysis; score: number | null; found: string[] | null; missing: string[] | null }) {
   const scoreVal = score ?? seo.score ?? 0;
   const scoreColor = scoreVal >= 70 ? "text-emerald-400" : scoreVal >= 40 ? "text-amber-400" : "text-red-400";
-  const scoreBorder = scoreVal >= 70 ? "border-emerald-500/20" : scoreVal >= 40 ? "border-amber-500/20" : "border-red-500/20";
   const foundKws = found || [];
   const missingKws = missing || [];
   const relevantDetails = seo.details?.filter(d => d.relevance !== "low") || [];
@@ -669,7 +710,6 @@ function SeoAnalysisCard({ seo, score, found, missing }: { seo: SeoAnalysis; sco
             </div>
           </div>
         )}
-
         {missingKws.length > 0 && (
           <div>
             <div className="text-xs font-medium text-amber-400 mb-1.5 flex items-center gap-1">
@@ -685,7 +725,6 @@ function SeoAnalysisCard({ seo, score, found, missing }: { seo: SeoAnalysis; sco
             </p>
           </div>
         )}
-
         {relevantDetails.length > 0 && (
           <div>
             <div className="text-xs font-medium text-slate-400 mb-1.5">Detalhes ({relevantDetails.length})</div>
@@ -704,7 +743,6 @@ function SeoAnalysisCard({ seo, score, found, missing }: { seo: SeoAnalysis; sco
             </div>
           </div>
         )}
-
         {foundKws.length === 0 && missingKws.length === 0 && (
           <p className="text-xs text-slate-500 text-center py-2">Nenhuma palavra relevante encontrada para análise.</p>
         )}
