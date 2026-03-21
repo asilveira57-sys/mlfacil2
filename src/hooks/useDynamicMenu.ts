@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useUserRole } from './useUserRole';
 import { useUserAccessState } from './useUserAccessState';
+import { usePlanAllowedModuleKeys } from './useCanAccessModule';
 import { useMemo } from 'react';
 
 export interface DynamicMenuItem {
