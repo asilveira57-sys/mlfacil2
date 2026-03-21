@@ -1547,7 +1547,7 @@ async function handleEnrichSales(supabase: any, sellerId: string) {
       items_processed: totalEnriched,
       items_failed: totalFailed,
       duration_ms: duration,
-      metadata: { action: "enrich_sales" },
+      metadata_json: { action: "enrich_sales" },
     });
   }).catch(() => {});
 
@@ -1677,10 +1677,10 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
   const startTime = Date.now();
   console.log(`[rad-collector] ANALYZE started for ${sellerId}${itemId ? ` item ${itemId}` : ' (all)'}`);
 
-  await supabase.from('listing_health_logs').insert({
+   await supabase.from('listing_health_logs').insert({
     seller_id: sellerId, item_id: itemId || null, log_type: 'analysis', log_level: 'info',
     action: 'analyze_started', message: `Analysis started`, metadata_json: { scope: itemId ? 'single' : 'all' },
-  }).catch(() => {});
+  });
 
   try {
     let query = supabase.from('listing_health_current').select('*').eq('seller_id', sellerId);
@@ -1801,12 +1801,12 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       const { error } = await supabase.from('listing_health_current').upsert(updateRows.slice(i, i+100), { onConflict: 'seller_id,item_id' });
       if (error) console.warn(`[rad-collector] ANALYZE upsert err:`, error.message);
     }
-    if (newAlerts.length > 0) await supabase.from('listing_health_alerts').insert(newAlerts).catch((e: any) => console.warn(e));
-    if (newRecs.length > 0) await supabase.from('listing_health_recommendations').insert(newRecs).catch((e: any) => console.warn(e));
+    if (newAlerts.length > 0) { const { error: ae } = await supabase.from('listing_health_alerts').insert(newAlerts); if (ae) console.warn('[rad-collector] alerts insert err:', ae.message); }
+    if (newRecs.length > 0) { const { error: re } = await supabase.from('listing_health_recommendations').insert(newRecs); if (re) console.warn('[rad-collector] recs insert err:', re.message); }
     if (mediaRows.length > 0) {
       if (!itemId) await supabase.from('listing_media_analysis').delete().eq('seller_id', sellerId);
       else await supabase.from('listing_media_analysis').delete().eq('seller_id', sellerId).eq('item_id', itemId);
-      for (let i = 0; i < mediaRows.length; i += 200) await supabase.from('listing_media_analysis').insert(mediaRows.slice(i,i+200)).catch(() => {});
+      for (let i = 0; i < mediaRows.length; i += 200) { const { error: me } = await supabase.from('listing_media_analysis').insert(mediaRows.slice(i,i+200)); if (me) console.warn('[rad-collector] media insert err:', me.message); }
     }
 
     const dur = Date.now() - startTime;
@@ -1815,13 +1815,13 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       message: `Done: ${analyzed} items, ${newAlerts.length} alerts, ${newRecs.length} recs`,
       metadata_json: { analyzed, errors: errCount, alerts: newAlerts.length, recs: newRecs.length, media: mediaRows.length },
       duration_ms: dur, items_processed: analyzed, errors_count: errCount,
-    }).catch(() => {});
+    });
 
     console.log(`[rad-collector] ANALYZE done: ${analyzed} items, ${newAlerts.length} alerts, ${newRecs.length} recs, ${dur}ms`);
     return { success: true, analyzed, alerts_generated: newAlerts.length, recommendations_generated: newRecs.length, media_analyzed: mediaRows.length, errors: errCount, duration_ms: dur };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown';
-    await supabase.from('listing_health_logs').insert({ seller_id: sellerId, item_id: itemId||null, log_type:'analysis', log_level:'error', action:'analyze_failed', message: msg, duration_ms: Date.now()-startTime }).catch(()=>{});
+    await supabase.from('listing_health_logs').insert({ seller_id: sellerId, item_id: itemId||null, log_type:'analysis', log_level:'error', action:'analyze_failed', message: msg, duration_ms: Date.now()-startTime });
     return { success: false, error: msg };
   }
 }
@@ -1983,7 +1983,9 @@ Deno.serve(async (req) => {
         const syncRes = await handleSync(supabase, seller_id, startTime);
         const collRes = await handleCollection(supabase, seller_id, Date.now(), 0);
         selfChain(seller_id, "backfill", { chain_depth: 0 });
-        result = { sync: syncRes, collection: collRes, backfill: "triggered_async" };
+        // Chain analyze to compute scores, media, catalog after collection
+        selfChain(seller_id, "analyze");
+        result = { sync: syncRes, collection: collRes, backfill: "triggered_async", analyze: "triggered_async" };
         break;
 
       case "enrich_sales":
