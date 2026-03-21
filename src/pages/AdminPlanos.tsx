@@ -413,6 +413,19 @@ export default function AdminPlanos() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* ─── MODULES ─── */}
+          <TabsContent value="modules">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Módulos por Plano</CardTitle>
+                <CardDescription>Selecione quais módulos cada plano terá acesso.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <PlanModulesTab />
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </div>
     </div>
