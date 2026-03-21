@@ -197,7 +197,7 @@ export function PlanModulesTab({}: PlanModulesTabProps) {
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium">{mod.name}</span>
                             {mod.requires_connection && (
-                              <Globe className="w-3 h-3 text-muted-foreground" title="Requer integração" />
+                              <span title="Requer integração"><Globe className="w-3 h-3 text-muted-foreground" /></span>
                             )}
                             {mod.route && (
                               <code className="text-[10px] text-muted-foreground bg-muted px-1 rounded">{mod.route}</code>
