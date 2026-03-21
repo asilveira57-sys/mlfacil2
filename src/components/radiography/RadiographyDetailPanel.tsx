@@ -49,14 +49,32 @@ function buildSmartRecommendations(item: HealthCurrentItem): Recommendation[] {
   const hasVideo = !!item.has_video;
   const photosCount = item.photos_count ?? 0;
   const coverageOk = item.data_coverage_status !== "insufficient";
+  const visits = item.visits_period ?? item.visits_last ?? item.visits_30d ?? 0;
+  const hasTraffic = visits >= 20;
+  const isHealthy = (item.health_score ?? 0) > 80;
 
-  // Traffic issues
-  if (flags.includes("zero_visits") || flags.includes("visit_drop")) {
-    recs.push({ action: "Revisar título e fotos para melhorar descoberta", reason: "Sem tráfego ou queda acentuada de visitas", priority: "high", icon: <Image className="h-4 w-4" /> });
+  // Stock — always show
+  if (item.available_quantity === 0) {
+    recs.push({ action: "Repor estoque imediatamente", reason: "Estoque zerado impede vendas e perde posicionamento", priority: "high", icon: <Package className="h-4 w-4" /> });
   }
 
-  // Conversion issues
-  if (flags.includes("visits_no_conversion") || flags.includes("low_conversion")) {
+  // Exposure-first: if no traffic AND no ADS/promo, suggest exposure
+  if (!hasTraffic && !item.is_ads_active && !item.is_promotion_active) {
+    recs.push({ action: "Ativar publicidade (ADS) ou promoção", reason: "Sem tráfego e sem estratégia de exposição ativa", priority: "high", icon: <Megaphone className="h-4 w-4" /> });
+  }
+
+  // ADS active but no traffic = campaign performance issue
+  if (!hasTraffic && item.is_ads_active) {
+    recs.push({ action: "Revisar campanha de ADS", reason: "ADS ativo mas sem gerar tráfego relevante — ajustar campanha ou atratividade", priority: "high", icon: <Megaphone className="h-4 w-4" /> });
+  }
+
+  // Traffic issues
+  if (hasTraffic && (flags.includes("zero_visits") || flags.includes("visit_drop"))) {
+    recs.push({ action: "Revisar título e fotos para melhorar descoberta", reason: "Queda acentuada de visitas detectada", priority: "high", icon: <Image className="h-4 w-4" /> });
+  }
+
+  // Conversion issues — ONLY if there IS traffic
+  if (hasTraffic && (flags.includes("visits_no_conversion") || flags.includes("low_conversion"))) {
     recs.push({ action: "Revisar preço, fotos e condições de venda", reason: "Recebe visitas mas não converte em vendas", priority: "high", icon: <BarChart3 className="h-4 w-4" /> });
   }
 
@@ -65,40 +83,45 @@ function buildSmartRecommendations(item: HealthCurrentItem): Recommendation[] {
     recs.push({ action: "Avaliar competitividade do anúncio", reason: `Sem vendas há ${item.days_without_sale ?? "muitos"} dias`, priority: "high", icon: <ShoppingCart className="h-4 w-4" /> });
   }
 
-  // Stock
-  if (item.available_quantity === 0) {
-    recs.push({ action: "Repor estoque imediatamente", reason: "Estoque zerado impede vendas e perde posicionamento", priority: "high", icon: <Package className="h-4 w-4" /> });
-  }
-
-  // SEO
-  if (item.seo_score != null && item.seo_score < 40) {
+  // SEO — only if has some traffic context
+  if (item.seo_score != null && item.seo_score < 40 && hasTraffic) {
     recs.push({ action: "Otimizar título com palavras-chave relevantes", reason: "Score SEO baixo — título pode estar fraco para buscas", priority: "medium", icon: <Search className="h-4 w-4" /> });
   }
 
-  // Media — video
-  if (!hasVideo) {
-    recs.push({ action: "Adicionar vídeo ao anúncio", reason: "Anúncios com vídeo convertem até 20% mais", priority: "medium", icon: <Video className="h-4 w-4" /> });
-  }
-
-  // Media — photos
-  if (photosCount < 5 && photosCount > 0) {
-    recs.push({ action: `Adicionar mais fotos (atualmente ${photosCount})`, reason: "Recomendado ter pelo menos 5 fotos de qualidade", priority: "medium", icon: <Camera className="h-4 w-4" /> });
+  // BLOCK: Media suggestions only if has traffic (no point improving content without visibility)
+  if (hasTraffic) {
+    if (!hasVideo) {
+      recs.push({ action: "Adicionar vídeo ao anúncio", reason: "Anúncios com vídeo convertem até 20% mais", priority: isHealthy ? "low" : "medium", icon: <Video className="h-4 w-4" /> });
+    }
+    if (photosCount < 5 && photosCount > 0) {
+      recs.push({ action: `Adicionar mais fotos (atualmente ${photosCount})`, reason: "Recomendado ter pelo menos 5 fotos de qualidade", priority: isHealthy ? "low" : "medium", icon: <Camera className="h-4 w-4" /> });
+    }
   }
 
   // SMART BLOCK: Only suggest Full if NOT already Full and data is confirmed
   if (!isFull && coverageOk) {
-    recs.push({ action: "Considerar envio por Fulfillment (Full)", reason: "Logística Full melhora relevância e tempo de entrega", priority: "low", icon: <Zap className="h-4 w-4" /> });
+    recs.push({ action: "Considerar envio por Fulfillment (Full)", reason: "Logística Full melhora relevância e tempo de entrega", priority: isHealthy ? "low" : "low", icon: <Zap className="h-4 w-4" /> });
   }
 
   // SMART BLOCK: Only suggest Catalog if NOT already in catalog
   if (!hasCatalog && coverageOk) {
-    recs.push({ action: "Tentar vincular ao catálogo oficial", reason: "Catálogo aumenta exposição e confiança do comprador", priority: "low", icon: <Tag className="h-4 w-4" /> });
+    recs.push({ action: "Tentar vincular ao catálogo oficial", reason: "Catálogo aumenta exposição e confiança do comprador", priority: isHealthy ? "low" : "low", icon: <Tag className="h-4 w-4" /> });
+  }
+
+  // Promo suggestion — only if good conversion and has traffic
+  if (!item.is_promotion_active && hasTraffic && (item.conversion_rate_7d ?? 0) >= 1) {
+    recs.push({ action: "Considerar participar de promoções", reason: "Boa conversão — promoções podem escalar vendas", priority: "low", icon: <BarChart3 className="h-4 w-4" /> });
   }
 
   // Price change monitoring
   const changes = item.change_flags || [];
   if (changes.some(c => c.type === "price_increased")) {
     recs.push({ action: "Monitorar impacto do aumento de preço", reason: "Preço subiu recentemente — pode afetar conversão", priority: "medium", icon: <TrendingUp className="h-4 w-4" /> });
+  }
+
+  // Healthy items — classify as "otimização leve"
+  if (isHealthy && recs.length > 0) {
+    recs.forEach(r => { if (r.priority !== "high") r.priority = "low"; });
   }
 
   return recs.sort((a, b) => {
