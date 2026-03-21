@@ -94,6 +94,11 @@ export interface HealthCurrentItem {
   free_shipping: boolean | null;
   data_coverage_days: number | null;
   data_coverage_status: string | null;
+  // Exposure
+  is_ads_active: boolean | null;
+  ads_status: string | null;
+  is_promotion_active: boolean | null;
+  promotion_status: string | null;
   // Period-based metrics (from RPC)
   visits_period?: number | null;
   sales_period?: number | null;
