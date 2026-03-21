@@ -17,7 +17,7 @@ import {
 } from "@/types/radiography";
 import {
   HealthCurrentItem, classifyHealth, AnomalyFilter, PeriodDays,
-  LogisticsFilter, CatalogFilter, MainProblemFilter, MediaFilter,
+  LogisticsFilter, CatalogFilter, MainProblemFilter, MediaFilter, ExposureFilter,
   MAIN_PROBLEM_LABELS, getLogisticsLabel,
 } from "@/hooks/useRadiographyData";
 
