@@ -6790,21 +6790,81 @@ export type Database = {
           },
         ]
       }
+      listing_health_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string
+          data_json: Json | null
+          id: string
+          is_read: boolean
+          is_resolved: boolean
+          item_id: string
+          message: string
+          resolved_at: string | null
+          seller_id: string
+          severity: string
+          tenant_id: string | null
+          title: string
+        }
+        Insert: {
+          alert_type: string
+          created_at?: string
+          data_json?: Json | null
+          id?: string
+          is_read?: boolean
+          is_resolved?: boolean
+          item_id: string
+          message: string
+          resolved_at?: string | null
+          seller_id: string
+          severity?: string
+          tenant_id?: string | null
+          title: string
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string
+          data_json?: Json | null
+          id?: string
+          is_read?: boolean
+          is_resolved?: boolean
+          item_id?: string
+          message?: string
+          resolved_at?: string | null
+          seller_id?: string
+          severity?: string
+          tenant_id?: string | null
+          title?: string
+        }
+        Relationships: []
+      }
       listing_health_current: {
         Row: {
           alerts_json: Json | null
           anomaly_flags: string[] | null
           available_quantity: number | null
           catalog_listing: boolean | null
+          catalog_product_id: string | null
           change_flags: Json | null
+          conversion_rate_30d: number | null
           conversion_rate_7d: number | null
+          data_coverage_days: number | null
+          data_coverage_status: string | null
           days_without_sale: number | null
+          free_shipping: boolean | null
+          has_video: boolean | null
+          health_score: number | null
+          health_status: string | null
           id: string
           item_id: string
           last_collected_at: string | null
           last_sale_at: string | null
           listing_status: string | null
           listing_type: string | null
+          logistic_type: string | null
+          main_problem: string | null
+          permalink: string | null
+          photos_count: number | null
           prev_available_quantity: number | null
           prev_catalog_listing: boolean | null
           prev_listing_status: string | null
@@ -6812,7 +6872,10 @@ export type Database = {
           prev_shipping_mode: string | null
           prev_visits: number | null
           price: number | null
+          revenue_30d: number | null
+          revenue_60d: number | null
           sales_count_30d: number | null
+          sales_count_60d: number | null
           sales_count_7d: number | null
           seller_id: string
           seo_analysis_json: Json | null
@@ -6820,9 +6883,16 @@ export type Database = {
           seo_keywords_missing: string[] | null
           seo_score: number | null
           shipping_mode: string | null
+          tenant_id: string | null
+          thumbnail: string | null
+          title: string | null
           units_sold_30d: number | null
+          units_sold_60d: number | null
           units_sold_7d: number | null
           updated_at: string
+          visits_30d: number | null
+          visits_60d: number | null
+          visits_7d: number | null
           visits_last: number | null
         }
         Insert: {
@@ -6830,15 +6900,27 @@ export type Database = {
           anomaly_flags?: string[] | null
           available_quantity?: number | null
           catalog_listing?: boolean | null
+          catalog_product_id?: string | null
           change_flags?: Json | null
+          conversion_rate_30d?: number | null
           conversion_rate_7d?: number | null
+          data_coverage_days?: number | null
+          data_coverage_status?: string | null
           days_without_sale?: number | null
+          free_shipping?: boolean | null
+          has_video?: boolean | null
+          health_score?: number | null
+          health_status?: string | null
           id?: string
           item_id: string
           last_collected_at?: string | null
           last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
+          logistic_type?: string | null
+          main_problem?: string | null
+          permalink?: string | null
+          photos_count?: number | null
           prev_available_quantity?: number | null
           prev_catalog_listing?: boolean | null
           prev_listing_status?: string | null
@@ -6846,7 +6928,10 @@ export type Database = {
           prev_shipping_mode?: string | null
           prev_visits?: number | null
           price?: number | null
+          revenue_30d?: number | null
+          revenue_60d?: number | null
           sales_count_30d?: number | null
+          sales_count_60d?: number | null
           sales_count_7d?: number | null
           seller_id: string
           seo_analysis_json?: Json | null
@@ -6854,9 +6939,16 @@ export type Database = {
           seo_keywords_missing?: string[] | null
           seo_score?: number | null
           shipping_mode?: string | null
+          tenant_id?: string | null
+          thumbnail?: string | null
+          title?: string | null
           units_sold_30d?: number | null
+          units_sold_60d?: number | null
           units_sold_7d?: number | null
           updated_at?: string
+          visits_30d?: number | null
+          visits_60d?: number | null
+          visits_7d?: number | null
           visits_last?: number | null
         }
         Update: {
@@ -6864,15 +6956,27 @@ export type Database = {
           anomaly_flags?: string[] | null
           available_quantity?: number | null
           catalog_listing?: boolean | null
+          catalog_product_id?: string | null
           change_flags?: Json | null
+          conversion_rate_30d?: number | null
           conversion_rate_7d?: number | null
+          data_coverage_days?: number | null
+          data_coverage_status?: string | null
           days_without_sale?: number | null
+          free_shipping?: boolean | null
+          has_video?: boolean | null
+          health_score?: number | null
+          health_status?: string | null
           id?: string
           item_id?: string
           last_collected_at?: string | null
           last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
+          logistic_type?: string | null
+          main_problem?: string | null
+          permalink?: string | null
+          photos_count?: number | null
           prev_available_quantity?: number | null
           prev_catalog_listing?: boolean | null
           prev_listing_status?: string | null
@@ -6880,7 +6984,10 @@ export type Database = {
           prev_shipping_mode?: string | null
           prev_visits?: number | null
           price?: number | null
+          revenue_30d?: number | null
+          revenue_60d?: number | null
           sales_count_30d?: number | null
+          sales_count_60d?: number | null
           sales_count_7d?: number | null
           seller_id?: string
           seo_analysis_json?: Json | null
@@ -6888,9 +6995,16 @@ export type Database = {
           seo_keywords_missing?: string[] | null
           seo_score?: number | null
           shipping_mode?: string | null
+          tenant_id?: string | null
+          thumbnail?: string | null
+          title?: string | null
           units_sold_30d?: number | null
+          units_sold_60d?: number | null
           units_sold_7d?: number | null
           updated_at?: string
+          visits_30d?: number | null
+          visits_60d?: number | null
+          visits_7d?: number | null
           visits_last?: number | null
         }
         Relationships: []
@@ -6899,15 +7013,24 @@ export type Database = {
         Row: {
           available_quantity: number | null
           catalog_listing: boolean | null
+          catalog_product_id: string | null
           collected_at: string
+          conversion_rate: number | null
           created_at: string
           days_without_sale: number | null
+          free_shipping: boolean | null
+          has_video: boolean | null
+          health_score: number | null
+          health_status: string | null
           id: string
           item_id: string
           last_sale_at: string | null
           listing_status: string | null
           listing_type: string | null
+          logistic_type: string | null
+          photos_count: number | null
           price: number | null
+          revenue: number | null
           sales_count: number | null
           seller_id: string
           shipping_mode: string | null
@@ -6915,19 +7038,30 @@ export type Database = {
           units_sold: number | null
           visits: number | null
           window_days: number
+          window_end: string | null
+          window_start: string | null
         }
         Insert: {
           available_quantity?: number | null
           catalog_listing?: boolean | null
+          catalog_product_id?: string | null
           collected_at?: string
+          conversion_rate?: number | null
           created_at?: string
           days_without_sale?: number | null
+          free_shipping?: boolean | null
+          has_video?: boolean | null
+          health_score?: number | null
+          health_status?: string | null
           id?: string
           item_id: string
           last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
+          logistic_type?: string | null
+          photos_count?: number | null
           price?: number | null
+          revenue?: number | null
           sales_count?: number | null
           seller_id: string
           shipping_mode?: string | null
@@ -6935,19 +7069,30 @@ export type Database = {
           units_sold?: number | null
           visits?: number | null
           window_days?: number
+          window_end?: string | null
+          window_start?: string | null
         }
         Update: {
           available_quantity?: number | null
           catalog_listing?: boolean | null
+          catalog_product_id?: string | null
           collected_at?: string
+          conversion_rate?: number | null
           created_at?: string
           days_without_sale?: number | null
+          free_shipping?: boolean | null
+          has_video?: boolean | null
+          health_score?: number | null
+          health_status?: string | null
           id?: string
           item_id?: string
           last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
+          logistic_type?: string | null
+          photos_count?: number | null
           price?: number | null
+          revenue?: number | null
           sales_count?: number | null
           seller_id?: string
           shipping_mode?: string | null
@@ -6955,6 +7100,197 @@ export type Database = {
           units_sold?: number | null
           visits?: number | null
           window_days?: number
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Relationships: []
+      }
+      listing_health_logs: {
+        Row: {
+          action: string
+          created_at: string
+          duration_ms: number | null
+          errors_count: number | null
+          id: string
+          item_id: string | null
+          items_processed: number | null
+          log_level: string
+          log_type: string
+          message: string | null
+          metadata_json: Json | null
+          seller_id: string | null
+          tenant_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          duration_ms?: number | null
+          errors_count?: number | null
+          id?: string
+          item_id?: string | null
+          items_processed?: number | null
+          log_level?: string
+          log_type: string
+          message?: string | null
+          metadata_json?: Json | null
+          seller_id?: string | null
+          tenant_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          duration_ms?: number | null
+          errors_count?: number | null
+          id?: string
+          item_id?: string | null
+          items_processed?: number | null
+          log_level?: string
+          log_type?: string
+          message?: string | null
+          metadata_json?: Json | null
+          seller_id?: string | null
+          tenant_id?: string | null
+        }
+        Relationships: []
+      }
+      listing_health_recommendations: {
+        Row: {
+          applied_at: string | null
+          category: string | null
+          created_at: string
+          description: string
+          dismissed_at: string | null
+          estimated_impact: string | null
+          id: string
+          item_id: string
+          priority: string
+          recommendation_type: string
+          seller_id: string
+          status: string
+          tenant_id: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          applied_at?: string | null
+          category?: string | null
+          created_at?: string
+          description: string
+          dismissed_at?: string | null
+          estimated_impact?: string | null
+          id?: string
+          item_id: string
+          priority?: string
+          recommendation_type: string
+          seller_id: string
+          status?: string
+          tenant_id?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          applied_at?: string | null
+          category?: string | null
+          created_at?: string
+          description?: string
+          dismissed_at?: string | null
+          estimated_impact?: string | null
+          id?: string
+          item_id?: string
+          priority?: string
+          recommendation_type?: string
+          seller_id?: string
+          status?: string
+          tenant_id?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      listing_health_rules: {
+        Row: {
+          category: string
+          condition_json: Json
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          recommendation_template: string | null
+          rule_key: string
+          rule_name: string
+          severity: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          condition_json: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          recommendation_template?: string | null
+          rule_key: string
+          rule_name: string
+          severity?: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          condition_json?: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          recommendation_template?: string | null
+          rule_key?: string
+          rule_name?: string
+          severity?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      listing_media_analysis: {
+        Row: {
+          analysis_json: Json | null
+          analyzed_at: string
+          created_at: string
+          has_video: boolean | null
+          id: string
+          item_id: string
+          photo_urls: string[] | null
+          photos_count: number | null
+          quality_score: number | null
+          seller_id: string
+          tenant_id: string | null
+          video_url: string | null
+        }
+        Insert: {
+          analysis_json?: Json | null
+          analyzed_at?: string
+          created_at?: string
+          has_video?: boolean | null
+          id?: string
+          item_id: string
+          photo_urls?: string[] | null
+          photos_count?: number | null
+          quality_score?: number | null
+          seller_id: string
+          tenant_id?: string | null
+          video_url?: string | null
+        }
+        Update: {
+          analysis_json?: Json | null
+          analyzed_at?: string
+          created_at?: string
+          has_video?: boolean | null
+          id?: string
+          item_id?: string
+          photo_urls?: string[] | null
+          photos_count?: number | null
+          quality_score?: number | null
+          seller_id?: string
+          tenant_id?: string | null
+          video_url?: string | null
         }
         Relationships: []
       }
