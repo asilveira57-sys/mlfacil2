@@ -1608,19 +1608,19 @@ async function handleRefreshMarketKeywords(supabase: any, categoryId?: string) {
   }
 }
 
-// --- FULL SEO ANALYSIS FOR ITEMS (Two-layer) ---
+// --- FULL SEO ANALYSIS FOR ITEMS (4-layer: Title + Description + Attributes + Model + Keywords) ---
 async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: string[], tenantId?: string | null) {
   if (!itemIds || itemIds.length === 0) return;
   const startTime = Date.now();
-  console.log(`[rad-collector] SEO analysis for ${sellerId}: ${itemIds.length} items`);
+  console.log(`[rad-collector] SEO 4-layer analysis for ${sellerId}: ${itemIds.length} items`);
 
   await supabase.from('seo_analysis_logs').insert({
     seller_id: sellerId, tenant_id: tenantId, status: 'started', action: 'SEO_ANALYSIS_STARTED',
-    message: `Analyzing ${itemIds.length} items`,
+    message: `4-layer analyzing ${itemIds.length} items`,
   });
 
   try {
-    // 1. Get item details
+    // 1. Get item details from cache
     const itemDetails = new Map<string, { title: string; category_id: string }>();
     for (let i = 0; i < itemIds.length; i += 500) {
       const { data } = await supabase.from("meli_listings_cache")
@@ -1630,16 +1630,62 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
     }
     if (itemDetails.size === 0) return;
 
-    // 2. Get health data for photo/video
-    const healthMap = new Map<string, any>();
-    for (let i = 0; i < itemIds.length; i += 500) {
-      const { data } = await supabase.from('listing_health_current')
-        .select('item_id, photos_count, has_video').eq('seller_id', sellerId)
-        .in('item_id', itemIds.slice(i, i + 500));
-      if (data) for (const r of data) healthMap.set(r.item_id, r);
-    }
+    // 2. Get ML access token for fetching descriptions/attributes
+    const { data: mlAccount } = await supabase.from('ml_accounts')
+      .select('access_token, ml_user_id').eq('ml_user_id', sellerId).eq('is_active', true).maybeSingle();
+    const accessToken = mlAccount?.access_token || null;
+    console.log(`[rad-collector] SEO: ML token ${accessToken ? 'available' : 'NOT available'} for seller ${sellerId}`);
 
-    // 3. Get keywords from market_keywords_cache
+    // 3. Fetch item descriptions + attributes from ML API (batched)
+    const itemExtras = new Map<string, { description: string | null; attributes: any[]; }>();
+    if (accessToken) {
+      const allItemIds = [...itemDetails.keys()];
+      // Batch multiget for attributes
+      for (let i = 0; i < allItemIds.length; i += 20) {
+        if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 15000) break;
+        const batch = allItemIds.slice(i, i + 20);
+        const idsParam = batch.join(',');
+        try {
+          const res = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,attributes`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (res.ok) {
+            const results = await res.json();
+            for (const r of results) {
+              if (r.code === 200 && r.body) {
+                itemExtras.set(r.body.id, {
+                  description: null,
+                  attributes: r.body.attributes || [],
+                });
+              }
+            }
+          }
+        } catch (e) { console.warn('[rad-collector] SEO multiget error:', e); }
+      }
+
+      // Fetch descriptions (individual endpoint — batch 5 at a time to be gentle)
+      for (let i = 0; i < allItemIds.length; i += 5) {
+        if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 10000) break;
+        const batch = allItemIds.slice(i, i + 5);
+        const descPromises = batch.map(async (itemId) => {
+          try {
+            const res = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (res.ok) {
+              const desc = await res.json();
+              const existing = itemExtras.get(itemId) || { description: null, attributes: [] };
+              existing.description = desc.plain_text || desc.text || null;
+              itemExtras.set(itemId, existing);
+            }
+          } catch { /* skip */ }
+        });
+        await Promise.all(descPromises);
+      }
+    }
+    console.log(`[rad-collector] SEO: Fetched extras for ${itemExtras.size}/${itemDetails.size} items`);
+
+    // 4. Get keywords from market_keywords_cache
     const categories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
     const keywordsByCategory = new Map<string, Array<{ keyword: string; normalized: string; weight: number }>>();
     for (let i = 0; i < categories.length; i += 50) {
@@ -1683,35 +1729,54 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
     console.log(`[rad-collector] SEO: ${itemDetails.size} items, ${keywordsByCategory.size} categories with keywords`);
 
-    // 4. Analyze each item
+    // 5. Analyze each item with 4 layers
     let analyzed = 0;
     const seoRows: any[] = [];
 
     for (const [itemId, detail] of itemDetails) {
-      const health = healthMap.get(itemId) || {};
       const catKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 30);
+      const extras = itemExtras.get(itemId) || { description: null, attributes: [] };
 
-      const structural = computeStructuralSeo({
-        title: detail.title, photos_count: health.photos_count || 0, has_video: health.has_video || false,
-      });
+      // Layer 1: Title (40%)
+      const titleResult = computeTitleSeo(detail.title, catKeywords);
 
+      // Layer 2: Description (25%)
+      const descResult = computeDescriptionSeo(extras.description, detail.title, catKeywords);
+
+      // Layer 3: Attributes (20%)
+      const attrResult = computeAttributesSeo(extras.attributes);
+
+      // Layer 4: Model (15%)
+      const modelResult = computeModelSeo(extras.attributes);
+
+      // Keyword adherence (for keyword section display)
       const titleTokens = tokenize(detail.title);
       const adherence = computeKeywordAdherence(titleTokens, catKeywords);
 
-      const seoScore = Math.round(structural.score * 0.6 + adherence.score * 0.4);
+      // Final score: weighted average
+      const seoScore = Math.round(
+        titleResult.score * 0.40 +
+        descResult.score * 0.25 +
+        attrResult.score * 0.20 +
+        modelResult.score * 0.15
+      );
       const seoGrade = seoScore >= 85 ? 'A' : seoScore >= 70 ? 'B' : seoScore >= 50 ? 'C' : 'D';
 
-      const allIssues = [...structural.issues];
+      // Merge all issues & suggestions
+      const allIssues = [...titleResult.issues, ...descResult.issues, ...attrResult.issues, ...modelResult.issues];
       if (adherence.coverage_ratio < 0.3 && catKeywords.length > 0) allIssues.push('Baixa cobertura de palavras-chave relevantes');
       if (adherence.irrelevant.length > 0) allIssues.push('Termos genéricos detectados no título');
 
-      const allSuggestions = [...structural.suggestions];
+      const allSuggestions = [...titleResult.suggestions, ...descResult.suggestions, ...attrResult.suggestions, ...modelResult.suggestions];
       if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
-      if (adherence.irrelevant.length > 0) allSuggestions.push('Remover termos genéricos que não ajudam no ranqueamento');
 
       seoRows.push({ seller_id: sellerId, item_id: itemId, tenant_id: tenantId,
-        seo_structural_score: structural.score, seo_keyword_score: adherence.score,
+        seo_structural_score: titleResult.score, seo_keyword_score: adherence.score,
         seo_score: seoScore, seo_grade: seoGrade,
+        title_score: titleResult.score, description_score: descResult.score,
+        attributes_score: attrResult.score, model_score: modelResult.score,
+        description_length: descResult.length, keyword_density: descResult.density,
+        missing_attributes: attrResult.missing, weak_attributes: attrResult.weak,
         keyword_coverage_ratio: Number(adherence.coverage_ratio.toFixed(4)),
         missing_keywords: adherence.missing.slice(0, 15),
         irrelevant_keywords: adherence.irrelevant.slice(0, 10),
@@ -1720,7 +1785,11 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
         keywords_faltantes: adherence.missing.slice(0, 15),
         issues: allIssues, suggestions: allSuggestions,
         analysis_details: {
-          structural, adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length, details: adherence.details.filter(d => d.relevance !== 'low').slice(0, 15) },
+          title: { score: titleResult.score, issues: titleResult.issues, suggestions: titleResult.suggestions },
+          description: { score: descResult.score, length: descResult.length, density: descResult.density, issues: descResult.issues, suggestions: descResult.suggestions },
+          attributes: { score: attrResult.score, total: attrResult.total, filled: attrResult.filled, missing: attrResult.missing, weak: attrResult.weak, issues: attrResult.issues, suggestions: attrResult.suggestions },
+          model: { score: modelResult.score, value: modelResult.modelValue, issues: modelResult.issues, suggestions: modelResult.suggestions },
+          adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length },
           analyzed_at: new Date().toISOString(),
         },
         updated_at: new Date().toISOString(),
@@ -1728,11 +1797,21 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
       // Update listing_health_current
       await supabase.from("listing_health_current").update({
-        seo_score: seoScore, seo_grade: seoGrade, seo_structural_score: structural.score, seo_keyword_score: adherence.score,
+        seo_score: seoScore, seo_grade: seoGrade,
+        seo_structural_score: titleResult.score, seo_keyword_score: adherence.score,
+        seo_title_score: titleResult.score, seo_description_score: descResult.score,
+        seo_attributes_score: attrResult.score, seo_model_score: modelResult.score,
+        seo_description_length: descResult.length,
         seo_keywords_found: adherence.found.slice(0, 10), seo_keywords_missing: adherence.missing.slice(0, 10),
         seo_analysis_json: {
-          structural_score: structural.score, keyword_score: adherence.score, score: seoScore, grade: seoGrade,
+          score: seoScore, grade: seoGrade,
+          title_score: titleResult.score, description_score: descResult.score,
+          attributes_score: attrResult.score, model_score: modelResult.score,
+          keyword_score: adherence.score,
+          description_length: descResult.length, keyword_density: descResult.density,
           total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
+          missing_attributes: attrResult.missing.slice(0, 5), weak_attributes: attrResult.weak.slice(0, 5),
+          model_value: modelResult.modelValue,
           irrelevant_keywords: adherence.irrelevant.slice(0, 10),
           issues: allIssues, suggestions: allSuggestions,
           details: adherence.details.filter(d => d.relevance !== 'low').slice(0, 15),
@@ -1755,11 +1834,11 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
     await supabase.from('seo_analysis_logs').insert({
       seller_id: sellerId, tenant_id: tenantId, status: 'completed', action: 'SEO_ANALYSIS_COMPLETED',
       score: analyzed, execution_time_ms: dur,
-      message: `${analyzed} items analyzed`,
-      metadata_json: { items_analyzed: analyzed, categories_with_keywords: keywordsByCategory.size },
+      message: `${analyzed} items analyzed (4-layer)`,
+      metadata_json: { items_analyzed: analyzed, categories_with_keywords: keywordsByCategory.size, items_with_extras: itemExtras.size },
     });
 
-    console.log(`[rad-collector] SEO: ${analyzed} items analyzed, ${dur}ms`);
+    console.log(`[rad-collector] SEO 4-layer: ${analyzed} items analyzed, ${dur}ms`);
   } catch (err) {
     console.warn(`[rad-collector] SEO analysis error:`, err);
     await supabase.from('seo_analysis_logs').insert({
@@ -1768,7 +1847,6 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
     });
   }
 }
-
 // ============================================================================
 // ENRICH SALES — Re-enrich all listing_health_current with sales data
 // without re-fetching visits from ML API
