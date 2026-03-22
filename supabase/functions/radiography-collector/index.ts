@@ -1244,13 +1244,20 @@ const GENERIC_IRRELEVANT_WORDS = new Set([
 function normalizeText(text: string): string {
   return text.toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^a-z0-9x\s]/g, " ")  // keep 'x' for measurements like 30x15
     .replace(/\s+/g, " ")
     .trim();
 }
 
+// Measurement pattern: digits+x+digits (e.g. 30x15, 110x74, 2x1)
+const MEASUREMENT_RE = /^\d+x\d+$/;
+
 function tokenize(text: string): string[] {
-  return normalizeText(text).split(" ").filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+  return normalizeText(text).split(" ").filter(w => {
+    if (SEO_STOPWORDS.has(w)) return false;
+    if (MEASUREMENT_RE.test(w)) return true;  // keep measurements regardless of length
+    return w.length > 2;
+  });
 }
 
 function checkKeywordInText(keyword: string, normalizedTitle: string): boolean {
@@ -1468,9 +1475,11 @@ function computeModelSeo(attributes: any[]): { score: number; modelValue: string
   return { score: Math.max(0, Math.min(score, 100)), modelValue, issues, suggestions };
 }
 
-// --- KEYWORD ADHERENCE (Tendências / Sales keywords) ---
-function computeKeywordAdherence(
-  titleTokens: string[],
+// --- KEYWORD ADHERENCE (multi-field: title + description + attributes) ---
+function computeKeywordAdherenceMultiField(
+  titleText: string,
+  descriptionText: string | null,
+  attributeTexts: string[],
   keywords: Array<{ keyword: string; normalized: string; weight: number }>
 ): {
   score: number;
@@ -1478,29 +1487,49 @@ function computeKeywordAdherence(
   found: string[];
   missing: string[];
   irrelevant: string[];
-  details: Array<{ keyword: string; found_in_title: boolean; relevance: string; weight: number }>;
+  details: Array<{ keyword: string; weight: number; matched_in_title: boolean; matched_in_description: boolean; matched_in_attributes: boolean; matched_overall: boolean }>;
 } {
   if (keywords.length === 0) return { score: 0, coverage_ratio: 0, found: [], missing: [], irrelevant: [], details: [] };
+
+  const titleNorm = normalizeText(titleText);
+  const titleTokens = tokenize(titleText);
+  const descNorm = descriptionText ? normalizeText(descriptionText) : '';
+  const attrNorm = attributeTexts.map(a => normalizeText(a)).join(' ');
 
   let totalWeightedScore = 0;
   let maxPossibleScore = 0;
   const found: string[] = [];
   const missing: string[] = [];
-  const details: Array<{ keyword: string; found_in_title: boolean; relevance: string; weight: number }> = [];
+  const details: Array<{ keyword: string; weight: number; matched_in_title: boolean; matched_in_description: boolean; matched_in_attributes: boolean; matched_overall: boolean }> = [];
 
   for (const kw of keywords) {
-    const kwTokens = kw.normalized.split(" ").filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+    const kwTokens = kw.normalized.split(" ").filter(w => {
+      if (SEO_STOPWORDS.has(w)) return false;
+      if (MEASUREMENT_RE.test(w)) return true;
+      return w.length > 2;
+    });
     if (kwTokens.length === 0) continue;
     maxPossibleScore += kw.weight;
 
-    const titleMatch = kwTokens.filter(t => titleTokens.some(tt => tt === t || tt.includes(t) || t.includes(tt))).length / kwTokens.length;
-    const foundInTitle = titleMatch >= 0.7;
-    if (foundInTitle) { totalWeightedScore += kw.weight; found.push(kw.keyword); }
+    // Mode A: token match (partial — each token of the keyword checked individually)
+    const titleMatchRatio = kwTokens.filter(t => titleTokens.some(tt => tt === t || tt.includes(t) || t.includes(tt))).length / kwTokens.length;
+    const matchedInTitle = titleMatchRatio >= 0.7;
 
-    const relevance = titleMatch >= 0.5 ? 'high' : titleMatch >= 0.25 ? 'medium' : 'low';
-    details.push({ keyword: kw.keyword, found_in_title: foundInTitle, relevance, weight: kw.weight });
+    // Mode B: also check description and attributes for compound terms
+    const matchedInDesc = descNorm ? checkKeywordInText(kw.keyword, descNorm) : false;
+    const matchedInAttrs = attrNorm ? checkKeywordInText(kw.keyword, attrNorm) : false;
+    const matchedOverall = matchedInTitle || matchedInDesc || matchedInAttrs;
 
-    if (!foundInTitle && relevance !== 'low') missing.push(kw.keyword);
+    // Weighted scoring: title match = full weight, desc/attrs = partial
+    if (matchedOverall) {
+      const fieldWeight = matchedInTitle ? 1.0 : matchedInDesc ? 0.7 : 0.5;
+      totalWeightedScore += kw.weight * fieldWeight;
+      found.push(kw.keyword);
+    }
+
+    details.push({ keyword: kw.keyword, weight: kw.weight, matched_in_title: matchedInTitle, matched_in_description: matchedInDesc, matched_in_attributes: matchedInAttrs, matched_overall: matchedOverall });
+
+    if (!matchedOverall) missing.push(kw.keyword);
   }
 
   const coverage_ratio = keywords.length > 0 ? found.length / keywords.length : 0;
@@ -1508,8 +1537,8 @@ function computeKeywordAdherence(
 
   // Detect irrelevant words in title
   const irrelevant: string[] = [];
-  const titleText = titleTokens.join(' ');
-  for (const word of GENERIC_IRRELEVANT_WORDS) { if (titleText.includes(normalizeText(word))) irrelevant.push(word); }
+  const titleJoined = titleTokens.join(' ');
+  for (const word of GENERIC_IRRELEVANT_WORDS) { if (titleJoined.includes(normalizeText(word))) irrelevant.push(word); }
   const wordCount = new Map<string, number>();
   for (const t of titleTokens) { wordCount.set(t, (wordCount.get(t) || 0) + 1); }
   for (const [w, c] of wordCount) { if (c >= 3) irrelevant.push(`${w} (${c}x)`); }
@@ -1749,9 +1778,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       // Layer 4: Model (15%)
       const modelResult = computeModelSeo(extras.attributes);
 
-      // Keyword adherence (for keyword section display)
-      const titleTokens = tokenize(detail.title);
-      const adherence = computeKeywordAdherence(titleTokens, catKeywords);
+      // Keyword adherence (multi-field: title + description + attributes)
+      const attrTexts = (extras.attributes || []).map((a: any) => `${a.name || ''} ${a.value_name || ''}`);
+      const adherence = computeKeywordAdherenceMultiField(detail.title, extras.description, attrTexts, catKeywords);
 
       // Final score: weighted average
       const seoScore = Math.round(
@@ -1769,6 +1798,16 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
       const allSuggestions = [...titleResult.suggestions, ...descResult.suggestions, ...attrResult.suggestions, ...modelResult.suggestions];
       if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
+
+      // Category keyword details with match locations
+      const categoryKeywordDetails = adherence.details.map(d => ({
+        keyword: d.keyword,
+        weight: d.weight,
+        matched_in_title: d.matched_in_title,
+        matched_in_description: d.matched_in_description,
+        matched_in_attributes: d.matched_in_attributes,
+        matched_overall: d.matched_overall,
+      }));
 
       seoRows.push({ seller_id: sellerId, item_id: itemId, tenant_id: tenantId,
         seo_structural_score: titleResult.score, seo_keyword_score: adherence.score,
@@ -1814,7 +1853,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           model_value: modelResult.modelValue,
           irrelevant_keywords: adherence.irrelevant.slice(0, 10),
           issues: allIssues, suggestions: allSuggestions,
-          details: adherence.details.filter(d => d.relevance !== 'low').slice(0, 15),
+          details: categoryKeywordDetails,
           analyzed_at: new Date().toISOString(),
         },
         seo_updated_at: new Date().toISOString(),
@@ -2221,14 +2260,27 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       if (data) for (const r of data) if (!detailMap.has(r.item_id)) detailMap.set(r.item_id, r);
     }
 
-    // Photos from API
+    // Photos from API — capture per-image resolution
     const token = await getValidToken(supabase, sellerId);
-    const photosMap = new Map<string, { count: number; hasVideo: boolean }>();
+    const photosMap = new Map<string, { count: number; hasVideo: boolean; images: Array<{ url: string; width: number; height: number }> }>();
     if (token) {
       for (let i = 0; i < allIds.length; i += 20) {
         try {
           const resp = await fetch(`https://api.mercadolibre.com/items?ids=${allIds.slice(i,i+20).join(',')}&attributes=id,pictures,video_id`, { headers: { Authorization: `Bearer ${token}` } });
-          if (resp.ok) { const d = await resp.json(); for (const e of d) if (e.code===200&&e.body) photosMap.set(e.body.id, { count: Array.isArray(e.body.pictures)?e.body.pictures.length:0, hasVideo: !!e.body.video_id }); }
+          if (resp.ok) {
+            const d = await resp.json();
+            for (const e of d) {
+              if (e.code === 200 && e.body) {
+                const pics = Array.isArray(e.body.pictures) ? e.body.pictures : [];
+                const images = pics.map((p: any) => ({
+                  url: p.secure_url || p.url || '',
+                  width: p.max_size ? parseInt(String(p.max_size).split('x')[0]) || 0 : 0,
+                  height: p.max_size ? parseInt(String(p.max_size).split('x')[1]) || 0 : 0,
+                }));
+                photosMap.set(e.body.id, { count: pics.length, hasVideo: !!e.body.video_id, images });
+              }
+            }
+          }
         } catch {}
         await sleep(200);
         if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 10000) break;
@@ -2314,7 +2366,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     for (const item of items) {
       try {
         const listing = detailMap.get(item.item_id) || {};
-        const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false };
+        const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false, images: [] };
         const covDays = covByItem.get(item.item_id) || 0;
         const title = listing.title || item.title || '';
         const merged = { ...item, ...listing, is_ads_active: adsActiveSet.has(item.item_id) || null, is_promotion_active: promoActiveSet.has(item.item_id) || null };
@@ -2347,12 +2399,45 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           });
         }
 
+        // Per-image resolution analysis
+        const imageAnalysis = (photos.images || []).map((img: any, idx: number) => {
+          const w = img.width || 0;
+          const h = img.height || 0;
+          const is1200 = w >= 1200 && h >= 1200;
+          const isSquare = w > 0 && h > 0 && Math.abs(w - h) < 50;
+          return {
+            image_index: idx + 1,
+            width: w, height: h,
+            is_square: isSquare,
+            is_1200x1200: is1200,
+            is_primary: idx === 0,
+            resolution_status: w === 0 ? 'unknown' : is1200 ? 'ok' : 'review',
+            recommendation: w === 0 ? 'Dimensão indisponível' : is1200 ? null : 'Recomenda-se ajustar para 1200x1200 px',
+          };
+        });
+        const imagesAt1200 = imageAnalysis.filter((i: any) => i.is_1200x1200).length;
+        const totalImages = imageAnalysis.length;
+        const resolutionRatio = totalImages > 0 ? imagesAt1200 / totalImages : 0;
+
+        // Media quality score with resolution component
+        let mediaQuality = 0;
+        if (photos.count >= 6) mediaQuality += 35; else if (photos.count >= 3) mediaQuality += 20; else if (photos.count >= 1) mediaQuality += 10;
+        if (photos.hasVideo) mediaQuality += 25;
+        if (resolutionRatio >= 1) mediaQuality += 30; else if (resolutionRatio >= 0.7) mediaQuality += 20; else if (resolutionRatio >= 0.3) mediaQuality += 10;
+        if (totalImages > 0 && imageAnalysis[0]?.is_1200x1200) mediaQuality += 10;
+        mediaQuality = Math.min(mediaQuality, 100);
+
         // Media
         mediaRows.push({
           seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId,
           photos_count: photos.count, has_video: photos.hasVideo,
-          quality_score: photos.count >= 6 && photos.hasVideo ? 100 : photos.count >= 6 ? 70 : photos.count >= 3 ? 50 : photos.count >= 1 ? 25 : 0,
-          analysis_json: { photos_count: photos.count, has_video: photos.hasVideo, title_length: title.length },
+          quality_score: mediaQuality,
+          analysis_json: {
+            photos_count: photos.count, has_video: photos.hasVideo,
+            images_at_1200: imagesAt1200, total_images: totalImages,
+            resolution_ratio: Number(resolutionRatio.toFixed(2)),
+            per_image: imageAnalysis,
+          },
           analyzed_at: new Date().toISOString(),
         });
 
