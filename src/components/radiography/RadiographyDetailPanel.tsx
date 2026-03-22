@@ -667,7 +667,15 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
 
             {/* SECTION 8 — SEO */}
             {item.seo_analysis_json && (
-              <SeoAnalysisCard seo={item.seo_analysis_json} score={item.seo_score} found={item.seo_keywords_found} missing={item.seo_keywords_missing} />
+              <SeoAnalysisCard
+                seo={item.seo_analysis_json}
+                score={item.seo_score}
+                found={item.seo_keywords_found}
+                missing={item.seo_keywords_missing}
+                structuralScore={item.seo_structural_score}
+                keywordScore={item.seo_keyword_score}
+                grade={item.seo_grade}
+              />
             )}
 
             {/* SECTION 9 — Recommendations */}
