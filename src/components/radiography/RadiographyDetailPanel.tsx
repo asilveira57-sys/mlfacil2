@@ -1458,13 +1458,13 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           <div className="p-2.5 rounded-md bg-slate-800/50 border border-slate-700/50">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] text-slate-500">Título atual</span>
-              <span className={`text-[10px] font-mono ${(item.title?.length || 0) > 60 ? 'text-red-400' : 'text-slate-500'}`}>
-                {item.title?.length || 0}/60 chars
+              <span className={`text-[10px] font-mono ${(titleData?.current_length || titleAnalysis?.length || item.title?.length || 0) > 60 ? 'text-red-400' : 'text-slate-500'}`}>
+                {titleData?.current_length || titleAnalysis?.length || item.title?.length || 0}/60 chars
               </span>
             </div>
-            <p className="text-sm text-slate-300">{item.title || "—"}</p>
-            {(item.title?.length || 0) > 60 && (
-              <p className="text-[10px] text-red-400 mt-1">⚠️ Excede o limite de 60 caracteres</p>
+            <p className="text-sm text-slate-300">{titleData?.current_title || item.title || "—"}</p>
+            {(item.title?.length || 0) > (titleData?.current_length || titleAnalysis?.length || 61) && (
+              <p className="text-[10px] text-slate-500 italic mt-1">Variação removida do cálculo de caracteres</p>
             )}
           </div>
 
