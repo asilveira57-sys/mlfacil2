@@ -15,6 +15,7 @@ import {
   BarChart3, ArrowUpDown, AlertOctagon, Lightbulb, Search, Check,
   X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck, Megaphone,
   Copy, RefreshCw, Loader2, ThumbsUp, ThumbsDown, Sparkles, Type,
+  FileText, ClipboardList,
 } from "lucide-react";
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -788,20 +789,22 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
 }) {
   const { toast } = useToast();
   const [feedbackMap, setFeedbackMap] = useState<Record<string, boolean>>({});
+  const [titleData, setTitleData] = useState<{ best: TitleSuggestion | null; suggestions: TitleSuggestion[]; issues: string[] } | null>(null);
   const [titleLoading, setTitleLoading] = useState(false);
-  const [titleData, setTitleData] = useState<{
-    current_title: string; current_length: number;
-    best: TitleSuggestion | null; suggestions: TitleSuggestion[];
-    issues: string[];
-  } | null>(null);
   const [copiedTitle, setCopiedTitle] = useState<string | null>(null);
+  const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
 
   const scoreVal = score ?? seo.score ?? 0;
   const gradeVal = grade ?? seo.grade ?? (scoreVal >= 85 ? 'A' : scoreVal >= 70 ? 'B' : scoreVal >= 50 ? 'C' : 'D');
-  const structVal = structuralScore ?? seo.structural_score ?? null;
-  const kwVal = keywordScore ?? seo.keyword_score ?? null;
   const scoreColor = scoreVal >= 70 ? "text-emerald-400" : scoreVal >= 40 ? "text-amber-400" : "text-red-400";
   const gradeColor = gradeVal === 'A' ? "text-emerald-400 border-emerald-500/30" : gradeVal === 'B' ? "text-cyan-400 border-cyan-500/30" : gradeVal === 'C' ? "text-amber-400 border-amber-500/30" : "text-red-400 border-red-500/30";
+
+  const titleScore = item.seo_title_score ?? seo.title_score ?? structuralScore ?? null;
+  const descScore = item.seo_description_score ?? seo.description_score ?? null;
+  const attrScore = item.seo_attributes_score ?? seo.attributes_score ?? null;
+  const modelScore = item.seo_model_score ?? seo.model_score ?? null;
+  const descLength = item.seo_description_length ?? seo.description_length ?? null;
+  const kwVal = keywordScore ?? seo.keyword_score ?? null;
   const foundKws = found || [];
   const missingKws = missing || [];
   const totalKws = seo.total_keywords ?? seo.total_trending_keywords ?? 0;
@@ -809,6 +812,9 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   const irrelevantKws = seo.irrelevant_keywords || [];
   const issues = seo.issues || [];
   const suggestions = seo.suggestions || [];
+  const modelValue = seo.model_value || null;
+  const missingAttrs = seo.missing_attributes || [];
+  const weakAttrs = seo.weak_attributes || [];
 
   const handleKeywordFeedback = async (keyword: string, isRelevant: boolean) => {
     setFeedbackMap(prev => ({ ...prev, [keyword]: isRelevant }));
@@ -842,8 +848,24 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedTitle(text);
-    toast({ title: "Copiado!", description: "Título copiado para a área de transferência." });
     setTimeout(() => setCopiedTitle(null), 2000);
+  };
+
+  const LayerBar = ({ label, value, weight, icon }: { label: string; value: number | null; weight: string; icon: React.ReactNode }) => {
+    if (value == null) return null;
+    const color = value >= 70 ? 'bg-emerald-500' : value >= 40 ? 'bg-amber-500' : 'bg-red-500';
+    const textColor = value >= 70 ? 'text-emerald-400' : value >= 40 ? 'text-amber-400' : 'text-red-400';
+    return (
+      <div className="flex items-center gap-2">
+        <div className="w-5 flex justify-center">{icon}</div>
+        <span className="text-xs text-slate-400 w-24 truncate">{label}</span>
+        <span className="text-[9px] text-slate-600 w-8">{weight}</span>
+        <div className="flex-1 h-2 rounded-full bg-slate-700/50">
+          <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${value}%` }} />
+        </div>
+        <span className={`text-xs font-mono w-8 text-right ${textColor}`}>{value}</span>
+      </div>
+    );
   };
 
   return (
@@ -859,34 +881,90 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             <span className="text-xs text-slate-500">/100</span>
           </div>
         }
-        subtitle={totalKws > 0 ? `Baseado em ${totalKws} palavras-chave da categoria` : undefined}
+        subtitle={`Análise em 4 camadas${totalKws > 0 ? ` · ${totalKws} palavras-chave` : ''}`}
       >
         <div className="space-y-3">
-          {/* Score breakdown */}
-          {(structVal != null || kwVal != null) && (
-            <div className="grid grid-cols-2 gap-2">
-              {structVal != null && (
-                <div className="p-2 rounded-md bg-slate-800/50 border border-slate-700/50">
-                  <div className="text-[10px] text-slate-500 mb-0.5">Estrutural</div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 h-1.5 rounded-full bg-slate-700">
-                      <div className={`h-full rounded-full ${structVal >= 70 ? 'bg-emerald-500' : structVal >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${structVal}%` }} />
+          {/* 4-layer breakdown */}
+          <div className="space-y-1.5 p-2.5 rounded-md bg-slate-800/40 border border-slate-700/40">
+            <div className="text-[10px] text-slate-500 mb-1 font-medium">COMPOSIÇÃO DO SCORE</div>
+            <LayerBar label="Título" value={titleScore} weight="40%" icon={<Type className="h-3 w-3 text-violet-400" />} />
+            <LayerBar label="Descrição" value={descScore} weight="25%" icon={<FileText className="h-3 w-3 text-cyan-400" />} />
+            <LayerBar label="Ficha Técnica" value={attrScore} weight="20%" icon={<ClipboardList className="h-3 w-3 text-amber-400" />} />
+            <LayerBar label="Modelo" value={modelScore} weight="15%" icon={<Tag className="h-3 w-3 text-emerald-400" />} />
+          </div>
+
+          {/* Title Detail */}
+          {titleScore != null && (
+            <button onClick={() => setExpandedLayer(expandedLayer === 'title' ? null : 'title')} className="w-full text-left">
+              <div className="flex items-center justify-between p-2 rounded-md bg-slate-800/30 border border-slate-700/30 hover:bg-slate-800/50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <Type className="h-3.5 w-3.5 text-violet-400" />
+                  <span className="text-xs text-slate-300">Título</span>
+                  <span className={`text-xs font-mono ${titleScore >= 70 ? 'text-emerald-400' : titleScore >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{titleScore}</span>
+                </div>
+                <span className="text-[10px] text-slate-500">{item.title?.length || 0}/60 chars</span>
+              </div>
+            </button>
+          )}
+
+          {/* Description Detail */}
+          {descScore != null && (
+            <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-3.5 w-3.5 text-cyan-400" />
+                  <span className="text-xs text-slate-300">Descrição</span>
+                  <span className={`text-xs font-mono ${descScore >= 70 ? 'text-emerald-400' : descScore >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{descScore}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {descLength != null && (
+                    <span className={`text-[10px] ${descLength >= 500 ? 'text-emerald-400' : descLength >= 300 ? 'text-amber-400' : 'text-red-400'}`}>
+                      {descLength} chars {descLength >= 500 ? '✓' : descLength > 0 ? `(ideal: 500+)` : '(vazia)'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Attributes Detail */}
+          {attrScore != null && (
+            <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/30">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <ClipboardList className="h-3.5 w-3.5 text-amber-400" />
+                  <span className="text-xs text-slate-300">Ficha Técnica</span>
+                  <span className={`text-xs font-mono ${attrScore >= 70 ? 'text-emerald-400' : attrScore >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{attrScore}</span>
+                </div>
+              </div>
+              {(missingAttrs.length > 0 || weakAttrs.length > 0) && (
+                <div className="mt-1 space-y-1">
+                  {missingAttrs.length > 0 && (
+                    <div className="text-[10px] text-red-400">
+                      Faltantes: {missingAttrs.slice(0, 5).join(', ')}{missingAttrs.length > 5 ? ` +${missingAttrs.length - 5}` : ''}
                     </div>
-                    <span className="text-xs font-mono text-slate-300">{structVal}</span>
-                  </div>
+                  )}
+                  {weakAttrs.length > 0 && (
+                    <div className="text-[10px] text-amber-400">
+                      Genéricos: {weakAttrs.slice(0, 3).join(', ')}{weakAttrs.length > 3 ? ` +${weakAttrs.length - 3}` : ''}
+                    </div>
+                  )}
                 </div>
               )}
-              {kwVal != null && (
-                <div className="p-2 rounded-md bg-slate-800/50 border border-slate-700/50">
-                  <div className="text-[10px] text-slate-500 mb-0.5">Aderência (Keywords)</div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex-1 h-1.5 rounded-full bg-slate-700">
-                      <div className={`h-full rounded-full ${kwVal >= 70 ? 'bg-emerald-500' : kwVal >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${kwVal}%` }} />
-                    </div>
-                    <span className="text-xs font-mono text-slate-300">{kwVal}</span>
-                  </div>
+            </div>
+          )}
+
+          {/* Model Detail */}
+          {modelScore != null && (
+            <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Tag className="h-3.5 w-3.5 text-emerald-400" />
+                  <span className="text-xs text-slate-300">Modelo</span>
+                  <span className={`text-xs font-mono ${modelScore >= 70 ? 'text-emerald-400' : modelScore >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{modelScore}</span>
                 </div>
-              )}
+                <span className="text-[10px] text-slate-500">{modelValue || 'não informado'}</span>
+              </div>
             </div>
           )}
 
@@ -894,7 +972,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           {coverageRatio != null && totalKws > 0 && (
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <Target className="h-3 w-3" />
-              <span>Cobertura: <strong className={coverageRatio >= 60 ? "text-emerald-400" : coverageRatio >= 30 ? "text-amber-400" : "text-red-400"}>{coverageRatio}%</strong></span>
+              <span>Cobertura de keywords: <strong className={coverageRatio >= 60 ? "text-emerald-400" : coverageRatio >= 30 ? "text-amber-400" : "text-red-400"}>{coverageRatio}%</strong></span>
             </div>
           )}
 
