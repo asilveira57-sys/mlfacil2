@@ -865,7 +865,7 @@ function WholesaleCard({ item }: { item: HealthCurrentItem }) {
   if (!w) return null;
 
   const statusColor = w.status === 'active' ? 'emerald' : w.status === 'partial' ? 'amber' : w.status === 'not_eligible' ? 'slate' : 'red';
-  const statusLabel = w.status === 'active' ? 'Ativo' : w.status === 'partial' ? 'Parcial' : w.status === 'not_eligible' ? 'Indisponível' : 'Não configurado';
+  const statusLabel = w.status === 'active' ? 'Ativo no Mercado Livre' : w.status === 'partial' ? 'Parcial' : w.status === 'not_eligible' ? (w.account_type === 'cpf' ? 'Indisponível para CPF' : 'Indisponível') : 'Preço de atacado não configurado';
   const scoreDisplay = w.is_eligible ? w.score : null;
   const icon = w.status === 'active' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> :
                w.status === 'not_eligible' ? <X className="h-3.5 w-3.5 text-slate-400" /> :
