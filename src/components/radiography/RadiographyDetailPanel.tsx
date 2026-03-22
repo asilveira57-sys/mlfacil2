@@ -760,30 +760,80 @@ function EvolutionPill({ label, delta, isCurrency }: { label: string; delta: num
   );
 }
 
-function SeoAnalysisCard({ seo, score, found, missing }: { seo: SeoAnalysis; score: number | null; found: string[] | null; missing: string[] | null }) {
+function SeoAnalysisCard({ seo, score, found, missing, structuralScore, keywordScore, grade }: {
+  seo: SeoAnalysis; score: number | null; found: string[] | null; missing: string[] | null;
+  structuralScore?: number | null; keywordScore?: number | null; grade?: string | null;
+}) {
   const scoreVal = score ?? seo.score ?? 0;
+  const gradeVal = grade ?? seo.grade ?? (scoreVal >= 85 ? 'A' : scoreVal >= 70 ? 'B' : scoreVal >= 50 ? 'C' : 'D');
+  const structVal = structuralScore ?? seo.structural_score ?? null;
+  const kwVal = keywordScore ?? seo.keyword_score ?? null;
   const scoreColor = scoreVal >= 70 ? "text-emerald-400" : scoreVal >= 40 ? "text-amber-400" : "text-red-400";
+  const gradeColor = gradeVal === 'A' ? "text-emerald-400 border-emerald-500/30" : gradeVal === 'B' ? "text-cyan-400 border-cyan-500/30" : gradeVal === 'C' ? "text-amber-400 border-amber-500/30" : "text-red-400 border-red-500/30";
   const foundKws = found || [];
   const missingKws = missing || [];
   const relevantDetails = seo.details?.filter(d => d.relevance !== "low") || [];
+  const totalKws = seo.total_keywords ?? seo.total_trending_keywords ?? 0;
+  const coverageRatio = seo.coverage_ratio != null ? Math.round(seo.coverage_ratio * 100) : null;
+  const irrelevantKws = seo.irrelevant_keywords || [];
+  const issues = seo.issues || [];
+  const suggestions = seo.suggestions || [];
 
   return (
     <SectionCard
-      title="Análise de SEO"
+      title="SEO do Anúncio"
       icon={<Search className="h-4 w-4 text-cyan-400" />}
       action={
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className={`text-sm font-bold ${gradeColor}`}>{gradeVal}</Badge>
           <span className={`text-xl font-bold font-mono ${scoreColor}`}>{scoreVal}</span>
           <span className="text-xs text-slate-500">/100</span>
         </div>
       }
-      subtitle={`Baseado nas ${seo.total_trending_keywords} palavras mais buscadas em ${seo.l1_category_name || seo.category_name}`}
+      subtitle={totalKws > 0 ? `Baseado em ${totalKws} palavras-chave da categoria` : undefined}
     >
       <div className="space-y-3">
+        {/* Score breakdown */}
+        {(structVal != null || kwVal != null) && (
+          <div className="grid grid-cols-2 gap-2">
+            {structVal != null && (
+              <div className="p-2 rounded-md bg-slate-800/50 border border-slate-700/50">
+                <div className="text-[10px] text-slate-500 mb-0.5">Estrutural</div>
+                <div className="flex items-center gap-1.5">
+                  <div className="flex-1 h-1.5 rounded-full bg-slate-700">
+                    <div className={`h-full rounded-full ${structVal >= 70 ? 'bg-emerald-500' : structVal >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${structVal}%` }} />
+                  </div>
+                  <span className="text-xs font-mono text-slate-300">{structVal}</span>
+                </div>
+              </div>
+            )}
+            {kwVal != null && (
+              <div className="p-2 rounded-md bg-slate-800/50 border border-slate-700/50">
+                <div className="text-[10px] text-slate-500 mb-0.5">Aderência (Keywords)</div>
+                <div className="flex items-center gap-1.5">
+                  <div className="flex-1 h-1.5 rounded-full bg-slate-700">
+                    <div className={`h-full rounded-full ${kwVal >= 70 ? 'bg-emerald-500' : kwVal >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${kwVal}%` }} />
+                  </div>
+                  <span className="text-xs font-mono text-slate-300">{kwVal}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Coverage ratio */}
+        {coverageRatio != null && totalKws > 0 && (
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <Target className="h-3 w-3" />
+            <span>Cobertura de palavras-chave: <strong className={coverageRatio >= 60 ? "text-emerald-400" : coverageRatio >= 30 ? "text-amber-400" : "text-red-400"}>{coverageRatio}%</strong></span>
+          </div>
+        )}
+
+        {/* Found keywords */}
         {foundKws.length > 0 && (
           <div>
             <div className="text-xs font-medium text-emerald-400 mb-1.5 flex items-center gap-1">
-              <Check className="h-3 w-3" /> Encontradas no título ({foundKws.length})
+              <Check className="h-3 w-3" /> Encontradas ({foundKws.length})
             </div>
             <div className="flex flex-wrap gap-1">
               {foundKws.map((kw) => (
@@ -792,24 +842,59 @@ function SeoAnalysisCard({ seo, score, found, missing }: { seo: SeoAnalysis; sco
             </div>
           </div>
         )}
+
+        {/* Missing keywords */}
         {missingKws.length > 0 && (
           <div>
             <div className="text-xs font-medium text-amber-400 mb-1.5 flex items-center gap-1">
-              <Target className="h-3 w-3" /> Oportunidades ({missingKws.length})
+              <Target className="h-3 w-3" /> Ausentes importantes ({missingKws.length})
             </div>
             <div className="flex flex-wrap gap-1">
               {missingKws.map((kw) => (
                 <Badge key={kw} variant="outline" className="text-xs border-amber-500/30 text-amber-300 bg-amber-500/5">{kw}</Badge>
               ))}
             </div>
-            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-              Avalie quais dessas palavras realmente representam este produto. Nem toda palavra com alto volume é aderente ao seu anúncio.
-            </p>
           </div>
         )}
+
+        {/* Irrelevant keywords */}
+        {irrelevantKws.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-red-400 mb-1.5 flex items-center gap-1">
+              <X className="h-3 w-3" /> Termos irrelevantes ({irrelevantKws.length})
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {irrelevantKws.map((kw) => (
+                <Badge key={kw} variant="outline" className="text-xs border-red-500/30 text-red-300 bg-red-500/5">{kw}</Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Issues & Suggestions */}
+        {issues.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-slate-400 mb-1">Problemas detectados</div>
+            <ul className="space-y-0.5 text-xs text-slate-400">
+              {issues.map((issue, i) => <li key={i} className="flex items-start gap-1"><span className="text-red-400 mt-0.5">•</span>{issue}</li>)}
+            </ul>
+          </div>
+        )}
+        {suggestions.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-cyan-400 mb-1 flex items-center gap-1">
+              <Lightbulb className="h-3 w-3" /> Ações recomendadas
+            </div>
+            <ul className="space-y-0.5 text-xs text-slate-400">
+              {suggestions.map((s, i) => <li key={i} className="flex items-start gap-1"><span className="text-cyan-400 mt-0.5">→</span>{s}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {/* Keyword details */}
         {relevantDetails.length > 0 && (
           <div>
-            <div className="text-xs font-medium text-slate-400 mb-1.5">Detalhes ({relevantDetails.length})</div>
+            <div className="text-xs font-medium text-slate-400 mb-1.5">Palavras-chave analisadas ({relevantDetails.length})</div>
             <div className="space-y-0.5 max-h-[160px] overflow-y-auto">
               {relevantDetails.map((d, i) => (
                 <div key={i} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-slate-800/50">
@@ -825,8 +910,9 @@ function SeoAnalysisCard({ seo, score, found, missing }: { seo: SeoAnalysis; sco
             </div>
           </div>
         )}
-        {foundKws.length === 0 && missingKws.length === 0 && (
-          <p className="text-xs text-slate-500 text-center py-2">Nenhuma palavra relevante encontrada para análise.</p>
+
+        {foundKws.length === 0 && missingKws.length === 0 && issues.length === 0 && (
+          <p className="text-xs text-slate-500 text-center py-2">Nenhuma palavra relevante encontrada para análise. Execute "Atualizar Dados" para gerar a análise SEO.</p>
         )}
       </div>
     </SectionCard>
