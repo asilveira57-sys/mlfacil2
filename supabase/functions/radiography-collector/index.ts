@@ -1671,15 +1671,29 @@ function computeModelSeo(attributes: any[]): {
 
   // Model evaluation → +60
   if (modelValue && !genericValues.has(modelValue.toLowerCase())) {
-    score += 60;
-    // Check if model is useful for search (has some specificity)
-    if (modelValue.length >= 3 && /[a-zA-Z0-9]/.test(modelValue)) {
-      score += 20;
+    // Check length and specificity — short models are weak
+    const modelLen = modelValue.trim().length;
+    if (modelLen >= 15 && /[a-zA-Z0-9]/.test(modelValue)) {
+      score += 60;
+      score += 20; // search friendly bonus
       is_search_friendly = true;
-      positives.push(`Modelo "${modelValue}" — específico e pesquisável`);
+      positives.push(`Modelo "${modelValue}" — específico e pesquisável (${modelLen} caracteres)`);
+    } else if (modelLen >= 8 && /[a-zA-Z0-9]/.test(modelValue)) {
+      score += 45;
+      is_search_friendly = true;
+      positives.push(`Modelo "${modelValue}" — razoável, mas pode ser mais descritivo`);
+      suggestions.push('Aproveite melhor o campo modelo — adicione palavras-chave relevantes para busca');
+      improvement_actions.push(`O campo modelo suporta até 60 caracteres. Você está usando ${modelLen}. Aproveite o espaço para incluir termos de busca relevantes.`);
+    } else if (modelLen >= 3) {
+      score += 25;
+      issues.push('Modelo muito curto');
+      negatives.push(`Modelo "${modelValue}" é curto (${modelLen} caracteres) — pouco aproveitamento do espaço`);
+      suggestions.push('Amplie o campo modelo com termos pesquisáveis relacionados ao produto');
+      improvement_actions.push(`O campo modelo aceita até 60 caracteres. Você está usando apenas ${modelLen}. Insira mais palavras-chave relevantes.`);
     } else {
-      issues.push('Modelo pouco específico');
-      negatives.push(`Modelo "${modelValue}" é pouco descritivo para buscas`);
+      score += 10;
+      issues.push('Modelo muito curto e pouco útil');
+      negatives.push(`Modelo "${modelValue}" é muito curto para gerar descoberta em buscas`);
       suggestions.push('Use um modelo mais descritivo para facilitar buscas');
       improvement_actions.push('Informe um modelo mais específico que os compradores possam pesquisar');
     }
@@ -1694,7 +1708,7 @@ function computeModelSeo(attributes: any[]): {
     issues.push('Campo modelo vazio');
     negatives.push('Campo modelo vazio — oportunidade perdida de ser encontrado por modelo');
     suggestions.push('Adicione o modelo do produto para melhorar a descoberta');
-    improvement_actions.push('Preencha com o modelo real e pesquisável do produto');
+    improvement_actions.push('Preencha com o modelo real e pesquisável do produto. O campo aceita até 60 caracteres — use-os!');
   }
 
   // Brand bonus → +20
@@ -2397,64 +2411,96 @@ async function analyzeWholesaleForItem(
     };
   }
 
-  // CNPJ → check ML API for sale_terms wholesale first, then internal tables
+  // CNPJ → check ML API for PxQ (price by quantity) first, then internal tables
   try {
-    // 1. Check ML API for wholesale config on this item
+    // 1. Check ML API for wholesale/PxQ config on this item
     let hasMLWholesale = false;
     let mlRangesCount = 0;
+    let detectionSource = 'none';
     if (token) {
       try {
-        const resp = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,sale_terms`, {
+        // Strategy 1: Check item tags for standard_price_by_quantity
+        const resp = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,sale_terms,tags`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (resp.ok) {
           const itemData = await resp.json();
-          const saleTerms = Array.isArray(itemData.sale_terms) ? itemData.sale_terms : [];
-          // Check for WHOLESALE or QUANTITY_DISCOUNTS
-          for (const term of saleTerms) {
-            if (term.id === 'WHOLESALE' || term.id === 'QUANTITY_DISCOUNTS') {
-              hasMLWholesale = true;
-              // Count discount ranges if available
-              if (Array.isArray(term.values)) {
-                mlRangesCount = term.values.length;
+          
+          // Check tags for PxQ indicator
+          const tags = Array.isArray(itemData.tags) ? itemData.tags : [];
+          if (tags.includes('standard_price_by_quantity')) {
+            hasMLWholesale = true;
+            detectionSource = 'tag:standard_price_by_quantity';
+            console.log(`[rad-collector] Wholesale: ${itemId} detected via tag standard_price_by_quantity`);
+          }
+          
+          // Check sale_terms for WHOLESALE or QUANTITY_DISCOUNTS
+          if (!hasMLWholesale) {
+            const saleTerms = Array.isArray(itemData.sale_terms) ? itemData.sale_terms : [];
+            for (const term of saleTerms) {
+              if (term.id === 'WHOLESALE' || term.id === 'QUANTITY_DISCOUNTS') {
+                hasMLWholesale = true;
+                detectionSource = `sale_term:${term.id}`;
+                if (Array.isArray(term.values)) mlRangesCount = term.values.length;
+                break;
               }
-              break;
             }
           }
-          // Also check via item.sale_conditions or price breakdown
-          if (!hasMLWholesale) {
-            // Try fetching price layers
-            try {
-              const priceResp = await fetch(`https://api.mercadolibre.com/items/${itemId}/prices`, {
-                headers: { Authorization: `Bearer ${token}` },
+        }
+        
+        // Strategy 2: Check /items/{id}/prices for standard prices with min_purchase_unit
+        if (!hasMLWholesale || mlRangesCount === 0) {
+          try {
+            const priceResp = await fetch(`https://api.mercadolibre.com/items/${itemId}/prices`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (priceResp.ok) {
+              const priceData = await priceResp.json();
+              const prices = Array.isArray(priceData.prices) ? priceData.prices : [];
+              // PxQ uses type="standard" with conditions.context_restrictions containing user_type_business
+              // or conditions.min_purchase_unit
+              const pxqPrices = prices.filter((p: any) => {
+                if (!p.conditions) return false;
+                // Check min_purchase_unit > 1
+                if (p.conditions.min_purchase_unit && p.conditions.min_purchase_unit > 1) return true;
+                // Check context_restrictions for business user
+                if (Array.isArray(p.conditions.context_restrictions)) {
+                  return p.conditions.context_restrictions.some((r: any) => r === 'user_type_business' || r?.user_type === 'business');
+                }
+                return false;
               });
-              if (priceResp.ok) {
-                const priceData = await priceResp.json();
-                if (priceData.prices && Array.isArray(priceData.prices)) {
-                  const bulkPrices = priceData.prices.filter((p: any) => p.type === 'bulk' || p.type === 'promotion' && p.conditions?.quantity);
-                  if (bulkPrices.length > 0) {
-                    hasMLWholesale = true;
-                    mlRangesCount = bulkPrices.length;
-                  }
+              if (pxqPrices.length > 0) {
+                hasMLWholesale = true;
+                mlRangesCount = Math.max(mlRangesCount, pxqPrices.length);
+                if (detectionSource === 'none') detectionSource = 'prices_api:pxq';
+              }
+              // Also check for bulk type as legacy fallback
+              if (!hasMLWholesale) {
+                const bulkPrices = prices.filter((p: any) => p.type === 'bulk');
+                if (bulkPrices.length > 0) {
+                  hasMLWholesale = true;
+                  mlRangesCount = bulkPrices.length;
+                  detectionSource = 'prices_api:bulk';
                 }
               }
-            } catch {}
-          }
+            }
+          } catch {}
         }
       } catch (mlErr) {
         console.warn(`[rad-collector] Wholesale ML API check failed for ${itemId}:`, mlErr);
       }
     }
 
+    console.log(`[rad-collector] Wholesale: ${itemId} result: detected=${hasMLWholesale}, source=${detectionSource}, ranges=${mlRangesCount}`);
+
     // If ML has wholesale configured → return active
     if (hasMLWholesale) {
-      console.log(`[rad-collector] Wholesale: ${itemId} has ML wholesale active (${mlRangesCount} ranges)`);
       return {
         score: mlRangesCount >= 2 ? 100 : 80, account_type: 'cnpj', is_eligible: true,
         has_wholesale_layer: true, has_valid_ranges: mlRangesCount >= 2, ranges_count: mlRangesCount, is_linked_to_listing: true,
         status: 'active',
         summary: 'Preço por atacado ativo no Mercado Livre.',
-        positives: ['Anúncio preparado para vendas em volume.', 'Estratégia comercial mais competitiva.', ...(mlRangesCount > 0 ? [`${mlRangesCount} faixas de preço configuradas.`] : [])],
+        positives: ['Anúncio preparado para vendas em volume.', 'Estratégia comercial mais competitiva.', ...(mlRangesCount > 0 ? [`${mlRangesCount} faixa(s) de preço configurada(s).`] : [])],
         negatives: [],
         improvement_actions: [],
         cta_available: false,

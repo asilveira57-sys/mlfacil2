@@ -891,12 +891,9 @@ function WholesaleCard({ item }: { item: HealthCurrentItem }) {
         {icon}
         <div className="flex-1 min-w-0">
           <span className="font-medium">Status: {statusLabel}</span>
-          {w.account_type !== 'unknown' && (
-            <span className="ml-1.5 opacity-70">({w.account_type === 'cnpj' ? 'CNPJ' : 'CPF'})</span>
-          )}
         </div>
         {w.ranges_count > 0 && (
-          <span className="text-[10px] opacity-70">{w.ranges_count} faixas</span>
+          <span className="text-[10px] opacity-70">{w.ranges_count} faixa(s)</span>
         )}
       </div>
 
@@ -956,7 +953,7 @@ function WholesaleCard({ item }: { item: HealthCurrentItem }) {
             variant="outline"
             className="text-xs border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 gap-1.5"
             onClick={() => {
-              window.open('/ferramentas/preco-atacado', '_blank');
+              window.open(`/atacado?item_id=${item?.item_id || ''}`, '_blank');
             }}
           >
             <Package className="h-3.5 w-3.5" />
