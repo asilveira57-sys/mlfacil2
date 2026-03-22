@@ -820,7 +820,121 @@ function MediaCard({ item }: { item: HealthCurrentItem }) {
   );
 }
 
-// --- Interactive SEO Card with keyword toggles + title generator ---
+// --- Wholesale Card ---
+function WholesaleCard({ item }: { item: HealthCurrentItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const w = item.wholesale_analysis_json;
+
+  if (!w) return null;
+
+  const statusColor = w.status === 'active' ? 'emerald' : w.status === 'partial' ? 'amber' : w.status === 'not_eligible' ? 'slate' : 'red';
+  const statusLabel = w.status === 'active' ? 'Ativo' : w.status === 'partial' ? 'Parcial' : w.status === 'not_eligible' ? 'Indisponível' : 'Não configurado';
+  const scoreDisplay = w.is_eligible ? w.score : null;
+  const icon = w.status === 'active' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> :
+               w.status === 'not_eligible' ? <X className="h-3.5 w-3.5 text-slate-400" /> :
+               <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />;
+
+  return (
+    <SectionCard
+      title="Atacado"
+      icon={<Package className="h-4 w-4 text-indigo-400" />}
+      action={scoreDisplay != null ? (
+        <Badge variant="outline" className={`text-xs border-${statusColor}-500/30 text-${statusColor}-400`}>
+          {scoreDisplay}/100
+        </Badge>
+      ) : undefined}
+    >
+      {/* Summary line */}
+      <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${
+        w.status === 'active' ? factorStatusStyles.good :
+        w.status === 'partial' ? factorStatusStyles.warning :
+        w.status === 'not_eligible' ? factorStatusStyles.neutral :
+        factorStatusStyles.bad
+      }`}>
+        {icon}
+        <div className="flex-1 min-w-0">
+          <span className="font-medium">Status: {statusLabel}</span>
+          {w.account_type !== 'unknown' && (
+            <span className="ml-1.5 opacity-70">({w.account_type === 'cnpj' ? 'CNPJ' : 'CPF'})</span>
+          )}
+        </div>
+        {w.ranges_count > 0 && (
+          <span className="text-[10px] opacity-70">{w.ranges_count} faixas</span>
+        )}
+      </div>
+
+      {/* Summary text */}
+      <p className="text-xs text-slate-400 mt-2 leading-relaxed">{w.summary}</p>
+
+      {/* Expandable detail */}
+      <button onClick={() => setExpanded(!expanded)} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-300 mt-2">
+        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        {expanded ? "Ocultar detalhes" : "Ver análise completa"}
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {/* Positives */}
+          {w.positives.length > 0 && (
+            <div className="space-y-1">
+              {w.positives.map((p, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-[11px] text-emerald-400">
+                  <Check className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                  <span>{p}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Negatives */}
+          {w.negatives.length > 0 && (
+            <div className="space-y-1">
+              {w.negatives.map((n, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-[11px] text-red-400">
+                  <X className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                  <span>{n}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Improvement actions */}
+          {w.improvement_actions.length > 0 && (
+            <div className="space-y-1">
+              <span className="text-[10px] text-slate-500 font-medium">Como melhorar:</span>
+              {w.improvement_actions.map((a, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-[11px] text-cyan-300">
+                  <Lightbulb className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                  <span>{a}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CTA - only for eligible accounts without active wholesale */}
+      {w.cta_available && w.is_eligible && (
+        <div className="mt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 gap-1.5"
+            onClick={() => {
+              window.open('/ferramentas/preco-atacado', '_blank');
+            }}
+          >
+            <Package className="h-3.5 w-3.5" />
+            Configurar preço de atacado
+          </Button>
+          <p className="text-[10px] text-slate-500 mt-1">
+            Após configurar, atualize os dados para refletir a nova pontuação.
+          </p>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+
 interface TitleSuggestion {
   title: string;
   score: number;
