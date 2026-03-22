@@ -6884,9 +6884,13 @@ export type Database = {
           sales_count_7d: number | null
           seller_id: string
           seo_analysis_json: Json | null
+          seo_grade: string | null
+          seo_keyword_score: number | null
           seo_keywords_found: string[] | null
           seo_keywords_missing: string[] | null
           seo_score: number | null
+          seo_structural_score: number | null
+          seo_updated_at: string | null
           shipping_mode: string | null
           tenant_id: string | null
           thumbnail: string | null
@@ -6945,9 +6949,13 @@ export type Database = {
           sales_count_7d?: number | null
           seller_id: string
           seo_analysis_json?: Json | null
+          seo_grade?: string | null
+          seo_keyword_score?: number | null
           seo_keywords_found?: string[] | null
           seo_keywords_missing?: string[] | null
           seo_score?: number | null
+          seo_structural_score?: number | null
+          seo_updated_at?: string | null
           shipping_mode?: string | null
           tenant_id?: string | null
           thumbnail?: string | null
@@ -7006,9 +7014,13 @@ export type Database = {
           sales_count_7d?: number | null
           seller_id?: string
           seo_analysis_json?: Json | null
+          seo_grade?: string | null
+          seo_keyword_score?: number | null
           seo_keywords_found?: string[] | null
           seo_keywords_missing?: string[] | null
           seo_score?: number | null
+          seo_structural_score?: number | null
+          seo_updated_at?: string | null
           shipping_mode?: string | null
           tenant_id?: string | null
           thumbnail?: string | null
@@ -7405,6 +7417,63 @@ export type Database = {
         }
         Relationships: []
       }
+      listing_seo_analysis: {
+        Row: {
+          analysis_details: Json | null
+          created_at: string
+          id: string
+          irrelevant_keywords: Json | null
+          issues: Json | null
+          item_id: string
+          keyword_coverage_ratio: number | null
+          missing_keywords: Json | null
+          seller_id: string
+          seo_grade: string
+          seo_keyword_score: number
+          seo_score: number
+          seo_structural_score: number
+          suggestions: Json | null
+          tenant_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          analysis_details?: Json | null
+          created_at?: string
+          id?: string
+          irrelevant_keywords?: Json | null
+          issues?: Json | null
+          item_id: string
+          keyword_coverage_ratio?: number | null
+          missing_keywords?: Json | null
+          seller_id: string
+          seo_grade?: string
+          seo_keyword_score?: number
+          seo_score?: number
+          seo_structural_score?: number
+          suggestions?: Json | null
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          analysis_details?: Json | null
+          created_at?: string
+          id?: string
+          irrelevant_keywords?: Json | null
+          issues?: Json | null
+          item_id?: string
+          keyword_coverage_ratio?: number | null
+          missing_keywords?: Json | null
+          seller_id?: string
+          seo_grade?: string
+          seo_keyword_score?: number
+          seo_score?: number
+          seo_structural_score?: number
+          suggestions?: Json | null
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       listing_snapshots: {
         Row: {
           attributes_count: number | null
@@ -7507,6 +7576,39 @@ export type Database = {
           title?: string | null
           title_length?: number | null
           visits_7d?: number | null
+        }
+        Relationships: []
+      }
+      market_keywords_cache: {
+        Row: {
+          category_id: string
+          id: string
+          keyword: string
+          last_updated_at: string
+          normalized_keyword: string
+          occurrence_count: number
+          source: string
+          weight: number
+        }
+        Insert: {
+          category_id: string
+          id?: string
+          keyword: string
+          last_updated_at?: string
+          normalized_keyword: string
+          occurrence_count?: number
+          source?: string
+          weight?: number
+        }
+        Update: {
+          category_id?: string
+          id?: string
+          keyword?: string
+          last_updated_at?: string
+          normalized_keyword?: string
+          occurrence_count?: number
+          source?: string
+          weight?: number
         }
         Relationships: []
       }
@@ -15144,6 +15246,48 @@ export type Database = {
           seller_id?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      seo_analysis_logs: {
+        Row: {
+          action: string | null
+          created_at: string
+          execution_time_ms: number | null
+          id: string
+          item_id: string | null
+          message: string | null
+          metadata_json: Json | null
+          score: number | null
+          seller_id: string | null
+          status: string
+          tenant_id: string | null
+        }
+        Insert: {
+          action?: string | null
+          created_at?: string
+          execution_time_ms?: number | null
+          id?: string
+          item_id?: string | null
+          message?: string | null
+          metadata_json?: Json | null
+          score?: number | null
+          seller_id?: string | null
+          status: string
+          tenant_id?: string | null
+        }
+        Update: {
+          action?: string | null
+          created_at?: string
+          execution_time_ms?: number | null
+          id?: string
+          item_id?: string | null
+          message?: string | null
+          metadata_json?: Json | null
+          score?: number | null
+          seller_id?: string | null
+          status?: string
+          tenant_id?: string | null
         }
         Relationships: []
       }
