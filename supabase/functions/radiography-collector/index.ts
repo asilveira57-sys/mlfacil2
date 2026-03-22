@@ -2369,6 +2369,7 @@ async function analyzeWholesaleForItem(
   sellerId: string,
   accountType: 'cpf' | 'cnpj' | 'unknown',
   tenantId: string | null,
+  token: string | null,
 ): Promise<WholesaleAnalysis> {
   // CPF → not eligible
   if (accountType === 'cpf') {
@@ -2396,20 +2397,83 @@ async function analyzeWholesaleForItem(
     };
   }
 
-  // CNPJ → check wholesale config
-  if (!tenantId) {
-    return {
-      score: 0, account_type: 'cnpj', is_eligible: true,
-      has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
-      status: 'not_configured',
-      summary: 'Este anúncio não possui preço por quantidade configurado.',
-      positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
-      improvement_actions: ['Criar faixas de preço para compras em maior volume.', 'Configurar política de atacado para aumentar competitividade.'],
-      cta_available: true,
-    };
-  }
-
+  // CNPJ → check ML API for sale_terms wholesale first, then internal tables
   try {
+    // 1. Check ML API for wholesale config on this item
+    let hasMLWholesale = false;
+    let mlRangesCount = 0;
+    if (token) {
+      try {
+        const resp = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,sale_terms`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          const itemData = await resp.json();
+          const saleTerms = Array.isArray(itemData.sale_terms) ? itemData.sale_terms : [];
+          // Check for WHOLESALE or QUANTITY_DISCOUNTS
+          for (const term of saleTerms) {
+            if (term.id === 'WHOLESALE' || term.id === 'QUANTITY_DISCOUNTS') {
+              hasMLWholesale = true;
+              // Count discount ranges if available
+              if (Array.isArray(term.values)) {
+                mlRangesCount = term.values.length;
+              }
+              break;
+            }
+          }
+          // Also check via item.sale_conditions or price breakdown
+          if (!hasMLWholesale) {
+            // Try fetching price layers
+            try {
+              const priceResp = await fetch(`https://api.mercadolibre.com/items/${itemId}/prices`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (priceResp.ok) {
+                const priceData = await priceResp.json();
+                if (priceData.prices && Array.isArray(priceData.prices)) {
+                  const bulkPrices = priceData.prices.filter((p: any) => p.type === 'bulk' || p.type === 'promotion' && p.conditions?.quantity);
+                  if (bulkPrices.length > 0) {
+                    hasMLWholesale = true;
+                    mlRangesCount = bulkPrices.length;
+                  }
+                }
+              }
+            } catch {}
+          }
+        }
+      } catch (mlErr) {
+        console.warn(`[rad-collector] Wholesale ML API check failed for ${itemId}:`, mlErr);
+      }
+    }
+
+    // If ML has wholesale configured → return active
+    if (hasMLWholesale) {
+      console.log(`[rad-collector] Wholesale: ${itemId} has ML wholesale active (${mlRangesCount} ranges)`);
+      return {
+        score: mlRangesCount >= 2 ? 100 : 80, account_type: 'cnpj', is_eligible: true,
+        has_wholesale_layer: true, has_valid_ranges: mlRangesCount >= 2, ranges_count: mlRangesCount, is_linked_to_listing: true,
+        status: 'active',
+        summary: 'Preço por atacado ativo no Mercado Livre.',
+        positives: ['Anúncio preparado para vendas em volume.', 'Estratégia comercial mais competitiva.', ...(mlRangesCount > 0 ? [`${mlRangesCount} faixas de preço configuradas.`] : [])],
+        negatives: [],
+        improvement_actions: [],
+        cta_available: false,
+      };
+    }
+
+    // 2. Fallback: check internal tables
+    if (!tenantId) {
+      return {
+        score: 0, account_type: 'cnpj', is_eligible: true,
+        has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+        status: 'not_configured',
+        summary: 'Preço de atacado não configurado neste anúncio.',
+        positives: [], negatives: ['Nenhuma faixa de preço por quantidade encontrada.'],
+        improvement_actions: ['Criar faixas de preço para compras em maior volume.', 'Configurar política de atacado para aumentar competitividade.'],
+        cta_available: true,
+      };
+    }
+
     // Check if item has a wholesale override
     const { data: override } = await supabase
       .from('wholesale_product_overrides')
@@ -2445,8 +2509,8 @@ async function analyzeWholesaleForItem(
         score: 0, account_type: 'cnpj', is_eligible: true,
         has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
         status: 'not_configured',
-        summary: 'Este anúncio não possui preço por quantidade configurado.',
-        positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
+        summary: 'Preço de atacado não configurado neste anúncio.',
+        positives: [], negatives: ['Nenhuma faixa de preço por quantidade encontrada.'],
         improvement_actions: ['Criar faixas de preço para compras em maior volume.', 'Configurar política de atacado para aumentar competitividade.'],
         cta_available: true,
       };
@@ -2475,8 +2539,8 @@ async function analyzeWholesaleForItem(
         score: 0, account_type: 'cnpj', is_eligible: true,
         has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
         status: 'not_configured',
-        summary: 'Este anúncio não possui preço por quantidade configurado.',
-        positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
+        summary: 'Preço de atacado não configurado neste anúncio.',
+        positives: [], negatives: ['Nenhuma faixa de preço por quantidade encontrada.'],
         improvement_actions: ['Criar faixas de preço para compras em maior volume.'],
         cta_available: true,
       };
