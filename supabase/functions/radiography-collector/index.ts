@@ -1778,9 +1778,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       // Layer 4: Model (15%)
       const modelResult = computeModelSeo(extras.attributes);
 
-      // Keyword adherence (for keyword section display)
-      const titleTokens = tokenize(detail.title);
-      const adherence = computeKeywordAdherence(titleTokens, catKeywords);
+      // Keyword adherence (multi-field: title + description + attributes)
+      const attrTexts = (extras.attributes || []).map((a: any) => `${a.name || ''} ${a.value_name || ''}`);
+      const adherence = computeKeywordAdherenceMultiField(detail.title, extras.description, attrTexts, catKeywords);
 
       // Final score: weighted average
       const seoScore = Math.round(
@@ -1798,6 +1798,16 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
       const allSuggestions = [...titleResult.suggestions, ...descResult.suggestions, ...attrResult.suggestions, ...modelResult.suggestions];
       if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
+
+      // Category keyword details with match locations
+      const categoryKeywordDetails = adherence.details.map(d => ({
+        keyword: d.keyword,
+        weight: d.weight,
+        matched_in_title: d.matched_in_title,
+        matched_in_description: d.matched_in_description,
+        matched_in_attributes: d.matched_in_attributes,
+        matched_overall: d.matched_overall,
+      }));
 
       seoRows.push({ seller_id: sellerId, item_id: itemId, tenant_id: tenantId,
         seo_structural_score: titleResult.score, seo_keyword_score: adherence.score,
@@ -1843,7 +1853,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           model_value: modelResult.modelValue,
           irrelevant_keywords: adherence.irrelevant.slice(0, 10),
           issues: allIssues, suggestions: allSuggestions,
-          details: adherence.details.filter(d => d.relevance !== 'low').slice(0, 15),
+          details: categoryKeywordDetails,
           analyzed_at: new Date().toISOString(),
         },
         seo_updated_at: new Date().toISOString(),
