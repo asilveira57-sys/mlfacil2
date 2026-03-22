@@ -2250,14 +2250,27 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       if (data) for (const r of data) if (!detailMap.has(r.item_id)) detailMap.set(r.item_id, r);
     }
 
-    // Photos from API
+    // Photos from API — capture per-image resolution
     const token = await getValidToken(supabase, sellerId);
-    const photosMap = new Map<string, { count: number; hasVideo: boolean }>();
+    const photosMap = new Map<string, { count: number; hasVideo: boolean; images: Array<{ url: string; width: number; height: number }> }>();
     if (token) {
       for (let i = 0; i < allIds.length; i += 20) {
         try {
           const resp = await fetch(`https://api.mercadolibre.com/items?ids=${allIds.slice(i,i+20).join(',')}&attributes=id,pictures,video_id`, { headers: { Authorization: `Bearer ${token}` } });
-          if (resp.ok) { const d = await resp.json(); for (const e of d) if (e.code===200&&e.body) photosMap.set(e.body.id, { count: Array.isArray(e.body.pictures)?e.body.pictures.length:0, hasVideo: !!e.body.video_id }); }
+          if (resp.ok) {
+            const d = await resp.json();
+            for (const e of d) {
+              if (e.code === 200 && e.body) {
+                const pics = Array.isArray(e.body.pictures) ? e.body.pictures : [];
+                const images = pics.map((p: any) => ({
+                  url: p.secure_url || p.url || '',
+                  width: p.max_size ? parseInt(String(p.max_size).split('x')[0]) || 0 : 0,
+                  height: p.max_size ? parseInt(String(p.max_size).split('x')[1]) || 0 : 0,
+                }));
+                photosMap.set(e.body.id, { count: pics.length, hasVideo: !!e.body.video_id, images });
+              }
+            }
+          }
         } catch {}
         await sleep(200);
         if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 10000) break;
