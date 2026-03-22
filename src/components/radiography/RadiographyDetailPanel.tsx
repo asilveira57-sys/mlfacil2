@@ -1366,6 +1366,23 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             </div>
           )}
 
+          {/* Discarded keywords (not relevant to this product) */}
+          {discardedCount > 0 && (
+            <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/20">
+              <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                <Filter className="h-2.5 w-2.5" />
+                {discardedCount} palavras da categoria foram ignoradas por não terem relação com este produto.
+              </div>
+              {discardedKws.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {discardedKws.slice(0, 8).map((kw) => (
+                    <span key={kw} className="text-[10px] text-slate-600 bg-slate-800/50 px-1.5 py-0.5 rounded">{kw}</span>
+                  ))}
+                  {discardedKws.length > 8 && <span className="text-[10px] text-slate-600">+{discardedKws.length - 8} mais</span>}
+                </div>
+              )}
+            </div>
+
           {/* Validation prompt */}
           {(foundKws.length > 0 || missingKws.length > 0 || (seo.details && seo.details.length > 0)) && (
             <div className="p-2 rounded-md bg-cyan-500/5 border border-cyan-500/15 text-xs text-cyan-300">
