@@ -1671,15 +1671,29 @@ function computeModelSeo(attributes: any[]): {
 
   // Model evaluation → +60
   if (modelValue && !genericValues.has(modelValue.toLowerCase())) {
-    score += 60;
-    // Check if model is useful for search (has some specificity)
-    if (modelValue.length >= 3 && /[a-zA-Z0-9]/.test(modelValue)) {
-      score += 20;
+    // Check length and specificity — short models are weak
+    const modelLen = modelValue.trim().length;
+    if (modelLen >= 15 && /[a-zA-Z0-9]/.test(modelValue)) {
+      score += 60;
+      score += 20; // search friendly bonus
       is_search_friendly = true;
-      positives.push(`Modelo "${modelValue}" — específico e pesquisável`);
+      positives.push(`Modelo "${modelValue}" — específico e pesquisável (${modelLen} caracteres)`);
+    } else if (modelLen >= 8 && /[a-zA-Z0-9]/.test(modelValue)) {
+      score += 45;
+      is_search_friendly = true;
+      positives.push(`Modelo "${modelValue}" — razoável, mas pode ser mais descritivo`);
+      suggestions.push('Aproveite melhor o campo modelo — adicione palavras-chave relevantes para busca');
+      improvement_actions.push(`O campo modelo suporta até 60 caracteres. Você está usando ${modelLen}. Aproveite o espaço para incluir termos de busca relevantes.`);
+    } else if (modelLen >= 3) {
+      score += 25;
+      issues.push('Modelo muito curto');
+      negatives.push(`Modelo "${modelValue}" é curto (${modelLen} caracteres) — pouco aproveitamento do espaço`);
+      suggestions.push('Amplie o campo modelo com termos pesquisáveis relacionados ao produto');
+      improvement_actions.push(`O campo modelo aceita até 60 caracteres. Você está usando apenas ${modelLen}. Insira mais palavras-chave relevantes.`);
     } else {
-      issues.push('Modelo pouco específico');
-      negatives.push(`Modelo "${modelValue}" é pouco descritivo para buscas`);
+      score += 10;
+      issues.push('Modelo muito curto e pouco útil');
+      negatives.push(`Modelo "${modelValue}" é muito curto para gerar descoberta em buscas`);
       suggestions.push('Use um modelo mais descritivo para facilitar buscas');
       improvement_actions.push('Informe um modelo mais específico que os compradores possam pesquisar');
     }
@@ -1694,7 +1708,7 @@ function computeModelSeo(attributes: any[]): {
     issues.push('Campo modelo vazio');
     negatives.push('Campo modelo vazio — oportunidade perdida de ser encontrado por modelo');
     suggestions.push('Adicione o modelo do produto para melhorar a descoberta');
-    improvement_actions.push('Preencha com o modelo real e pesquisável do produto');
+    improvement_actions.push('Preencha com o modelo real e pesquisável do produto. O campo aceita até 60 caracteres — use-os!');
   }
 
   // Brand bonus → +20
