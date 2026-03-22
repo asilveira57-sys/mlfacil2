@@ -2816,7 +2816,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     if (token) {
       for (let i = 0; i < allIds.length; i += 20) {
         try {
-          const resp = await fetch(`https://api.mercadolibre.com/items?ids=${allIds.slice(i,i+20).join(',')}&attributes=id,pictures,video_id`, { headers: { Authorization: `Bearer ${token}` } });
+          const resp = await fetch(`https://api.mercadolibre.com/items?ids=${allIds.slice(i,i+20).join(',')}&attributes=id,pictures,video_id,variations,title`, { headers: { Authorization: `Bearer ${token}` } });
           if (resp.ok) {
             const d = await resp.json();
             for (const e of d) {
@@ -2828,6 +2828,21 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
                   height: p.max_size ? parseInt(String(p.max_size).split('x')[1]) || 0 : 0,
                 }));
                 photosMap.set(e.body.id, { count: pics.length, hasVideo: !!e.body.video_id, images });
+                
+                // Extract variation attribute values for title cleaning
+                const variations = Array.isArray(e.body.variations) ? e.body.variations : [];
+                if (variations.length > 0) {
+                  const varAttrs = new Set<string>();
+                  for (const v of variations) {
+                    const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
+                    for (const c of combos) {
+                      if (c.value_name) varAttrs.add(c.value_name);
+                    }
+                  }
+                  if (varAttrs.size > 0) variationMap.set(e.body.id, varAttrs);
+                }
+              }
+            }
               }
             }
           }
