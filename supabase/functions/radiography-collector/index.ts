@@ -3516,7 +3516,7 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
     if (!listing?.title) return { success: false, error: 'Anúncio não encontrado no cache local. Atualize os dados para gerar a análise.' };
 
     // Fetch variation attributes from ML API to strip from title
-    const variationAttrs: string[] = [];
+    const variationValues: string[] = []; // individual variation values like "Branco", "Nenhum"
     const token = await getValidToken(supabase, sellerId);
     if (token) {
       try {
@@ -3529,8 +3529,12 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
           for (const v of vars) {
             const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
             for (const c of combos) {
-              if (c.value_name && !variationAttrs.includes(normalizeText(c.value_name))) {
-                variationAttrs.push(normalizeText(c.value_name));
+              if (c.value_name && !variationValues.includes(c.value_name)) {
+                variationValues.push(c.value_name);
+              }
+              // Also capture "Cor", "Tamanho" etc. — ML sometimes appends attribute name too
+              if (c.name && !variationValues.includes(c.name)) {
+                variationValues.push(c.name);
               }
             }
           }
@@ -3540,21 +3544,24 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
       }
     }
 
-    // Clean title by stripping variation suffixes
+    // Clean title by stripping variation suffixes from the end
     let currentTitle = listing.title;
-    if (variationAttrs.length > 0) {
-      for (const va of variationAttrs) {
-        const original = currentTitle;
-        // Try to remove the variation value from the end of the title
-        const tokens = currentTitle.split(/\s+/);
-        const vaTokens = va.split(/\s+/);
-        // Check if last N tokens match variation
-        if (tokens.length > vaTokens.length) {
-          const lastTokens = tokens.slice(-vaTokens.length).map(t => normalizeText(t));
-          if (lastTokens.every((t, i) => t === vaTokens[i])) {
-            currentTitle = tokens.slice(0, -vaTokens.length).join(' ').trim();
-          }
+    if (variationValues.length > 0) {
+      // Sort by length descending to remove longer matches first (e.g., "Cor Branco" before "Branco")
+      const sortedVars = [...variationValues].sort((a, b) => b.length - a.length);
+      // Multiple passes to strip chained variation tokens
+      for (let pass = 0; pass < 3; pass++) {
+        let changed = false;
+        for (const va of sortedVars) {
+          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+          const before = currentTitle;
+          currentTitle = currentTitle.replace(regex, '').trim();
+          if (currentTitle !== before) changed = true;
         }
+        if (!changed) break;
+      }
+      if (currentTitle !== listing.title) {
+        console.log(`[rad-collector] GENERATE_TITLE: cleaned "${listing.title}" → "${currentTitle}"`);
       }
     }
     const categoryId = listing.category_id;
