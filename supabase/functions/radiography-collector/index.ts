@@ -3796,25 +3796,11 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
       }
     }
 
-    // Clean title by stripping variation suffixes from the end
-    let currentTitle = listing.title;
-    if (variationValues.length > 0) {
-      // Sort by length descending to remove longer matches first (e.g., "Cor Branco" before "Branco")
-      const sortedVars = [...variationValues].sort((a, b) => b.length - a.length);
-      // Multiple passes to strip chained variation tokens
-      for (let pass = 0; pass < 3; pass++) {
-        let changed = false;
-        for (const va of sortedVars) {
-          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-          const before = currentTitle;
-          currentTitle = currentTitle.replace(regex, '').trim();
-          if (currentTitle !== before) changed = true;
-        }
-        if (!changed) break;
-      }
-      if (currentTitle !== listing.title) {
-        console.log(`[rad-collector] GENERATE_TITLE: cleaned "${listing.title}" → "${currentTitle}"`);
-      }
+    // Clean title using canonical normalizer (single source of truth)
+    const canonResult = getCanonicalTitle(listing.title, variationValues);
+    const currentTitle = canonResult.canonical;
+    if (canonResult.removed_tokens.length > 0) {
+      console.log(`[rad-collector] GENERATE_TITLE: canonical "${listing.title}" → "${currentTitle}" (removed: ${canonResult.removed_tokens.join(', ')})`);
     }
     const categoryId = listing.category_id;
 
