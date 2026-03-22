@@ -2381,13 +2381,8 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
     const currentTitle = listing.title;
     const categoryId = listing.category_id;
 
-    const variationAttrs: string[] = [];
-    if (listing.variation_attributes && Array.isArray(listing.variation_attributes)) {
-      for (const va of listing.variation_attributes) {
-        if (va.value_name) variationAttrs.push(normalizeText(va.value_name));
-        if (va.name) variationAttrs.push(normalizeText(va.name));
-      }
-    }
+    // Variation attributes not available in meli_listings_cache - skip variation filtering
+    // Future: fetch from API or analyzed_items if needed
 
     const { data: feedback } = await supabase.from('listing_keyword_feedback')
       .select('keyword, is_relevant').eq('seller_id', sellerId).eq('listing_id', itemId);
