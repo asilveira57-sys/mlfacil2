@@ -983,7 +983,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
 }) {
   const { toast } = useToast();
   const [feedbackMap, setFeedbackMap] = useState<Record<string, boolean>>({});
-  const [titleData, setTitleData] = useState<{ best: TitleSuggestion | null; suggestions: TitleSuggestion[]; issues: string[] } | null>(null);
+  const [titleData, setTitleData] = useState<{ best: TitleSuggestion | null; suggestions: TitleSuggestion[]; issues: string[]; current_title?: string; current_length?: number } | null>(null);
   const [titleLoading, setTitleLoading] = useState(false);
   const [copiedTitle, setCopiedTitle] = useState<string | null>(null);
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
