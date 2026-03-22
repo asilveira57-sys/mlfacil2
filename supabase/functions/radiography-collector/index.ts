@@ -1559,6 +1559,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
         keyword_coverage_ratio: Number(adherence.coverage_ratio.toFixed(4)),
         missing_keywords: adherence.missing.slice(0, 15),
         irrelevant_keywords: adherence.irrelevant.slice(0, 10),
+        keywords_relevantes: catKeywords.map(k => k.keyword).slice(0, 30),
+        keywords_presentes: adherence.found.slice(0, 20),
+        keywords_faltantes: adherence.missing.slice(0, 15),
         issues: allIssues, suggestions: allSuggestions,
         analysis_details: {
           structural, adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length, details: adherence.details.filter(d => d.relevance !== 'low').slice(0, 15) },
@@ -2282,6 +2285,220 @@ async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, 
 }
 
 // ============================================================================
+// FLOW 9 — SAVE KEYWORD FEEDBACK
+// ============================================================================
+async function handleSaveKeywordFeedback(supabase: any, sellerId: string, itemId: string, keyword: string, isRelevant: boolean, tenantId?: string) {
+  const { error } = await supabase.from('listing_keyword_feedback')
+    .upsert({
+      seller_id: sellerId, listing_id: itemId, keyword: normalizeText(keyword),
+      is_relevant: isRelevant, source: 'manual', tenant_id: tenantId || null,
+    }, { onConflict: 'seller_id,listing_id,keyword' });
+  if (error) return { success: false, error: error.message };
+  return { success: true, keyword, is_relevant: isRelevant };
+}
+
+// ============================================================================
+// FLOW 10 — GENERATE TITLE SUGGESTIONS (60 char limit)
+// ============================================================================
+const MAX_TITLE_LENGTH = 60;
+const TITLE_CONNECTORS = new Set(['de', 'para', 'com', 'e', 'a', 'o', 'em', 'no', 'na', 'do', 'da', 'por']);
+
+function scoreTitleSuggestion(title: string, keywords: Array<{keyword: string; normalized: string; weight: number}>, variationAttrs: string[]): {score: number; breakdown: Record<string, number>} {
+  const len = title.length;
+  const normalizedTitle = normalizeText(title);
+  const titleTokens = tokenize(title);
+
+  let lengthScore = 0;
+  if (len >= 50 && len <= 60) lengthScore = 20;
+  else if (len >= 40 && len <= 60) lengthScore = 15;
+  else if (len >= 30) lengthScore = 10;
+  else lengthScore = 5;
+
+  let kwFound = 0;
+  for (const kw of keywords) {
+    const kwTokens = kw.normalized.split(" ").filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+    if (kwTokens.length === 0) continue;
+    const match = kwTokens.filter(t => titleTokens.some(tt => tt === t || tt.includes(t) || t.includes(tt))).length / kwTokens.length;
+    if (match >= 0.7) kwFound++;
+  }
+  const kwScore = keywords.length > 0 ? Math.round((kwFound / Math.min(keywords.length, 10)) * 25) : 15;
+
+  let adhScore = 0;
+  let totalW = 0, matchW = 0;
+  for (const kw of keywords.slice(0, 15)) {
+    totalW += kw.weight;
+    if (normalizedTitle.includes(kw.normalized)) matchW += kw.weight;
+  }
+  adhScore = totalW > 0 ? Math.round((matchW / totalW) * 20) : 10;
+
+  let clarityScore = 15;
+  for (const word of GENERIC_IRRELEVANT_WORDS) {
+    if (normalizedTitle.includes(normalizeText(word))) clarityScore -= 3;
+  }
+  clarityScore = Math.max(0, clarityScore);
+
+  let repScore = 10;
+  const wordCount = new Map<string, number>();
+  for (const t of titleTokens) wordCount.set(t, (wordCount.get(t) || 0) + 1);
+  for (const [, c] of wordCount) { if (c >= 2) repScore -= 3; }
+  repScore = Math.max(0, repScore);
+
+  const unique = new Set(titleTokens);
+  const semScore = unique.size >= 6 ? 10 : unique.size >= 4 ? 7 : unique.size >= 2 ? 4 : 2;
+
+  const score = Math.min(100, lengthScore + kwScore + adhScore + clarityScore + repScore + semScore);
+  return { score, breakdown: { length: lengthScore, keywords: kwScore, adherence: adhScore, clarity: clarityScore, repetition: repScore, semantic: semScore } };
+}
+
+function compressTitle(words: string[], maxLen: number): string {
+  let title = words.join(' ');
+  if (title.length <= maxLen) return title;
+  while (title.length > maxLen && words.length > 1) {
+    const last = words[words.length - 1].toLowerCase();
+    if (TITLE_CONNECTORS.has(last)) { words.pop(); title = words.join(' '); } else break;
+  }
+  if (title.length <= maxLen) return title;
+  while (title.length > maxLen && words.length > 2) { words.pop(); title = words.join(' '); }
+  return title.slice(0, maxLen).trim();
+}
+
+async function handleGenerateTitle(supabase: any, sellerId: string, itemId: string, tenantId?: string) {
+  const startTime = Date.now();
+  console.log(`[rad-collector] GENERATE_TITLE: ${itemId} for seller ${sellerId}`);
+
+  await supabase.from('title_suggestion_logs').insert({
+    seller_id: sellerId, listing_id: itemId, tenant_id: tenantId || null,
+    status: 'started', action: 'TITLE_GENERATION_STARTED',
+  });
+
+  try {
+    const { data: listing } = await supabase.from('meli_listings_cache')
+      .select('item_id, title, category_id, variation_attributes')
+      .eq('item_id', itemId).eq('seller_id', sellerId).maybeSingle();
+    if (!listing?.title) return { success: false, error: 'Item not found' };
+
+    const currentTitle = listing.title;
+    const categoryId = listing.category_id;
+
+    const variationAttrs: string[] = [];
+    if (listing.variation_attributes && Array.isArray(listing.variation_attributes)) {
+      for (const va of listing.variation_attributes) {
+        if (va.value_name) variationAttrs.push(normalizeText(va.value_name));
+        if (va.name) variationAttrs.push(normalizeText(va.name));
+      }
+    }
+
+    const { data: feedback } = await supabase.from('listing_keyword_feedback')
+      .select('keyword, is_relevant').eq('seller_id', sellerId).eq('listing_id', itemId);
+    const feedbackMap = new Map<string, boolean>();
+    if (feedback) for (const f of feedback) feedbackMap.set(f.keyword, f.is_relevant);
+
+    let keywords: Array<{keyword: string; normalized: string; weight: number}> = [];
+    if (categoryId) {
+      const { data: kws } = await supabase.from('market_keywords_cache')
+        .select('keyword, normalized_keyword, weight')
+        .eq('category_id', categoryId).order('weight', { ascending: false }).limit(30);
+      if (kws) keywords = kws.map((k: any) => ({ keyword: k.keyword, normalized: k.normalized_keyword, weight: k.weight }));
+    }
+
+    const filteredKeywords = keywords.filter(kw => feedbackMap.get(kw.normalized) !== false);
+    const validKeywords = filteredKeywords.filter(kw => {
+      if (variationAttrs.some(va => kw.normalized.includes(va) || va.includes(kw.normalized))) return false;
+      if (GENERIC_IRRELEVANT_WORDS.has(kw.keyword)) return false;
+      return true;
+    });
+
+    const currentTokens = tokenize(currentTitle);
+    const currentTokensClean = currentTokens.filter(t => {
+      if (variationAttrs.some(va => t === va || va.includes(t))) return false;
+      if (GENERIC_IRRELEVANT_WORDS.has(t)) return false;
+      return true;
+    });
+
+    const wordPool: Array<{word: string; weight: number; source: string}> = [];
+    const added = new Set<string>();
+    for (const t of currentTokensClean) {
+      if (!added.has(t) && t.length > 2 && !SEO_STOPWORDS.has(t)) {
+        const kw = validKeywords.find(k => k.normalized === t || k.normalized.includes(t));
+        wordPool.push({ word: t, weight: kw?.weight || 0.3, source: 'current' });
+        added.add(t);
+      }
+    }
+    for (const kw of validKeywords) {
+      const kwTokens = kw.normalized.split(' ').filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+      for (const t of kwTokens) {
+        if (!added.has(t)) { wordPool.push({ word: t, weight: kw.weight, source: 'category' }); added.add(t); }
+      }
+    }
+    wordPool.sort((a, b) => b.weight - a.weight);
+
+    const capitalize = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+    const suggestions: Array<{title: string; score: number; length: number; breakdown: Record<string, number>}> = [];
+
+    // Variation 1: Clean current
+    const v1 = compressTitle(currentTokensClean.map(capitalize), MAX_TITLE_LENGTH);
+    if (v1.length >= 10) { const r = scoreTitleSuggestion(v1, validKeywords, variationAttrs); suggestions.push({ title: v1, ...r, length: v1.length }); }
+
+    // Variation 2: Keywords-first
+    const v2 = compressTitle(wordPool.slice(0, 12).map(w => capitalize(w.word)), MAX_TITLE_LENGTH);
+    if (v2.length >= 10) { const r = scoreTitleSuggestion(v2, validKeywords, variationAttrs); suggestions.push({ title: v2, ...r, length: v2.length }); }
+
+    // Variation 3: Mixed
+    const v3Words = [...currentTokensClean.slice(0, 5), ...wordPool.filter(w => w.source === 'category').slice(0, 5).map(m => m.word)];
+    const v3 = compressTitle([...new Set(v3Words)].map(capitalize), MAX_TITLE_LENGTH);
+    if (v3.length >= 10) { const r = scoreTitleSuggestion(v3, validKeywords, variationAttrs); suggestions.push({ title: v3, ...r, length: v3.length }); }
+
+    // Variation 4: Compact
+    const v4 = compressTitle(wordPool.slice(0, 8).map(w => capitalize(w.word)), MAX_TITLE_LENGTH);
+    if (v4.length >= 10) { const r = scoreTitleSuggestion(v4, validKeywords, variationAttrs); suggestions.push({ title: v4, ...r, length: v4.length }); }
+
+    // Variation 5: Original + top missing
+    const topMissing = wordPool.filter(w => w.source === 'category' && !currentTokensClean.includes(w.word)).slice(0, 3);
+    const v5 = compressTitle([...new Set([...currentTokensClean, ...topMissing.map(m => m.word)])].map(capitalize), MAX_TITLE_LENGTH);
+    if (v5.length >= 10) { const r = scoreTitleSuggestion(v5, validKeywords, variationAttrs); suggestions.push({ title: v5, ...r, length: v5.length }); }
+
+    const uniqueSuggestions = [...new Map(suggestions.map(s => [normalizeText(s.title), s])).values()]
+      .sort((a, b) => b.score - a.score).slice(0, 5);
+    const best = uniqueSuggestions[0] || null;
+
+    const issues: string[] = [];
+    if (currentTitle.length > 60) issues.push(`Título excede 60 caracteres (${currentTitle.length})`);
+    if (currentTitle.length < 30) issues.push('Título muito curto — subutiliza o espaço disponível');
+    const currentNormalized = normalizeText(currentTitle);
+    for (const word of GENERIC_IRRELEVANT_WORDS) { if (currentNormalized.includes(normalizeText(word))) issues.push(`Termo genérico: "${word}"`); }
+    for (const va of variationAttrs) { if (currentNormalized.includes(va) && va.length > 2) issues.push(`Variação no título: "${va}"`); }
+    const missingImportant = validKeywords.filter(kw => !currentNormalized.includes(kw.normalized)).slice(0, 5);
+    if (missingImportant.length > 0) issues.push(`Falta keyword: ${missingImportant.map(k => k.keyword).join(', ')}`);
+
+    await supabase.from('title_suggestion_analysis').upsert({
+      seller_id: sellerId, listing_id: itemId, tenant_id: tenantId || null,
+      current_title: currentTitle, current_length: currentTitle.length,
+      best_suggestion: best?.title || null, best_score: best?.score || 0,
+      suggestions_json: uniqueSuggestions, issues_json: issues,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'seller_id,listing_id' });
+
+    const dur = Date.now() - startTime;
+    await supabase.from('title_suggestion_logs').insert({
+      seller_id: sellerId, listing_id: itemId, tenant_id: tenantId || null,
+      status: 'completed', action: 'TITLE_GENERATION_COMPLETED',
+      score: best?.score || 0, execution_time_ms: dur,
+      message: `${uniqueSuggestions.length} suggestions`,
+      metadata_json: { current_length: currentTitle.length, best_length: best?.title?.length, keywords_used: validKeywords.length },
+    });
+
+    return { success: true, current_title: currentTitle, current_length: currentTitle.length, best, suggestions: uniqueSuggestions, issues, keywords_used: validKeywords.length, variation_attrs_excluded: variationAttrs, duration_ms: dur };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown';
+    await supabase.from('title_suggestion_logs').insert({
+      seller_id: sellerId, listing_id: itemId, tenant_id: tenantId || null,
+      status: 'error', action: 'TITLE_GENERATION_FAILED', message: msg, execution_time_ms: Date.now() - startTime,
+    });
+    return { success: false, error: msg };
+  }
+}
+
+// ============================================================================
 // MAIN HANDLER
 // ============================================================================
 Deno.serve(async (req) => {
@@ -2357,8 +2574,18 @@ Deno.serve(async (req) => {
         result = await handleRefreshMarketKeywords(supabase, body.category_id);
         break;
 
+      case "generate_title":
+        if (!seller_id || !body.item_id) return new Response(JSON.stringify({ error: "seller_id and item_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await handleGenerateTitle(supabase, seller_id, body.item_id, body.tenant_id);
+        break;
+
+      case "save_keyword_feedback":
+        if (!seller_id || !body.item_id || !body.keyword) return new Response(JSON.stringify({ error: "seller_id, item_id, keyword required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await handleSaveKeywordFeedback(supabase, seller_id, body.item_id, body.keyword, body.is_relevant ?? true, body.tenant_id);
+        break;
+
       default:
-        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full, enrich_sales, analyze, refresh_keywords` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full, enrich_sales, analyze, refresh_keywords, generate_title, save_keyword_feedback` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

@@ -7276,6 +7276,39 @@ export type Database = {
         }
         Relationships: []
       }
+      listing_keyword_feedback: {
+        Row: {
+          created_at: string
+          id: string
+          is_relevant: boolean
+          keyword: string
+          listing_id: string
+          seller_id: string
+          source: string
+          tenant_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_relevant?: boolean
+          keyword: string
+          listing_id: string
+          seller_id: string
+          source?: string
+          tenant_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_relevant?: boolean
+          keyword?: string
+          listing_id?: string
+          seller_id?: string
+          source?: string
+          tenant_id?: string | null
+        }
+        Relationships: []
+      }
       listing_media_analysis: {
         Row: {
           analysis_json: Json | null
@@ -7426,6 +7459,9 @@ export type Database = {
           issues: Json | null
           item_id: string
           keyword_coverage_ratio: number | null
+          keywords_faltantes: Json | null
+          keywords_presentes: Json | null
+          keywords_relevantes: Json | null
           missing_keywords: Json | null
           seller_id: string
           seo_grade: string
@@ -7444,6 +7480,9 @@ export type Database = {
           issues?: Json | null
           item_id: string
           keyword_coverage_ratio?: number | null
+          keywords_faltantes?: Json | null
+          keywords_presentes?: Json | null
+          keywords_relevantes?: Json | null
           missing_keywords?: Json | null
           seller_id: string
           seo_grade?: string
@@ -7462,6 +7501,9 @@ export type Database = {
           issues?: Json | null
           item_id?: string
           keyword_coverage_ratio?: number | null
+          keywords_faltantes?: Json | null
+          keywords_presentes?: Json | null
+          keywords_relevantes?: Json | null
           missing_keywords?: Json | null
           seller_id?: string
           seo_grade?: string
@@ -18163,6 +18205,93 @@ export type Database = {
           source?: string | null
           user_agent?: string | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      title_suggestion_analysis: {
+        Row: {
+          best_score: number | null
+          best_suggestion: string | null
+          created_at: string
+          current_length: number | null
+          current_title: string | null
+          id: string
+          issues_json: Json | null
+          listing_id: string
+          seller_id: string
+          suggestions_json: Json | null
+          tenant_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          best_score?: number | null
+          best_suggestion?: string | null
+          created_at?: string
+          current_length?: number | null
+          current_title?: string | null
+          id?: string
+          issues_json?: Json | null
+          listing_id: string
+          seller_id: string
+          suggestions_json?: Json | null
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          best_score?: number | null
+          best_suggestion?: string | null
+          created_at?: string
+          current_length?: number | null
+          current_title?: string | null
+          id?: string
+          issues_json?: Json | null
+          listing_id?: string
+          seller_id?: string
+          suggestions_json?: Json | null
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      title_suggestion_logs: {
+        Row: {
+          action: string | null
+          created_at: string
+          execution_time_ms: number | null
+          id: string
+          listing_id: string | null
+          message: string | null
+          metadata_json: Json | null
+          score: number | null
+          seller_id: string | null
+          status: string
+          tenant_id: string | null
+        }
+        Insert: {
+          action?: string | null
+          created_at?: string
+          execution_time_ms?: number | null
+          id?: string
+          listing_id?: string | null
+          message?: string | null
+          metadata_json?: Json | null
+          score?: number | null
+          seller_id?: string | null
+          status: string
+          tenant_id?: string | null
+        }
+        Update: {
+          action?: string | null
+          created_at?: string
+          execution_time_ms?: number | null
+          id?: string
+          listing_id?: string | null
+          message?: string | null
+          metadata_json?: Json | null
+          score?: number | null
+          seller_id?: string | null
+          status?: string
+          tenant_id?: string | null
         }
         Relationships: []
       }
