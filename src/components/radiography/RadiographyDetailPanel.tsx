@@ -15,7 +15,7 @@ import {
   BarChart3, ArrowUpDown, AlertOctagon, Lightbulb, Search, Check,
   X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck, Megaphone,
   Copy, RefreshCw, Loader2, ThumbsUp, ThumbsDown, Sparkles, Type,
-  FileText, ClipboardList, ChevronDown, ChevronUp,
+  FileText, ClipboardList, ChevronDown, ChevronUp, Filter,
 } from "lucide-react";
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
