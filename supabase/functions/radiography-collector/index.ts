@@ -13,6 +13,55 @@ const ML_SECRET_KEY = Deno.env.get("ML_SECRET_KEY") || "";
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// ============================================================================
+// CANONICAL TITLE — Single source of truth for title without ML variation suffixes
+// Rule: No ML listing title exceeds 60 chars. If it does, it's because ML appended
+// variation attributes (e.g., "Branco Nenhum", "Cor Branco", "110v").
+// This function strips those suffixes deterministically.
+// ============================================================================
+function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | string[] | null): { canonical: string; raw_length: number; canonical_length: number; removed_tokens: string[]; strategy: string } {
+  const raw_length = rawTitle.length;
+  if (raw_length <= 60 && (!variationAttrs || (variationAttrs instanceof Set ? variationAttrs.size === 0 : variationAttrs.length === 0))) {
+    return { canonical: rawTitle, raw_length, canonical_length: raw_length, removed_tokens: [], strategy: 'none' };
+  }
+
+  const varSet = variationAttrs instanceof Set ? variationAttrs : new Set(variationAttrs || []);
+  let title = rawTitle;
+  const removed: string[] = [];
+
+  if (varSet.size > 0) {
+    // Sort by length descending to remove longer matches first
+    const sorted = [...varSet].sort((a, b) => b.length - a.length);
+    // Multiple passes (up to 5) to strip chained variation tokens from end
+    for (let pass = 0; pass < 5; pass++) {
+      let changed = false;
+      for (const va of sorted) {
+        if (va.length < 2) continue;
+        const escaped = va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`\\s+${escaped}\\s*$`, 'i');
+        const before = title;
+        title = title.replace(regex, '').trim();
+        if (title !== before) { removed.push(va); changed = true; }
+      }
+      if (!changed) break;
+    }
+  }
+
+  // If still > 60 after variation stripping, apply word-boundary truncation
+  if (title.length > 60) {
+    const words = title.split(' ');
+    while (words.join(' ').length > 60 && words.length > 3) {
+      removed.push(words.pop()!);
+    }
+    title = words.join(' ');
+  }
+
+  title = title.trim();
+  const strategy = removed.length > 0 ? (varSet.size > 0 ? 'variation_strip' : 'truncate') : 'none';
+
+  return { canonical: title, raw_length, canonical_length: title.length, removed_tokens: removed, strategy };
+}
+
 // Safety timeout for edge function (50s to leave margin)
 const SAFETY_TIMEOUT_MS = 50_000;
 
