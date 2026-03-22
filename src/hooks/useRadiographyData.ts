@@ -28,6 +28,17 @@ export interface SeoAnalysis {
   keyword_score?: number;
   score: number;
   grade?: string;
+  // 4-layer sub-scores
+  title_score?: number;
+  description_score?: number;
+  attributes_score?: number;
+  model_score?: number;
+  description_length?: number;
+  keyword_density?: number;
+  model_value?: string | null;
+  missing_attributes?: string[];
+  weak_attributes?: string[];
+  // Keywords
   category_id?: string;
   category_name?: string;
   l1_category_name?: string;
