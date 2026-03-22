@@ -1283,17 +1283,49 @@ function assessKeywordRelevance(keyword: string, title: string, categoryName: st
 
 // --- 4-LAYER SEO ANALYSIS ---
 
-function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): { score: number; issues: string[]; suggestions: string[] } {
+function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): {
+  score: number; issues: string[]; suggestions: string[];
+  positives: string[]; negatives: string[]; improvement_actions: string[]; summary: string;
+  length: number; limit_status: string; matched_keywords: string[]; missing_keywords: string[];
+} {
   let score = 0;
   const issues: string[] = [];
   const suggestions: string[] = [];
+  const positives: string[] = [];
+  const negatives: string[] = [];
+  const improvement_actions: string[] = [];
+  const matched_keywords: string[] = [];
+  const missing_keywords: string[] = [];
   const titleLen = title.length;
+  let limit_status = 'ok';
 
   // Length: 50-60 ideal → +30
-  if (titleLen >= 50 && titleLen <= 60) { score += 30; }
-  else if (titleLen >= 40 && titleLen <= 70) { score += 22; }
-  else if (titleLen >= 30) { score += 12; }
-  else { issues.push('Título muito curto'); suggestions.push('Expanda o título para 50-60 caracteres com termos relevantes'); }
+  if (titleLen >= 50 && titleLen <= 60) {
+    score += 30;
+    positives.push(`Título com ${titleLen} caracteres — dentro da faixa ideal (50-60)`);
+  } else if (titleLen >= 40 && titleLen <= 70) {
+    score += 22;
+    if (titleLen > 60) {
+      limit_status = 'above_limit';
+      negatives.push(`Título com ${titleLen} caracteres — excede o limite de 60`);
+      improvement_actions.push(`Reduza ${titleLen - 60} caracteres do título para ficar no limite ideal`);
+    } else {
+      limit_status = 'short';
+      negatives.push(`Título com ${titleLen} caracteres — abaixo da faixa ideal de 50-60`);
+      improvement_actions.push(`Adicione mais ${50 - titleLen} caracteres com termos relevantes`);
+    }
+  } else if (titleLen >= 30) {
+    score += 12;
+    limit_status = 'short';
+    negatives.push(`Título com apenas ${titleLen} caracteres — muito curto para SEO`);
+    improvement_actions.push('Expanda o título para 50-60 caracteres com termos relevantes da categoria');
+  } else {
+    limit_status = 'very_short';
+    issues.push('Título muito curto');
+    negatives.push(`Título com apenas ${titleLen} caracteres — prejudica a descoberta do anúncio`);
+    suggestions.push('Expanda o título para 50-60 caracteres com termos relevantes');
+    improvement_actions.push('Expanda o título para 50-60 caracteres usando palavras-chave da categoria');
+  }
   if (titleLen > 60) { issues.push(`Título excede 60 caracteres (${titleLen})`); suggestions.push('Reduza o título para no máximo 60 caracteres'); }
 
   // Keyword presence in title → +40
@@ -1301,43 +1333,131 @@ function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; nor
   const titleNorm = normalizeText(title);
   let kwFoundCount = 0;
   for (const kw of catKeywords.slice(0, 15)) {
-    if (checkKeywordInText(kw.keyword, titleNorm)) kwFoundCount++;
+    if (checkKeywordInText(kw.keyword, titleNorm)) {
+      kwFoundCount++;
+      matched_keywords.push(kw.keyword);
+    } else {
+      missing_keywords.push(kw.keyword);
+    }
   }
   const kwRatio = catKeywords.length > 0 ? kwFoundCount / Math.min(catKeywords.length, 15) : 0;
   score += Math.round(kwRatio * 40);
-  if (kwRatio < 0.2 && catKeywords.length > 0) { issues.push('Baixa presença de palavras-chave da categoria no título'); suggestions.push('Adicione termos mais buscados da categoria'); }
+
+  if (kwRatio >= 0.5) {
+    positives.push(`Boa presença de palavras-chave da categoria (${kwFoundCount} de ${Math.min(catKeywords.length, 15)} encontradas)`);
+  } else if (kwRatio >= 0.2) {
+    negatives.push(`Cobertura parcial de palavras-chave (${kwFoundCount} de ${Math.min(catKeywords.length, 15)})`);
+    if (missing_keywords.length > 0) {
+      improvement_actions.push(`Inclua palavras-chave importantes como: ${missing_keywords.slice(0, 3).join(', ')}`);
+    }
+  } else if (catKeywords.length > 0) {
+    issues.push('Baixa presença de palavras-chave da categoria no título');
+    negatives.push(`Apenas ${kwFoundCount} palavra(s)-chave da categoria encontrada(s) no título`);
+    suggestions.push('Adicione termos mais buscados da categoria');
+    if (missing_keywords.length > 0) {
+      improvement_actions.push(`Priorize incluir: ${missing_keywords.slice(0, 4).join(', ')}`);
+    }
+  }
 
   // Word variety → +20
   const uniqueTokens = new Set(titleTokens);
-  if (uniqueTokens.size >= 6) { score += 20; }
-  else if (uniqueTokens.size >= 4) { score += 14; }
-  else if (uniqueTokens.size >= 2) { score += 7; }
-  else { issues.push('Baixa variação semântica no título'); }
+  if (uniqueTokens.size >= 6) {
+    score += 20;
+    positives.push(`Boa variedade semântica no título (${uniqueTokens.size} termos únicos)`);
+  } else if (uniqueTokens.size >= 4) {
+    score += 14;
+  } else if (uniqueTokens.size >= 2) {
+    score += 7;
+    negatives.push('Baixa variedade de termos no título');
+  } else {
+    issues.push('Baixa variação semântica no título');
+    negatives.push('Título com poucos termos — dificulta a descoberta');
+  }
 
   // Repetition penalty
   const wordCount = new Map<string, number>();
   for (const t of titleTokens) wordCount.set(t, (wordCount.get(t) || 0) + 1);
-  for (const [w, c] of wordCount) { if (c >= 3) { score -= 10; issues.push(`Palavra "${w}" repetida ${c}x no título`); } }
+  for (const [w, c] of wordCount) {
+    if (c >= 3) {
+      score -= 10;
+      issues.push(`Palavra "${w}" repetida ${c}x no título`);
+      negatives.push(`Repetição excessiva de "${w}" (${c}x) — penaliza o SEO`);
+      improvement_actions.push(`Remova repetições de "${w}" e substitua por sinônimos ou termos complementares`);
+    }
+  }
 
   // Generic words penalty
-  for (const t of titleTokens) { if (GENERIC_IRRELEVANT_WORDS.has(t)) { score -= 5; issues.push(`Termo genérico "${t}" no título`); } }
+  for (const t of titleTokens) {
+    if (GENERIC_IRRELEVANT_WORDS.has(t)) {
+      score -= 5;
+      issues.push(`Termo genérico "${t}" no título`);
+      negatives.push(`Termo "${t}" é genérico e não contribui para buscas`);
+      improvement_actions.push(`Substitua "${t}" por um termo mais específico da categoria`);
+    }
+  }
 
-  return { score: Math.max(0, Math.min(score, 100)), issues, suggestions };
+  const finalScore = Math.max(0, Math.min(score, 100));
+
+  // Summary
+  let summary = '';
+  if (finalScore >= 70) summary = 'Título bem otimizado, com boa cobertura de palavras-chave e aproveitamento do espaço.';
+  else if (finalScore >= 40) summary = `Título acima do básico, mas ainda pode melhorar ${titleLen > 60 ? 'reduzindo caracteres e' : ''} ${kwFoundCount < 3 ? 'incluindo mais palavras-chave relevantes' : 'otimizando a escolha de termos'}.`;
+  else summary = 'Título fraco para SEO — precisa de revisão significativa nos termos e no aproveitamento do espaço.';
+
+  return { score: finalScore, issues, suggestions, positives, negatives, improvement_actions, summary, length: titleLen, limit_status, matched_keywords, missing_keywords };
 }
 
-function computeDescriptionSeo(description: string | null, title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): { score: number; length: number; density: number; issues: string[]; suggestions: string[] } {
+function computeDescriptionSeo(description: string | null, title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): {
+  score: number; length: number; density: number; issues: string[]; suggestions: string[];
+  positives: string[]; negatives: string[]; improvement_actions: string[]; summary: string;
+  length_status: string; matched_keywords: string[]; missing_keywords: string[];
+  description_preview: string;
+} {
   const issues: string[] = [];
   const suggestions: string[] = [];
+  const positives: string[] = [];
+  const negatives: string[] = [];
+  const improvement_actions: string[] = [];
+  const matched_keywords: string[] = [];
+  const missing_keywords: string[] = [];
   const desc = (description || '').trim();
   const descLen = desc.length;
   let score = 0;
+  let length_status = 'empty';
 
   // Length → +40
-  if (descLen >= 500) { score += 40; }
-  else if (descLen >= 300) { score += 25; issues.push(`Descrição com ${descLen} caracteres (ideal: 500+)`); suggestions.push('Aumente a descrição para mais de 500 caracteres'); }
-  else if (descLen >= 100) { score += 12; issues.push('Descrição muito curta para SEO'); suggestions.push('Expanda a descrição com detalhes do produto, benefícios e especificações'); }
-  else if (descLen > 0) { score += 5; issues.push('Descrição extremamente curta'); suggestions.push('Crie uma descrição completa com no mínimo 500 caracteres'); }
-  else { issues.push('Sem descrição'); suggestions.push('Adicione uma descrição detalhada do produto'); }
+  if (descLen >= 500) {
+    score += 40;
+    length_status = 'strong';
+    positives.push(`Descrição com ${descLen} caracteres — boa extensão para SEO`);
+  } else if (descLen >= 300) {
+    score += 25;
+    length_status = 'acceptable';
+    issues.push(`Descrição com ${descLen} caracteres (ideal: 500+)`);
+    negatives.push(`Descrição com ${descLen} caracteres — aceitável, mas abaixo do ideal de 500+`);
+    suggestions.push('Aumente a descrição para mais de 500 caracteres');
+    improvement_actions.push(`Adicione mais ${500 - descLen} caracteres com detalhes sobre uso, material e aplicação do produto`);
+  } else if (descLen >= 100) {
+    score += 12;
+    length_status = 'short';
+    issues.push('Descrição muito curta para SEO');
+    negatives.push(`Descrição com apenas ${descLen} caracteres — muito curta para indexação`);
+    suggestions.push('Expanda a descrição com detalhes do produto, benefícios e especificações');
+    improvement_actions.push('Crie uma descrição completa com no mínimo 500 caracteres incluindo especificações, benefícios e aplicações');
+  } else if (descLen > 0) {
+    score += 5;
+    length_status = 'very_short';
+    issues.push('Descrição extremamente curta');
+    negatives.push(`Descrição com apenas ${descLen} caracteres — praticamente inexistente para SEO`);
+    suggestions.push('Crie uma descrição completa com no mínimo 500 caracteres');
+    improvement_actions.push('Reescreva a descrição com pelo menos 500 caracteres, incluindo detalhes técnicos, benefícios e aplicações');
+  } else {
+    length_status = 'empty';
+    issues.push('Sem descrição');
+    negatives.push('Anúncio sem descrição — impacto negativo forte no SEO');
+    suggestions.push('Adicione uma descrição detalhada do produto');
+    improvement_actions.push('Crie uma descrição completa com no mínimo 500 caracteres');
+  }
 
   // Keyword density → +30
   let density = 0;
@@ -1346,14 +1466,36 @@ function computeDescriptionSeo(description: string | null, title: string, catKey
     const descNorm = normalizeText(desc);
     let kwFound = 0;
     for (const kw of catKeywords.slice(0, 15)) {
-      if (checkKeywordInText(kw.keyword, descNorm)) kwFound++;
+      if (checkKeywordInText(kw.keyword, descNorm)) {
+        kwFound++;
+        matched_keywords.push(kw.keyword);
+      } else {
+        missing_keywords.push(kw.keyword);
+      }
     }
     density = descTokens.length > 0 ? kwFound / descTokens.length : 0;
     const densityScore = catKeywords.length > 0 ? kwFound / Math.min(catKeywords.length, 15) : 0;
-    if (densityScore >= 0.3) { score += 30; }
-    else if (densityScore >= 0.15) { score += 20; }
-    else if (densityScore > 0) { score += 10; suggestions.push('Insira palavras-chave naturalmente na descrição'); }
-    else if (catKeywords.length > 0) { suggestions.push('Inclua termos relevantes da categoria na descrição'); }
+    if (densityScore >= 0.3) {
+      score += 30;
+      positives.push(`Boa cobertura de palavras-chave na descrição (${kwFound} termos encontrados)`);
+    } else if (densityScore >= 0.15) {
+      score += 20;
+      negatives.push(`Cobertura parcial de palavras-chave na descrição (${kwFound} de ${Math.min(catKeywords.length, 15)})`);
+      if (missing_keywords.length > 0) {
+        improvement_actions.push(`Inclua naturalmente na descrição: ${missing_keywords.slice(0, 3).join(', ')}`);
+      }
+    } else if (densityScore > 0) {
+      score += 10;
+      negatives.push(`Poucas palavras-chave da categoria na descrição (apenas ${kwFound})`);
+      suggestions.push('Insira palavras-chave naturalmente na descrição');
+      if (missing_keywords.length > 0) {
+        improvement_actions.push(`Adicione termos relevantes como: ${missing_keywords.slice(0, 4).join(', ')}`);
+      }
+    } else if (catKeywords.length > 0) {
+      negatives.push('Nenhuma palavra-chave relevante encontrada na descrição');
+      suggestions.push('Inclua termos relevantes da categoria na descrição');
+      improvement_actions.push('Reescreva a descrição incorporando as palavras-chave mais buscadas da categoria');
+    }
   }
 
   // Not just title repetition → +15
@@ -1362,40 +1504,82 @@ function computeDescriptionSeo(description: string | null, title: string, catKey
     const descNorm = normalizeText(desc);
     if (descNorm === titleNorm || (descLen < titleNorm.length * 1.5 && descNorm.includes(titleNorm))) {
       issues.push('Descrição é apenas repetição do título');
+      negatives.push('Descrição repete o título sem acrescentar informação');
+      improvement_actions.push('Diferencie a descrição do título — adicione especificações, benefícios e contexto de uso');
     } else {
       score += 15;
+      positives.push('Descrição diferente do título — bom para indexação');
     }
   }
 
   // Context coherence → +15
-  if (descLen >= 100) { score += 15; }
+  if (descLen >= 100) {
+    score += 15;
+    if (descLen >= 300) positives.push('Descrição com contexto suficiente para indexação');
+  }
 
-  return { score: Math.max(0, Math.min(score, 100)), length: descLen, density: Number(density.toFixed(4)), issues, suggestions };
+  const finalScore = Math.max(0, Math.min(score, 100));
+
+  let summary = '';
+  if (finalScore >= 70) summary = `Descrição com boa base de texto (${descLen} chars) e cobertura razoável de palavras-chave.`;
+  else if (finalScore >= 40) summary = `Descrição existe mas ${descLen < 500 ? 'ainda precisa ser expandida' : 'falta cobertura de palavras-chave relevantes da categoria'}.`;
+  else summary = descLen === 0 ? 'Sem descrição — impacto significativo no SEO do anúncio.' : `Descrição muito curta (${descLen} chars) e com pouca relevância para buscas.`;
+
+  return {
+    score: finalScore, length: descLen, density: Number(density.toFixed(4)), issues, suggestions,
+    positives, negatives, improvement_actions, summary, length_status,
+    matched_keywords, missing_keywords,
+    description_preview: desc.slice(0, 500),
+  };
 }
 
-function computeAttributesSeo(attributes: any[]): { score: number; missing: string[]; weak: string[]; issues: string[]; suggestions: string[]; total: number; filled: number } {
+function computeAttributesSeo(attributes: any[]): {
+  score: number; missing: string[]; weak: string[]; issues: string[]; suggestions: string[]; total: number; filled: number;
+  positives: string[]; negatives: string[]; improvement_actions: string[]; summary: string;
+  strong_attributes: string[]; weak_attributes_detail: string[];
+} {
   const issues: string[] = [];
   const suggestions: string[] = [];
+  const positives: string[] = [];
+  const negatives: string[] = [];
+  const improvement_actions: string[] = [];
   const missing: string[] = [];
   const weak: string[] = [];
+  const strong_attributes: string[] = [];
+  const weak_attributes_detail: string[] = [];
 
   if (!attributes || !Array.isArray(attributes) || attributes.length === 0) {
-    return { score: 0, missing: [], weak: [], issues: ['Ficha técnica não disponível'], suggestions: ['Preencha os atributos do anúncio'], total: 0, filled: 0 };
+    return { score: 0, missing: [], weak: [], issues: ['Ficha técnica não disponível'], suggestions: ['Preencha os atributos do anúncio'], total: 0, filled: 0, positives: [], negatives: ['Ficha técnica sem dados — impossível avaliar'], improvement_actions: ['Preencha a ficha técnica do anúncio com todos os atributos disponíveis'], summary: 'Ficha técnica indisponível — impacta negativamente o SEO.', strong_attributes: [], weak_attributes_detail: [] };
   }
 
   const total = attributes.length;
   let filled = 0;
   const genericValues = new Set(['outro', 'outros', 'genérico', 'generico', 'não informado', 'nao informado', 'n/a', '-', 'não se aplica', 'na']);
+  const importantAttrs = new Set(['marca', 'brand', 'modelo', 'model', 'material', 'tipo', 'type', 'cor', 'color', 'tamanho', 'size', 'peso', 'weight', 'voltagem', 'voltage', 'compatibilidade', 'uso', 'aplicação', 'acabamento', 'dimensão', 'tecnologia']);
 
   for (const attr of attributes) {
     const valueName = (attr.value_name || '').trim();
+    const attrName = attr.name || attr.id || 'Unknown';
+    const attrId = (attr.id || '').toLowerCase();
+    const isImportant = importantAttrs.has(attrId) || importantAttrs.has((attr.name || '').toLowerCase());
+
     if (!valueName || valueName === '') {
-      missing.push(attr.name || attr.id || 'Unknown');
+      missing.push(attrName);
+      if (isImportant) {
+        improvement_actions.push(`Preencha o atributo "${attrName}" — é relevante para buscas`);
+      }
     } else if (genericValues.has(valueName.toLowerCase())) {
-      weak.push(`${attr.name || attr.id}: "${valueName}"`);
+      weak.push(`${attrName}: "${valueName}"`);
+      weak_attributes_detail.push(`${attrName} → "${valueName}" (valor genérico)`);
       filled++;
+      if (isImportant) {
+        improvement_actions.push(`Substitua o valor genérico de "${attrName}" por um valor específico e pesquisável`);
+      }
     } else {
       filled++;
+      if (isImportant) {
+        strong_attributes.push(`${attrName}: ${valueName}`);
+      }
     }
   }
 
@@ -1403,28 +1587,66 @@ function computeAttributesSeo(attributes: any[]): { score: number; missing: stri
   const ratio = total > 0 ? filled / total : 0;
 
   // Fill ratio → +60
-  if (ratio >= 0.8) { score += 60; }
-  else if (ratio >= 0.5) { score += 40; issues.push(`Ficha técnica ${Math.round(ratio * 100)}% preenchida`); suggestions.push('Complete os atributos faltantes para melhorar indexação'); }
-  else { score += Math.round(ratio * 50); issues.push(`Ficha técnica apenas ${Math.round(ratio * 100)}% preenchida`); suggestions.push('Preencha pelo menos 80% dos atributos'); }
+  if (ratio >= 0.8) {
+    score += 60;
+    positives.push(`Ficha técnica ${Math.round(ratio * 100)}% preenchida (${filled}/${total} atributos)`);
+  } else if (ratio >= 0.5) {
+    score += 40;
+    issues.push(`Ficha técnica ${Math.round(ratio * 100)}% preenchida`);
+    negatives.push(`Ficha técnica com ${Math.round(ratio * 100)}% de preenchimento — pode melhorar`);
+    suggestions.push('Complete os atributos faltantes para melhorar indexação');
+    improvement_actions.push(`Preencha os ${missing.length} atributos faltantes para melhorar a indexação`);
+  } else {
+    score += Math.round(ratio * 50);
+    issues.push(`Ficha técnica apenas ${Math.round(ratio * 100)}% preenchida`);
+    negatives.push(`Ficha técnica com apenas ${Math.round(ratio * 100)}% de preenchimento — impacto negativo`);
+    suggestions.push('Preencha pelo menos 80% dos atributos');
+    improvement_actions.push('Priorize preencher os atributos mais relevantes para buscas: marca, material, tipo, dimensão');
+  }
 
   // Quality → +25
-  if (weak.length === 0 && filled > 0) { score += 25; }
-  else if (weak.length <= 2) { score += 15; }
-  else { issues.push(`${weak.length} atributos com valores genéricos`); suggestions.push('Substitua valores genéricos por informações específicas'); }
+  if (weak.length === 0 && filled > 0) {
+    score += 25;
+    positives.push('Nenhum atributo com valor genérico — boa qualidade');
+  } else if (weak.length <= 2) {
+    score += 15;
+    negatives.push(`${weak.length} atributo(s) com valor genérico`);
+  } else {
+    issues.push(`${weak.length} atributos com valores genéricos`);
+    negatives.push(`${weak.length} atributos com valores genéricos — reduz qualidade da ficha`);
+    suggestions.push('Substitua valores genéricos por informações específicas');
+  }
 
   // Relevance → +15
-  if (total >= 10 && filled >= 8) { score += 15; }
-  else if (total >= 5 && filled >= 4) { score += 10; }
+  if (total >= 10 && filled >= 8) {
+    score += 15;
+    positives.push('Quantidade robusta de atributos preenchidos');
+  } else if (total >= 5 && filled >= 4) { score += 10; }
 
-  return { score: Math.max(0, Math.min(score, 100)), missing: missing.slice(0, 10), weak: weak.slice(0, 10), issues, suggestions, total, filled };
+  if (strong_attributes.length > 0) positives.push(`Atributos fortes: ${strong_attributes.slice(0, 5).join(', ')}`);
+
+  const finalScore = Math.max(0, Math.min(score, 100));
+  let summary = '';
+  if (finalScore >= 80) summary = `Ficha técnica bem preenchida (${Math.round(ratio * 100)}%), sem lacunas relevantes identificadas.`;
+  else if (finalScore >= 50) summary = `Ficha técnica com base razoável, mas ${missing.length > 0 ? `faltam ${missing.length} atributos` : `${weak.length} atributos têm valores genéricos`}.`;
+  else summary = `Ficha técnica fraca — ${missing.length > 0 ? `${missing.length} atributos vazios` : 'dados insuficientes'} prejudicam a indexação.`;
+
+  return { score: finalScore, missing: missing.slice(0, 10), weak: weak.slice(0, 10), issues, suggestions, total, filled, positives, negatives, improvement_actions, summary, strong_attributes: strong_attributes.slice(0, 10), weak_attributes_detail: weak_attributes_detail.slice(0, 10) };
 }
 
-function computeModelSeo(attributes: any[]): { score: number; modelValue: string | null; issues: string[]; suggestions: string[] } {
+function computeModelSeo(attributes: any[]): {
+  score: number; modelValue: string | null; issues: string[]; suggestions: string[];
+  positives: string[]; negatives: string[]; improvement_actions: string[]; summary: string;
+  brand_value: string | null; is_search_friendly: boolean;
+} {
   const issues: string[] = [];
   const suggestions: string[] = [];
+  const positives: string[] = [];
+  const negatives: string[] = [];
+  const improvement_actions: string[] = [];
 
   if (!attributes || !Array.isArray(attributes)) {
-    return { score: 0, modelValue: null, issues: ['Atributos não disponíveis para verificar modelo'], suggestions: [] };
+    return { score: 0, modelValue: null, issues: ['Atributos não disponíveis para verificar modelo'], suggestions: [], positives: [], negatives: ['Dados de atributos indisponíveis'], improvement_actions: [], summary: 'Não foi possível avaliar o campo modelo — dados indisponíveis.', brand_value: null, is_search_friendly: false };
   }
 
   // Find model attribute
@@ -1443,6 +1665,7 @@ function computeModelSeo(attributes: any[]): { score: number; modelValue: string
   let score = 0;
   const modelValue = modelAttr?.value_name || null;
   const brandValue = brandAttr?.value_name || null;
+  let is_search_friendly = false;
 
   const genericValues = new Set(['outro', 'outros', 'genérico', 'generico', 'não informado', 'nao informado', 'n/a', '-', 'não se aplica', 'na', 'sem modelo', 'sem marca']);
 
@@ -1451,28 +1674,46 @@ function computeModelSeo(attributes: any[]): { score: number; modelValue: string
     score += 60;
     // Check if model is useful for search (has some specificity)
     if (modelValue.length >= 3 && /[a-zA-Z0-9]/.test(modelValue)) {
-      score += 20; // Specific model
+      score += 20;
+      is_search_friendly = true;
+      positives.push(`Modelo "${modelValue}" — específico e pesquisável`);
     } else {
       issues.push('Modelo pouco específico');
+      negatives.push(`Modelo "${modelValue}" é pouco descritivo para buscas`);
       suggestions.push('Use um modelo mais descritivo para facilitar buscas');
+      improvement_actions.push('Informe um modelo mais específico que os compradores possam pesquisar');
     }
   } else if (modelValue && genericValues.has(modelValue.toLowerCase())) {
     score += 10;
     issues.push('Campo modelo com valor genérico');
+    negatives.push(`Campo modelo preenchido com "${modelValue}" — valor genérico que não ajuda na busca`);
     suggestions.push('Substitua o valor genérico por um modelo real do produto');
+    improvement_actions.push('Preencha com o modelo real do produto (ex: código do fabricante, referência comercial)');
   } else {
+    // EMPTY MODEL = cannot be 100
     issues.push('Campo modelo vazio');
+    negatives.push('Campo modelo vazio — oportunidade perdida de ser encontrado por modelo');
     suggestions.push('Adicione o modelo do produto para melhorar a descoberta');
+    improvement_actions.push('Preencha com o modelo real e pesquisável do produto');
   }
 
   // Brand bonus → +20
   if (brandValue && !genericValues.has(brandValue.toLowerCase())) {
     score += 20;
+    positives.push(`Marca "${brandValue}" — preenchida e específica`);
   } else {
+    negatives.push(brandValue ? `Marca "${brandValue}" é genérica` : 'Campo marca vazio');
     suggestions.push('Preencha a marca do produto');
+    improvement_actions.push('Informe a marca real do produto — compradores buscam por marca');
   }
 
-  return { score: Math.max(0, Math.min(score, 100)), modelValue, issues, suggestions };
+  const finalScore = Math.max(0, Math.min(score, 100));
+  let summary = '';
+  if (finalScore >= 70) summary = 'Modelo e marca bem preenchidos — contribuem positivamente para a descoberta do anúncio.';
+  else if (finalScore >= 40) summary = `Campo modelo ${modelValue ? 'preenchido mas pode ser mais específico' : 'precisa ser preenchido'} para melhorar a indexação.`;
+  else summary = `Campo modelo ${modelValue ? `com valor "${modelValue}" — insuficiente` : 'vazio'} — prejudica a descoberta do anúncio em buscas.`;
+
+  return { score: finalScore, modelValue, issues, suggestions, positives, negatives, improvement_actions, summary, brand_value: brandValue, is_search_friendly };
 }
 
 // --- KEYWORD ADHERENCE (multi-field: title + description + attributes) ---
