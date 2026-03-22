@@ -2869,6 +2869,17 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const convRate = v30d > 0 ? (s30d / v30d) * 100 : 0;
 
         const scores = computeSubScores(merged, photos, title.length, covDays, v7d, v30d, s30d);
+
+        // Wholesale analysis
+        const wholesaleResult = await analyzeWholesaleForItem(supabase, item.item_id, sellerId, accountType, tenantId);
+        // Add wholesale to scores; if not eligible, remove weight from calculation
+        if (wholesaleResult.is_eligible) {
+          scores.wholesale = wholesaleResult.score;
+        } else {
+          // Remove wholesale weight — computeHealthScore will just skip it
+          delete scores.wholesale;
+        }
+
         const hScore = computeHealthScore(scores);
         const hStatus = classifyHealthStatus(hScore);
         const mainProb = determineMainProblem(scores, covStatus, v30d, s30d, item.available_quantity, merged);
