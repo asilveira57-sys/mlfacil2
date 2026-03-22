@@ -1798,17 +1798,14 @@ function computeSubScores(item: any, photos: { count: number; hasVideo: boolean 
   // Conversion
   const convRate = visits30d > 0 ? (sales30d / visits30d) * 100 : 0;
   const conversion = visits30d < 10 ? 50 : convRate >= 5 ? 100 : convRate >= 3 ? 85 : convRate >= 1.5 ? 70 : convRate >= 0.5 ? 50 : convRate > 0 ? 30 : 0;
-  // Content
+  // Content (media only, SEO is separate)
   let content = 0;
   if (photos.count >= 6) content += 50; else if (photos.count >= 3) content += 30; else if (photos.count >= 1) content += 15;
   if (photos.hasVideo) content += 25;
   if (titleLen >= 40) content += 25; else if (titleLen >= 20) content += 15;
   content = Math.min(content, 100);
-  // SEO integration into content score
-  const seoScore = item.seo_score || 0;
-  if (seoScore > 0) {
-    content = Math.round(content * 0.7 + seoScore * 0.3); // 70% media + 30% SEO
-  }
+  // SEO as independent dimension
+  const seo = item.seo_score || 0;
   // Stock
   const stock = (item.available_quantity ?? null) === null ? 50 : item.available_quantity === 0 ? 0 : item.available_quantity < 3 ? 30 : item.available_quantity >= 10 ? 100 : 70;
   // Logistics
@@ -1822,7 +1819,7 @@ function computeSubScores(item: any, photos: { count: number; hasVideo: boolean 
   const covPct = 30 > 0 ? (coverageDays / 30) * 100 : 0;
   const coverage = covPct >= 80 ? 100 : covPct >= 50 ? 70 : covPct >= 20 ? 40 : 10;
 
-  return { traffic, conversion, content, stock, logistics, catalog, coverage };
+  return { traffic, conversion, content, stock, logistics, catalog, coverage, seo };
 }
 
 function computeHealthScore(scores: Record<string, number>): number {
