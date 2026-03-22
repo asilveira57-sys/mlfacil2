@@ -2372,21 +2372,17 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
   });
 
   try {
-    const { data: listing } = await supabase.from('meli_listings_cache')
-      .select('item_id, title, category_id, variation_attributes')
+    const { data: listing, error: listingErr } = await supabase.from('meli_listings_cache')
+      .select('item_id, title, category_id')
       .eq('item_id', itemId).eq('seller_id', sellerId).maybeSingle();
-    if (!listing?.title) return { success: false, error: 'Item not found' };
+    if (listingErr) console.error('[rad-collector] GENERATE_TITLE listing fetch error:', listingErr);
+    if (!listing?.title) return { success: false, error: 'Item not found in listings cache' };
 
     const currentTitle = listing.title;
     const categoryId = listing.category_id;
 
-    const variationAttrs: string[] = [];
-    if (listing.variation_attributes && Array.isArray(listing.variation_attributes)) {
-      for (const va of listing.variation_attributes) {
-        if (va.value_name) variationAttrs.push(normalizeText(va.value_name));
-        if (va.name) variationAttrs.push(normalizeText(va.name));
-      }
-    }
+    // Variation attributes not available in meli_listings_cache - skip variation filtering
+    // Future: fetch from API or analyzed_items if needed
 
     const { data: feedback } = await supabase.from('listing_keyword_feedback')
       .select('keyword, is_relevant').eq('seller_id', sellerId).eq('listing_id', itemId);
@@ -2403,14 +2399,12 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
 
     const filteredKeywords = keywords.filter(kw => feedbackMap.get(kw.normalized) !== false);
     const validKeywords = filteredKeywords.filter(kw => {
-      if (variationAttrs.some(va => kw.normalized.includes(va) || va.includes(kw.normalized))) return false;
       if (GENERIC_IRRELEVANT_WORDS.has(kw.keyword)) return false;
       return true;
     });
 
     const currentTokens = tokenize(currentTitle);
     const currentTokensClean = currentTokens.filter(t => {
-      if (variationAttrs.some(va => t === va || va.includes(t))) return false;
       if (GENERIC_IRRELEVANT_WORDS.has(t)) return false;
       return true;
     });
