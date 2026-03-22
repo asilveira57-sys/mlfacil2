@@ -1860,7 +1860,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           if (promoItems) {
             for (const r of promoItems) {
               promoStatusMap.set(r.item_id, r.item_status);
-              if (r.item_status === 'candidate' || r.item_status === 'active') promoActiveSet.add(r.item_id);
+              if (['candidate', 'active', 'started'].includes(r.item_status)) promoActiveSet.add(r.item_id);
             }
           }
         }
