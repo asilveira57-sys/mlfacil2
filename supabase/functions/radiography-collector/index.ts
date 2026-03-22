@@ -2156,6 +2156,14 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       for (let i = 0; i < mediaRows.length; i += 200) { const { error: me } = await supabase.from('listing_media_analysis').insert(mediaRows.slice(i,i+200)); if (me) console.warn('[rad-collector] media insert err:', me.message); }
     }
 
+    // Run SEO analysis after main analysis
+    const allItemIds = items.map((i: any) => i.item_id);
+    if (Date.now() - startTime < SAFETY_TIMEOUT_MS - 15000) {
+      await analyzeSeoForItems(supabase, sellerId, allItemIds, tenantId);
+    } else {
+      console.log(`[rad-collector] ANALYZE: skipping SEO (timeout approaching)`);
+    }
+
     const dur = Date.now() - startTime;
     await supabase.from('listing_health_logs').insert({
       seller_id: sellerId, log_type: 'analysis', log_level: 'info', action: 'analyze_finished',
