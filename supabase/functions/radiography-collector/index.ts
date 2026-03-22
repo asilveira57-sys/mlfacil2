@@ -3415,21 +3415,13 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const listing = detailMap.get(item.item_id) || {};
         const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false, images: [] };
         const covDays = covByItem.get(item.item_id) || 0;
-        // Clean title: strip variation attribute suffixes
-        let title = listing.title || item.title || '';
+        // Clean title using canonical normalizer
+        const rawTitle = listing.title || item.title || '';
         const varAttrs = variationMap.get(item.item_id);
-        if (varAttrs && varAttrs.size > 0) {
-          for (const va of varAttrs) {
-            // Remove variation value from end of title (e.g., "...Branco Nenhum" → "...")
-            const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-            title = title.replace(regex, '');
-          }
-          // Second pass for remaining values
-          for (const va of varAttrs) {
-            const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-            title = title.replace(regex, '');
-          }
-          title = title.trim();
+        const titleResult = getCanonicalTitle(rawTitle, varAttrs || null);
+        const title = titleResult.canonical;
+        if (titleResult.removed_tokens.length > 0) {
+          console.log(`[rad-collector] ANALYZE canonical title: "${rawTitle}" → "${title}" (removed: ${titleResult.removed_tokens.join(', ')}, strategy: ${titleResult.strategy})`);
         }
         const merged = { ...item, ...listing, is_ads_active: adsActiveSet.has(item.item_id) || null, is_promotion_active: promoActiveSet.has(item.item_id) || null };
         const covStatus = classifyCoverage(covDays, 30);
