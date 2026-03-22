@@ -2414,14 +2414,18 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       const allSuggestions = [...titleResult.suggestions, ...descResult.suggestions, ...attrResult.suggestions, ...modelResult.suggestions];
       if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
 
-      // Category keyword details with match locations
+      // Category keyword details with match locations + source
       const categoryKeywordDetails = adherence.details.map(d => {
         const filteredKw = catKeywords.find(k => k.keyword === d.keyword);
+        const rawKw = rawCatKeywords.find(k => k.keyword === d.keyword);
         return {
           keyword: d.keyword,
           weight: d.weight,
           relevance_score: filteredKw?.relevance_score ?? null,
           relevance_level: filteredKw?.relevance_level ?? null,
+          source: rawKw?.source || 'sales',
+          in_autocomplete: rawKw?.in_autocomplete || false,
+          in_top_listings: rawKw?.in_top_listings || false,
           matched_in_title: d.matched_in_title,
           matched_in_description: d.matched_in_description,
           matched_in_attributes: d.matched_in_attributes,
