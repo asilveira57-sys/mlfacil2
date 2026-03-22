@@ -1019,8 +1019,44 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             </div>
           )}
 
+          {/* Category keyword details with match locations */}
+          {seo.details && seo.details.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1">
+                <Target className="h-3 w-3 text-cyan-400" /> Palavras da categoria ({seo.details.length})
+              </div>
+              <div className="space-y-0.5 max-h-40 overflow-y-auto">
+                {seo.details.map((d, i) => {
+                  const matched = d.matched_overall ?? d.found_in_title ?? false;
+                  const inTitle = d.matched_in_title ?? d.found_in_title ?? false;
+                  const inDesc = d.matched_in_description ?? false;
+                  const inAttrs = d.matched_in_attributes ?? false;
+                  const locationParts: string[] = [];
+                  if (inTitle) locationParts.push("título");
+                  if (inDesc) locationParts.push("descrição");
+                  if (inAttrs) locationParts.push("atributos");
+                  const locationText = matched ? locationParts.join(", ") : "ausente";
+                  return (
+                    <div key={i} className={`flex items-center justify-between px-2 py-1 rounded text-[11px] ${
+                      matched ? 'bg-emerald-500/5 text-emerald-300' : 'bg-slate-800/30 text-slate-500'
+                    }`}>
+                      <span className="truncate">{d.keyword}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className={`text-[10px] ${matched ? 'text-emerald-400' : 'text-red-400'}`}>{locationText}</span>
+                        {d.weight != null && <span className="text-[9px] text-slate-600">{(d.weight * 100).toFixed(0)}%</span>}
+                        <button onClick={() => handleKeywordFeedback(d.keyword, !(feedbackMap[d.keyword] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
+                          {feedbackMap[d.keyword] === false ? <ThumbsDown className="h-2.5 w-2.5 text-red-400" /> : <ThumbsUp className="h-2.5 w-2.5 text-slate-500 opacity-30 hover:opacity-100" />}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Interactive keywords: Found */}
-          {foundKws.length > 0 && (
+          {foundKws.length > 0 && !seo.details?.length && (
             <div>
               <div className="text-xs font-medium text-emerald-400 mb-1.5 flex items-center gap-1">
                 <Check className="h-3 w-3" /> Presentes ({foundKws.length})
