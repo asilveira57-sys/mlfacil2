@@ -5,6 +5,22 @@ import { RadiographyHealthStatus } from "@/types/radiography";
 
 // --- Types ---
 
+export interface WholesaleAnalysis {
+  score: number;
+  account_type: 'cpf' | 'cnpj' | 'unknown';
+  is_eligible: boolean;
+  has_wholesale_layer: boolean;
+  has_valid_ranges: boolean;
+  ranges_count: number;
+  is_linked_to_listing: boolean;
+  status: 'not_eligible' | 'not_configured' | 'partial' | 'active';
+  summary: string;
+  positives: string[];
+  negatives: string[];
+  improvement_actions: string[];
+  cta_available: boolean;
+}
+
 export interface StructuredAlert {
   type: string;
   severity: string;
