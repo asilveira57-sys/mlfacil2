@@ -1274,42 +1274,198 @@ function assessKeywordRelevance(keyword: string, title: string, categoryName: st
   return "low";
 }
 
-// --- STRUCTURAL SEO ANALYSIS ---
-function computeStructuralSeo(item: {
-  title?: string;
-  photos_count?: number;
-  has_video?: boolean;
-}): { score: number; issues: string[]; suggestions: string[] } {
+// --- 4-LAYER SEO ANALYSIS ---
+
+function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): { score: number; issues: string[]; suggestions: string[] } {
   let score = 0;
   const issues: string[] = [];
   const suggestions: string[] = [];
-  const titleLen = (item.title || '').length;
+  const titleLen = title.length;
 
-  // Title: 50-70 chars ideal → +25
-  if (titleLen >= 50 && titleLen <= 70) { score += 25; }
-  else if (titleLen >= 40 && titleLen <= 80) { score += 20; }
+  // Length: 50-60 ideal → +30
+  if (titleLen >= 50 && titleLen <= 60) { score += 30; }
+  else if (titleLen >= 40 && titleLen <= 70) { score += 22; }
   else if (titleLen >= 30) { score += 12; }
-  else { issues.push('Título muito curto'); suggestions.push('Expanda o título para 50-70 caracteres com termos relevantes'); }
+  else { issues.push('Título muito curto'); suggestions.push('Expanda o título para 50-60 caracteres com termos relevantes'); }
+  if (titleLen > 60) { issues.push(`Título excede 60 caracteres (${titleLen})`); suggestions.push('Reduza o título para no máximo 60 caracteres'); }
 
-  // Images >= 5 → +25
-  if ((item.photos_count || 0) >= 6) { score += 25; }
-  else if ((item.photos_count || 0) >= 4) { score += 18; }
-  else if ((item.photos_count || 0) >= 2) { score += 10; }
-  else { issues.push('Poucas fotos'); suggestions.push('Adicione pelo menos 6 fotos de qualidade'); }
+  // Keyword presence in title → +40
+  const titleTokens = tokenize(title);
+  const titleNorm = normalizeText(title);
+  let kwFoundCount = 0;
+  for (const kw of catKeywords.slice(0, 15)) {
+    if (checkKeywordInText(kw.keyword, titleNorm)) kwFoundCount++;
+  }
+  const kwRatio = catKeywords.length > 0 ? kwFoundCount / Math.min(catKeywords.length, 15) : 0;
+  score += Math.round(kwRatio * 40);
+  if (kwRatio < 0.2 && catKeywords.length > 0) { issues.push('Baixa presença de palavras-chave da categoria no título'); suggestions.push('Adicione termos mais buscados da categoria'); }
 
-  // Video → +20
-  if (item.has_video) { score += 20; }
-  else { suggestions.push('Adicionar vídeo melhora ranqueamento e conversão'); }
+  // Word variety → +20
+  const uniqueTokens = new Set(titleTokens);
+  if (uniqueTokens.size >= 6) { score += 20; }
+  else if (uniqueTokens.size >= 4) { score += 14; }
+  else if (uniqueTokens.size >= 2) { score += 7; }
+  else { issues.push('Baixa variação semântica no título'); }
 
-  // Title word variety → +30
-  const tokens = tokenize(item.title || '');
-  const uniqueTokens = new Set(tokens);
-  if (uniqueTokens.size >= 6) { score += 30; }
-  else if (uniqueTokens.size >= 4) { score += 20; }
-  else if (uniqueTokens.size >= 2) { score += 10; }
-  else { issues.push('Baixa variação semântica no título'); suggestions.push('Use mais termos descritivos no título'); }
+  // Repetition penalty
+  const wordCount = new Map<string, number>();
+  for (const t of titleTokens) wordCount.set(t, (wordCount.get(t) || 0) + 1);
+  for (const [w, c] of wordCount) { if (c >= 3) { score -= 10; issues.push(`Palavra "${w}" repetida ${c}x no título`); } }
 
-  return { score: Math.min(score, 100), issues, suggestions };
+  // Generic words penalty
+  for (const t of titleTokens) { if (GENERIC_IRRELEVANT_WORDS.has(t)) { score -= 5; issues.push(`Termo genérico "${t}" no título`); } }
+
+  return { score: Math.max(0, Math.min(score, 100)), issues, suggestions };
+}
+
+function computeDescriptionSeo(description: string | null, title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): { score: number; length: number; density: number; issues: string[]; suggestions: string[] } {
+  const issues: string[] = [];
+  const suggestions: string[] = [];
+  const desc = (description || '').trim();
+  const descLen = desc.length;
+  let score = 0;
+
+  // Length → +40
+  if (descLen >= 500) { score += 40; }
+  else if (descLen >= 300) { score += 25; issues.push(`Descrição com ${descLen} caracteres (ideal: 500+)`); suggestions.push('Aumente a descrição para mais de 500 caracteres'); }
+  else if (descLen >= 100) { score += 12; issues.push('Descrição muito curta para SEO'); suggestions.push('Expanda a descrição com detalhes do produto, benefícios e especificações'); }
+  else if (descLen > 0) { score += 5; issues.push('Descrição extremamente curta'); suggestions.push('Crie uma descrição completa com no mínimo 500 caracteres'); }
+  else { issues.push('Sem descrição'); suggestions.push('Adicione uma descrição detalhada do produto'); }
+
+  // Keyword density → +30
+  let density = 0;
+  if (descLen > 20) {
+    const descTokens = tokenize(desc);
+    const descNorm = normalizeText(desc);
+    let kwFound = 0;
+    for (const kw of catKeywords.slice(0, 15)) {
+      if (checkKeywordInText(kw.keyword, descNorm)) kwFound++;
+    }
+    density = descTokens.length > 0 ? kwFound / descTokens.length : 0;
+    const densityScore = catKeywords.length > 0 ? kwFound / Math.min(catKeywords.length, 15) : 0;
+    if (densityScore >= 0.3) { score += 30; }
+    else if (densityScore >= 0.15) { score += 20; }
+    else if (densityScore > 0) { score += 10; suggestions.push('Insira palavras-chave naturalmente na descrição'); }
+    else if (catKeywords.length > 0) { suggestions.push('Inclua termos relevantes da categoria na descrição'); }
+  }
+
+  // Not just title repetition → +15
+  if (descLen > 0) {
+    const titleNorm = normalizeText(title);
+    const descNorm = normalizeText(desc);
+    if (descNorm === titleNorm || (descLen < titleNorm.length * 1.5 && descNorm.includes(titleNorm))) {
+      issues.push('Descrição é apenas repetição do título');
+    } else {
+      score += 15;
+    }
+  }
+
+  // Context coherence → +15
+  if (descLen >= 100) { score += 15; }
+
+  return { score: Math.max(0, Math.min(score, 100)), length: descLen, density: Number(density.toFixed(4)), issues, suggestions };
+}
+
+function computeAttributesSeo(attributes: any[]): { score: number; missing: string[]; weak: string[]; issues: string[]; suggestions: string[]; total: number; filled: number } {
+  const issues: string[] = [];
+  const suggestions: string[] = [];
+  const missing: string[] = [];
+  const weak: string[] = [];
+
+  if (!attributes || !Array.isArray(attributes) || attributes.length === 0) {
+    return { score: 0, missing: [], weak: [], issues: ['Ficha técnica não disponível'], suggestions: ['Preencha os atributos do anúncio'], total: 0, filled: 0 };
+  }
+
+  const total = attributes.length;
+  let filled = 0;
+  const genericValues = new Set(['outro', 'outros', 'genérico', 'generico', 'não informado', 'nao informado', 'n/a', '-', 'não se aplica', 'na']);
+
+  for (const attr of attributes) {
+    const valueName = (attr.value_name || '').trim();
+    if (!valueName || valueName === '') {
+      missing.push(attr.name || attr.id || 'Unknown');
+    } else if (genericValues.has(valueName.toLowerCase())) {
+      weak.push(`${attr.name || attr.id}: "${valueName}"`);
+      filled++;
+    } else {
+      filled++;
+    }
+  }
+
+  let score = 0;
+  const ratio = total > 0 ? filled / total : 0;
+
+  // Fill ratio → +60
+  if (ratio >= 0.8) { score += 60; }
+  else if (ratio >= 0.5) { score += 40; issues.push(`Ficha técnica ${Math.round(ratio * 100)}% preenchida`); suggestions.push('Complete os atributos faltantes para melhorar indexação'); }
+  else { score += Math.round(ratio * 50); issues.push(`Ficha técnica apenas ${Math.round(ratio * 100)}% preenchida`); suggestions.push('Preencha pelo menos 80% dos atributos'); }
+
+  // Quality → +25
+  if (weak.length === 0 && filled > 0) { score += 25; }
+  else if (weak.length <= 2) { score += 15; }
+  else { issues.push(`${weak.length} atributos com valores genéricos`); suggestions.push('Substitua valores genéricos por informações específicas'); }
+
+  // Relevance → +15
+  if (total >= 10 && filled >= 8) { score += 15; }
+  else if (total >= 5 && filled >= 4) { score += 10; }
+
+  return { score: Math.max(0, Math.min(score, 100)), missing: missing.slice(0, 10), weak: weak.slice(0, 10), issues, suggestions, total, filled };
+}
+
+function computeModelSeo(attributes: any[]): { score: number; modelValue: string | null; issues: string[]; suggestions: string[] } {
+  const issues: string[] = [];
+  const suggestions: string[] = [];
+
+  if (!attributes || !Array.isArray(attributes)) {
+    return { score: 0, modelValue: null, issues: ['Atributos não disponíveis para verificar modelo'], suggestions: [] };
+  }
+
+  // Find model attribute
+  const modelAttr = attributes.find((a: any) => {
+    const id = (a.id || '').toLowerCase();
+    const name = (a.name || '').toLowerCase();
+    return id === 'model' || id === 'modelo' || name === 'modelo' || name === 'model';
+  });
+
+  const brandAttr = attributes.find((a: any) => {
+    const id = (a.id || '').toLowerCase();
+    const name = (a.name || '').toLowerCase();
+    return id === 'brand' || id === 'marca' || name === 'marca' || name === 'brand';
+  });
+
+  let score = 0;
+  const modelValue = modelAttr?.value_name || null;
+  const brandValue = brandAttr?.value_name || null;
+
+  const genericValues = new Set(['outro', 'outros', 'genérico', 'generico', 'não informado', 'nao informado', 'n/a', '-', 'não se aplica', 'na', 'sem modelo', 'sem marca']);
+
+  // Model evaluation → +60
+  if (modelValue && !genericValues.has(modelValue.toLowerCase())) {
+    score += 60;
+    // Check if model is useful for search (has some specificity)
+    if (modelValue.length >= 3 && /[a-zA-Z0-9]/.test(modelValue)) {
+      score += 20; // Specific model
+    } else {
+      issues.push('Modelo pouco específico');
+      suggestions.push('Use um modelo mais descritivo para facilitar buscas');
+    }
+  } else if (modelValue && genericValues.has(modelValue.toLowerCase())) {
+    score += 10;
+    issues.push('Campo modelo com valor genérico');
+    suggestions.push('Substitua o valor genérico por um modelo real do produto');
+  } else {
+    issues.push('Campo modelo vazio');
+    suggestions.push('Adicione o modelo do produto para melhorar a descoberta');
+  }
+
+  // Brand bonus → +20
+  if (brandValue && !genericValues.has(brandValue.toLowerCase())) {
+    score += 20;
+  } else {
+    suggestions.push('Preencha a marca do produto');
+  }
+
+  return { score: Math.max(0, Math.min(score, 100)), modelValue, issues, suggestions };
 }
 
 // --- KEYWORD ADHERENCE (Tendências / Sales keywords) ---
