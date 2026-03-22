@@ -217,7 +217,7 @@ const PrimeiroAcesso = () => {
         // Also create user_plan_assignments record
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          await supabase.from('user_plan_assignments' as any).insert({
+          await (supabase as any).from('user_plan_assignments').insert({
             user_id: user.id,
             plan_tier_id: ZPL_PLAN_ID,
             status: 'active',

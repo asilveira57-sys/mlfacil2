@@ -3,8 +3,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useCollaboratorAccess, getModuleKeyFromRouteSync } from '@/hooks/useCollaboratorAccess';
 import { useModuleRouteMap } from '@/hooks/useSystemModules';
+import { useCanAccessModule } from '@/hooks/useCanAccessModule';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ModuleAccessDenied } from './ModuleAccessDenied';
 
 interface ModuleAccessGuardProps {
   children: React.ReactNode;
