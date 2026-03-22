@@ -1281,6 +1281,52 @@ function assessKeywordRelevance(keyword: string, title: string, categoryName: st
   return "low";
 }
 
+// --- CONTEXTUAL KEYWORD FILTER: only keep keywords relevant to the product ---
+function filterKeywordsByProductContext(
+  catKeywords: Array<{ keyword: string; normalized: string; weight: number }>,
+  productTokens: Set<string>,
+): { filtered: Array<{ keyword: string; normalized: string; weight: number }>; discarded: string[] } {
+  const filtered: Array<{ keyword: string; normalized: string; weight: number }> = [];
+  const discarded: string[] = [];
+
+  for (const kw of catKeywords) {
+    const kwTokens = kw.normalized.split(" ").filter(w => {
+      if (SEO_STOPWORDS.has(w)) return false;
+      if (MEASUREMENT_RE.test(w)) return true;
+      return w.length > 2;
+    });
+    if (kwTokens.length === 0) { discarded.push(kw.keyword); continue; }
+
+    // A keyword is relevant if at least 1 of its tokens overlaps with any product token
+    const hasOverlap = kwTokens.some(kt =>
+      [...productTokens].some(pt => pt === kt || pt.includes(kt) || kt.includes(pt))
+    );
+
+    if (hasOverlap) {
+      filtered.push(kw);
+    } else {
+      discarded.push(kw.keyword);
+    }
+  }
+
+  return { filtered: filtered.slice(0, 20), discarded };
+}
+
+// Build product context tokens from all available fields
+function buildProductTokens(title: string, description: string | null, attributes: any[], model?: string): Set<string> {
+  const parts: string[] = [];
+  parts.push(title);
+  if (description) parts.push(description);
+  for (const a of attributes) {
+    if (a.value_name) parts.push(a.value_name);
+    if (a.name) parts.push(a.name);
+  }
+  if (model) parts.push(model);
+  const combined = parts.join(' ');
+  const tokens = tokenize(combined);
+  return new Set(tokens);
+}
+
 // --- 4-LAYER SEO ANALYSIS ---
 
 function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): {
