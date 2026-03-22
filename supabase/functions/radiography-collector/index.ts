@@ -1281,6 +1281,52 @@ function assessKeywordRelevance(keyword: string, title: string, categoryName: st
   return "low";
 }
 
+// --- CONTEXTUAL KEYWORD FILTER: only keep keywords relevant to the product ---
+function filterKeywordsByProductContext(
+  catKeywords: Array<{ keyword: string; normalized: string; weight: number }>,
+  productTokens: Set<string>,
+): { filtered: Array<{ keyword: string; normalized: string; weight: number }>; discarded: string[] } {
+  const filtered: Array<{ keyword: string; normalized: string; weight: number }> = [];
+  const discarded: string[] = [];
+
+  for (const kw of catKeywords) {
+    const kwTokens = kw.normalized.split(" ").filter(w => {
+      if (SEO_STOPWORDS.has(w)) return false;
+      if (MEASUREMENT_RE.test(w)) return true;
+      return w.length > 2;
+    });
+    if (kwTokens.length === 0) { discarded.push(kw.keyword); continue; }
+
+    // A keyword is relevant if at least 1 of its tokens overlaps with any product token
+    const hasOverlap = kwTokens.some(kt =>
+      [...productTokens].some(pt => pt === kt || pt.includes(kt) || kt.includes(pt))
+    );
+
+    if (hasOverlap) {
+      filtered.push(kw);
+    } else {
+      discarded.push(kw.keyword);
+    }
+  }
+
+  return { filtered: filtered.slice(0, 20), discarded };
+}
+
+// Build product context tokens from all available fields
+function buildProductTokens(title: string, description: string | null, attributes: any[], model?: string): Set<string> {
+  const parts: string[] = [];
+  parts.push(title);
+  if (description) parts.push(description);
+  for (const a of attributes) {
+    if (a.value_name) parts.push(a.value_name);
+    if (a.name) parts.push(a.name);
+  }
+  if (model) parts.push(model);
+  const combined = parts.join(' ');
+  const tokens = tokenize(combined);
+  return new Set(tokens);
+}
+
 // --- 4-LAYER SEO ANALYSIS ---
 
 function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): {
@@ -2018,8 +2064,16 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
     const seoRows: any[] = [];
 
     for (const [itemId, detail] of itemDetails) {
-      const catKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 30);
+      const rawCatKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 50);
       const extras = itemExtras.get(itemId) || { description: null, attributes: [] };
+
+      // Build product context tokens from all available fields
+      const modelAttr = (extras.attributes || []).find((a: any) => a.id === 'MODEL' || a.id === 'ALPHANUMERIC_MODEL');
+      const productTokens = buildProductTokens(detail.title, extras.description, extras.attributes || [], modelAttr?.value_name || '');
+
+      // Filter keywords by product context — only keep relevant ones
+      const { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
+      console.log(`[rad-collector] SEO item ${itemId}: ${rawCatKeywords.length} raw kws → ${catKeywords.length} relevant, ${discardedKeywords.length} discarded`);
 
       // Layer 1: Title (40%)
       const titleResult = computeTitleSeo(detail.title, catKeywords);
@@ -2109,7 +2163,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
             improvement_actions: modelResult.improvement_actions, summary: modelResult.summary,
             issues: modelResult.issues, suggestions: modelResult.suggestions,
           },
-          adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length },
+          adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length, total_raw_keywords: rawCatKeywords.length, discarded_count: discardedKeywords.length },
           analyzed_at: new Date().toISOString(),
         },
         updated_at: new Date().toISOString(),
@@ -2129,7 +2183,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           attributes_score: attrResult.score, model_score: modelResult.score,
           keyword_score: adherence.score,
           description_length: descResult.length, keyword_density: descResult.density,
-          total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
+           total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
+          total_raw_keywords: rawCatKeywords.length, discarded_count: discardedKeywords.length,
+          discarded_keywords: discardedKeywords.slice(0, 15),
           missing_attributes: attrResult.missing.slice(0, 5), weak_attributes: attrResult.weak.slice(0, 5),
           model_value: modelResult.modelValue,
           irrelevant_keywords: adherence.irrelevant.slice(0, 10),
