@@ -2962,6 +2962,8 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           data_coverage_days: covDays, data_coverage_status: covStatus,
           is_ads_active: isAdsActive, ads_status: adsStatus,
           is_promotion_active: isPromoActive, promotion_status: promoStatus,
+          wholesale_score: wholesaleResult.is_eligible ? wholesaleResult.score : null,
+          wholesale_analysis_json: wholesaleResult,
         });
         analyzed++;
       } catch (e) { errCount++; console.warn(`[rad-collector] ANALYZE item ${item.item_id} err:`, e); }
