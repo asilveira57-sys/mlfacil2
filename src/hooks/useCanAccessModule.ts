@@ -33,8 +33,8 @@ export function useCanAccessModule() {
       // 1. Try user_plan_assignments first (active assignment)
       let planId: string | null = null;
 
-      const { data: assignment } = await supabase
-        .from('user_plan_assignments' as any)
+      const { data: assignment } = await (supabase as any)
+        .from('user_plan_assignments')
         .select('plan_tier_id')
         .eq('user_id', userId)
         .eq('status', 'active')
