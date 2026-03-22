@@ -3288,17 +3288,69 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
   });
 
   try {
-    const { data: listing, error: listingErr } = await supabase.from('meli_listings_cache')
+    // Try meli_listings_cache first, then listing_health_current as fallback
+    let listing: any = null;
+    const { data: cacheRow, error: listingErr } = await supabase.from('meli_listings_cache')
       .select('item_id, title, category_id')
       .eq('item_id', itemId).eq('seller_id', sellerId).maybeSingle();
     if (listingErr) console.error('[rad-collector] GENERATE_TITLE listing fetch error:', listingErr);
-    if (!listing?.title) return { success: false, error: 'Item not found in listings cache' };
+    listing = cacheRow;
+    
+    // Fallback to listing_health_current
+    if (!listing?.title) {
+      const { data: healthRow } = await supabase.from('listing_health_current')
+        .select('item_id, title')
+        .eq('item_id', itemId).eq('seller_id', sellerId).maybeSingle();
+      if (healthRow?.title) {
+        listing = { item_id: itemId, title: healthRow.title, category_id: null };
+      }
+    }
+    
+    if (!listing?.title) return { success: false, error: 'Anúncio não encontrado no cache local. Atualize os dados para gerar a análise.' };
 
-    const currentTitle = listing.title;
+    // Fetch variation attributes from ML API to strip from title
+    const variationAttrs: string[] = [];
+    const token = await getValidToken(supabase, sellerId);
+    if (token) {
+      try {
+        const resp = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,variations,title`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          const itemData = await resp.json();
+          const vars = Array.isArray(itemData.variations) ? itemData.variations : [];
+          for (const v of vars) {
+            const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
+            for (const c of combos) {
+              if (c.value_name && !variationAttrs.includes(normalizeText(c.value_name))) {
+                variationAttrs.push(normalizeText(c.value_name));
+              }
+            }
+          }
+        }
+      } catch (varErr) {
+        console.warn(`[rad-collector] GENERATE_TITLE: variation fetch failed:`, varErr);
+      }
+    }
+
+    // Clean title by stripping variation suffixes
+    let currentTitle = listing.title;
+    if (variationAttrs.length > 0) {
+      for (const va of variationAttrs) {
+        const original = currentTitle;
+        // Try to remove the variation value from the end of the title
+        const tokens = currentTitle.split(/\s+/);
+        const vaTokens = va.split(/\s+/);
+        // Check if last N tokens match variation
+        if (tokens.length > vaTokens.length) {
+          const lastTokens = tokens.slice(-vaTokens.length).map(t => normalizeText(t));
+          if (lastTokens.every((t, i) => t === vaTokens[i])) {
+            currentTitle = tokens.slice(0, -vaTokens.length).join(' ').trim();
+          }
+        }
+      }
+    }
     const categoryId = listing.category_id;
-
-    // Variation attributes not available in meli_listings_cache - skip variation filtering
-    // Future: fetch from API or analyzed_items if needed
 
     const { data: feedback } = await supabase.from('listing_keyword_feedback')
       .select('keyword, is_relevant').eq('seller_id', sellerId).eq('listing_id', itemId);
