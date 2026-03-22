@@ -2935,7 +2935,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const scores = computeSubScores(merged, photos, title.length, covDays, v7d, v30d, s30d);
 
         // Wholesale analysis
-        const wholesaleResult = await analyzeWholesaleForItem(supabase, item.item_id, sellerId, accountType, tenantId);
+        const wholesaleResult = await analyzeWholesaleForItem(supabase, item.item_id, sellerId, accountType, tenantId, token);
         // Add wholesale to scores; if not eligible, remove weight from calculation
         if (wholesaleResult.is_eligible) {
           scores.wholesale = wholesaleResult.score;
