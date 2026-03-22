@@ -91,6 +91,9 @@ export interface HealthCurrentItem {
   prev_available_quantity: number | null;
   // SEO
   seo_score: number | null;
+  seo_grade: string | null;
+  seo_structural_score: number | null;
+  seo_keyword_score: number | null;
   seo_keywords_found: string[] | null;
   seo_keywords_missing: string[] | null;
   seo_analysis_json: SeoAnalysis | null;
