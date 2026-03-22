@@ -787,6 +787,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   seo: SeoAnalysis; score: number | null; found: string[] | null; missing: string[] | null;
   structuralScore?: number | null; keywordScore?: number | null; grade?: string | null;
 }) {
+  const { toast } = useToast();
   const [feedbackMap, setFeedbackMap] = useState<Record<string, boolean>>({});
   const [titleData, setTitleData] = useState<{ best: TitleSuggestion | null; suggestions: TitleSuggestion[]; issues: string[] } | null>(null);
   const [titleLoading, setTitleLoading] = useState(false);
