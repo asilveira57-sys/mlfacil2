@@ -2138,19 +2138,38 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       const rawCatKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 50);
       const extras = itemExtras.get(itemId) || { description: null, attributes: [] };
 
+      // CRITICAL: Strip variation attribute suffixes from title before any SEO analysis
+      let seoTitle = detail.title;
+      const seoVarAttrs = seoVariationMap.get(itemId);
+      if (seoVarAttrs && seoVarAttrs.size > 0) {
+        for (const va of seoVarAttrs) {
+          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+          seoTitle = seoTitle.replace(regex, '');
+        }
+        // Second pass for chained variation values (e.g., "Cor Branco" → "Branco" removed, then "Cor" if also variation)
+        for (const va of seoVarAttrs) {
+          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+          seoTitle = seoTitle.replace(regex, '');
+        }
+        seoTitle = seoTitle.trim();
+        if (seoTitle !== detail.title) {
+          console.log(`[rad-collector] SEO title cleaned: "${detail.title}" → "${seoTitle}" (removed variation attrs)`);
+        }
+      }
+
       // Build product context tokens from all available fields
       const modelAttr = (extras.attributes || []).find((a: any) => a.id === 'MODEL' || a.id === 'ALPHANUMERIC_MODEL');
-      const productTokens = buildProductTokens(detail.title, extras.description, extras.attributes || [], modelAttr?.value_name || '');
+      const productTokens = buildProductTokens(seoTitle, extras.description, extras.attributes || [], modelAttr?.value_name || '');
 
       // Filter keywords by product context — only keep relevant ones
       const { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
       console.log(`[rad-collector] SEO item ${itemId}: ${rawCatKeywords.length} raw kws → ${catKeywords.length} relevant, ${discardedKeywords.length} discarded`);
 
-      // Layer 1: Title (40%)
-      const titleResult = computeTitleSeo(detail.title, catKeywords);
+      // Layer 1: Title (40%) — uses cleaned title without variation
+      const titleResult = computeTitleSeo(seoTitle, catKeywords);
 
       // Layer 2: Description (25%)
-      const descResult = computeDescriptionSeo(extras.description, detail.title, catKeywords);
+      const descResult = computeDescriptionSeo(extras.description, seoTitle, catKeywords);
 
       // Layer 3: Attributes (20%)
       const attrResult = computeAttributesSeo(extras.attributes);
