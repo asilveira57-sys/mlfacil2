@@ -2324,8 +2324,200 @@ async function handleEnrichSales(supabase: any, sellerId: string) {
 // ============================================================================
 
 const HEALTH_WEIGHTS: Record<string, number> = {
-  traffic: 15, conversion: 20, content: 10, stock: 15, logistics: 10, catalog: 5, coverage: 5, seo: 20,
+  traffic: 15, conversion: 15, content: 10, stock: 15, logistics: 10, catalog: 5, coverage: 5, seo: 15, wholesale: 10,
 };
+
+// --- WHOLESALE ANALYSIS ---
+interface WholesaleAnalysis {
+  score: number;
+  account_type: 'cpf' | 'cnpj' | 'unknown';
+  is_eligible: boolean;
+  has_wholesale_layer: boolean;
+  has_valid_ranges: boolean;
+  ranges_count: number;
+  is_linked_to_listing: boolean;
+  status: 'not_eligible' | 'not_configured' | 'partial' | 'active';
+  summary: string;
+  positives: string[];
+  negatives: string[];
+  improvement_actions: string[];
+  cta_available: boolean;
+}
+
+async function detectAccountType(supabase: any, token: string | null, sellerId: string): Promise<'cpf' | 'cnpj' | 'unknown'> {
+  if (!token) return 'unknown';
+  try {
+    const resp = await fetch(`https://api.mercadolibre.com/users/${sellerId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) return 'unknown';
+    const user = await resp.json();
+    const idType = (user?.identification?.type || '').toUpperCase();
+    if (idType === 'CNPJ') return 'cnpj';
+    if (idType === 'CPF') return 'cpf';
+    // Also check company info
+    if (user?.company?.corporate_name || user?.company?.brand_name) return 'cnpj';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function analyzeWholesaleForItem(
+  supabase: any,
+  itemId: string,
+  sellerId: string,
+  accountType: 'cpf' | 'cnpj' | 'unknown',
+  tenantId: string | null,
+): Promise<WholesaleAnalysis> {
+  // CPF → not eligible
+  if (accountType === 'cpf') {
+    return {
+      score: 0, account_type: 'cpf', is_eligible: false,
+      has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+      status: 'not_eligible',
+      summary: 'Preço por atacado disponível apenas para contas CNPJ.',
+      positives: [], negatives: ['Sua conta não permite configuração de preço por quantidade.'],
+      improvement_actions: ['Para utilizar atacado, é necessário operar com conta CNPJ verificada.'],
+      cta_available: false,
+    };
+  }
+
+  // Unknown → treat as potentially eligible but no data
+  if (accountType === 'unknown') {
+    return {
+      score: 0, account_type: 'unknown', is_eligible: false,
+      has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+      status: 'not_eligible',
+      summary: 'Não foi possível identificar o tipo da conta. Atualize os dados para verificar elegibilidade.',
+      positives: [], negatives: ['Tipo de conta não identificado.'],
+      improvement_actions: ['Atualize os dados para verificar se sua conta é CNPJ.'],
+      cta_available: false,
+    };
+  }
+
+  // CNPJ → check wholesale config
+  if (!tenantId) {
+    return {
+      score: 0, account_type: 'cnpj', is_eligible: true,
+      has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+      status: 'not_configured',
+      summary: 'Este anúncio não possui preço por quantidade configurado.',
+      positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
+      improvement_actions: ['Criar faixas de preço para compras em maior volume.', 'Configurar política de atacado para aumentar competitividade.'],
+      cta_available: true,
+    };
+  }
+
+  try {
+    // Check if item has a wholesale override
+    const { data: override } = await supabase
+      .from('wholesale_product_overrides')
+      .select('id, override_mode, custom_tiers, is_excluded, profile_id')
+      .eq('company_id', tenantId)
+      .eq('item_id', itemId)
+      .maybeSingle();
+
+    // If excluded, treat as not configured
+    if (override?.is_excluded) {
+      return {
+        score: 0, account_type: 'cnpj', is_eligible: true,
+        has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+        status: 'not_configured',
+        summary: 'Este anúncio foi excluído da política de atacado.',
+        positives: [], negatives: ['Anúncio excluído da política de atacado.'],
+        improvement_actions: ['Remova a exclusão se deseja ativar preço por quantidade.'],
+        cta_available: true,
+      };
+    }
+
+    // Check for active profile
+    const { data: settings } = await supabase
+      .from('wholesale_seller_settings')
+      .select('default_profile_id, strategy_mode')
+      .eq('company_id', tenantId)
+      .maybeSingle();
+
+    const profileId = override?.profile_id || settings?.default_profile_id;
+
+    if (!profileId) {
+      return {
+        score: 0, account_type: 'cnpj', is_eligible: true,
+        has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+        status: 'not_configured',
+        summary: 'Este anúncio não possui preço por quantidade configurado.',
+        positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
+        improvement_actions: ['Criar faixas de preço para compras em maior volume.', 'Configurar política de atacado para aumentar competitividade.'],
+        cta_available: true,
+      };
+    }
+
+    // Check profile tiers
+    let tiers: any[] = [];
+    if (override?.override_mode === 'custom' && Array.isArray(override?.custom_tiers)) {
+      tiers = override.custom_tiers;
+    } else {
+      const { data: profileTiers } = await supabase
+        .from('wholesale_profile_tiers')
+        .select('*')
+        .eq('profile_id', profileId)
+        .eq('is_enabled', true)
+        .order('tier_index');
+      tiers = profileTiers || [];
+    }
+
+    const rangesCount = tiers.length;
+    const hasValidRanges = rangesCount >= 2;
+    const hasLayer = rangesCount > 0;
+
+    if (!hasLayer) {
+      return {
+        score: 0, account_type: 'cnpj', is_eligible: true,
+        has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+        status: 'not_configured',
+        summary: 'Este anúncio não possui preço por quantidade configurado.',
+        positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
+        improvement_actions: ['Criar faixas de preço para compras em maior volume.'],
+        cta_available: true,
+      };
+    }
+
+    if (!hasValidRanges) {
+      return {
+        score: 40, account_type: 'cnpj', is_eligible: true,
+        has_wholesale_layer: true, has_valid_ranges: false, ranges_count: rangesCount, is_linked_to_listing: true,
+        status: 'partial',
+        summary: 'Configuração de atacado incompleta.',
+        positives: ['Política de atacado iniciada.'],
+        negatives: ['Faixas de preço insuficientes ou inconsistentes.'],
+        improvement_actions: ['Revisar faixas de quantidade.', 'Adicionar mais faixas para volume.'],
+        cta_available: true,
+      };
+    }
+
+    return {
+      score: 100, account_type: 'cnpj', is_eligible: true,
+      has_wholesale_layer: true, has_valid_ranges: true, ranges_count: rangesCount, is_linked_to_listing: true,
+      status: 'active',
+      summary: 'Preço por atacado ativo e bem configurado.',
+      positives: ['Anúncio preparado para vendas em volume.', 'Estratégia comercial mais competitiva.', `${rangesCount} faixas de preço configuradas.`],
+      negatives: [],
+      improvement_actions: [],
+      cta_available: false,
+    };
+  } catch (err) {
+    console.warn(`[rad-collector] Wholesale analysis failed for ${itemId}:`, err);
+    return {
+      score: 0, account_type: 'cnpj', is_eligible: true,
+      has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+      status: 'not_configured',
+      summary: 'Não foi possível verificar a política de atacado.',
+      positives: [], negatives: ['Erro ao consultar dados de atacado.'],
+      improvement_actions: ['Atualize os dados para verificar.'],
+      cta_available: false,
+    };
+  }
+}
 
 function classifyLogisticType(item: any): { isFull: boolean; confirmed: boolean; logisticLabel: string } {
   const lt = (item.logistic_type || '').toLowerCase();
@@ -2654,6 +2846,11 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     let tenantId: string | null = null;
     if (acct?.user_id) { const { data: mem } = await supabase.from('company_members').select('company_id').eq('user_id', acct.user_id).limit(1).maybeSingle(); tenantId = mem?.company_id || null; }
 
+    // Detect account type for wholesale analysis
+    const accountType = await detectAccountType(supabase, token, sellerId);
+    console.log(`[rad-collector] ANALYZE: Account type for ${sellerId}: ${accountType}`);
+    await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'info', action: 'WHOLESALE_ACCOUNT_TYPE_DETECTED', message: `Account type: ${accountType}` });
+
     let analyzed = 0, errCount = 0;
     const newAlerts: any[] = [], newRecs: any[] = [], updateRows: any[] = [], mediaRows: any[] = [];
 
@@ -2672,6 +2869,17 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const convRate = v30d > 0 ? (s30d / v30d) * 100 : 0;
 
         const scores = computeSubScores(merged, photos, title.length, covDays, v7d, v30d, s30d);
+
+        // Wholesale analysis
+        const wholesaleResult = await analyzeWholesaleForItem(supabase, item.item_id, sellerId, accountType, tenantId);
+        // Add wholesale to scores; if not eligible, remove weight from calculation
+        if (wholesaleResult.is_eligible) {
+          scores.wholesale = wholesaleResult.score;
+        } else {
+          // Remove wholesale weight — computeHealthScore will just skip it
+          delete scores.wholesale;
+        }
+
         const hScore = computeHealthScore(scores);
         const hStatus = classifyHealthStatus(hScore);
         const mainProb = determineMainProblem(scores, covStatus, v30d, s30d, item.available_quantity, merged);
@@ -2754,6 +2962,8 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           data_coverage_days: covDays, data_coverage_status: covStatus,
           is_ads_active: isAdsActive, ads_status: adsStatus,
           is_promotion_active: isPromoActive, promotion_status: promoStatus,
+          wholesale_score: wholesaleResult.is_eligible ? wholesaleResult.score : null,
+          wholesale_analysis_json: wholesaleResult,
         });
         analyzed++;
       } catch (e) { errCount++; console.warn(`[rad-collector] ANALYZE item ${item.item_id} err:`, e); }

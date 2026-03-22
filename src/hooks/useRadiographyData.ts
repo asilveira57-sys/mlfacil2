@@ -5,6 +5,22 @@ import { RadiographyHealthStatus } from "@/types/radiography";
 
 // --- Types ---
 
+export interface WholesaleAnalysis {
+  score: number;
+  account_type: 'cpf' | 'cnpj' | 'unknown';
+  is_eligible: boolean;
+  has_wholesale_layer: boolean;
+  has_valid_ranges: boolean;
+  ranges_count: number;
+  is_linked_to_listing: boolean;
+  status: 'not_eligible' | 'not_configured' | 'partial' | 'active';
+  summary: string;
+  positives: string[];
+  negatives: string[];
+  improvement_actions: string[];
+  cta_available: boolean;
+}
+
 export interface StructuredAlert {
   type: string;
   severity: string;
@@ -165,6 +181,9 @@ export interface HealthCurrentItem {
   ads_status: string | null;
   is_promotion_active: boolean | null;
   promotion_status: string | null;
+  // Wholesale
+  wholesale_score: number | null;
+  wholesale_analysis_json: WholesaleAnalysis | null;
   // Diagnostic
   diagnostic_text: string | null;
   // Period-based metrics (from RPC)
@@ -428,6 +447,7 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
           change_flags: (h.change_flags as any as ChangeFlag[]) || [],
           alerts_json: (h.alerts_json as any as StructuredAlert[]) || [],
           seo_analysis_json: (h.seo_analysis_json as any as SeoAnalysis) || null,
+          wholesale_analysis_json: (h.wholesale_analysis_json as any as WholesaleAnalysis) || null,
           title: h.title || cache?.title || null,
           thumbnail: h.thumbnail || cache?.thumbnail || null,
           permalink: h.permalink || cache?.permalink || null,

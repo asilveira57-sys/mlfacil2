@@ -6908,6 +6908,8 @@ export type Database = {
           visits_60d: number | null
           visits_7d: number | null
           visits_last: number | null
+          wholesale_analysis_json: Json | null
+          wholesale_score: number | null
         }
         Insert: {
           ads_status?: string | null
@@ -6978,6 +6980,8 @@ export type Database = {
           visits_60d?: number | null
           visits_7d?: number | null
           visits_last?: number | null
+          wholesale_analysis_json?: Json | null
+          wholesale_score?: number | null
         }
         Update: {
           ads_status?: string | null
@@ -7048,6 +7052,8 @@ export type Database = {
           visits_60d?: number | null
           visits_7d?: number | null
           visits_last?: number | null
+          wholesale_analysis_json?: Json | null
+          wholesale_score?: number | null
         }
         Relationships: []
       }
