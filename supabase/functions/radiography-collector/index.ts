@@ -2404,23 +2404,12 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       const rawCatKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 50);
       const extras = itemExtras.get(itemId) || { description: null, attributes: [] };
 
-      // CRITICAL: Strip variation attribute suffixes from title before any SEO analysis
-      let seoTitle = detail.title;
+      // CRITICAL: Use canonical title normalizer for all SEO analysis
       const seoVarAttrs = seoVariationMap.get(itemId);
-      if (seoVarAttrs && seoVarAttrs.size > 0) {
-        for (const va of seoVarAttrs) {
-          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-          seoTitle = seoTitle.replace(regex, '');
-        }
-        // Second pass for chained variation values (e.g., "Cor Branco" → "Branco" removed, then "Cor" if also variation)
-        for (const va of seoVarAttrs) {
-          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-          seoTitle = seoTitle.replace(regex, '');
-        }
-        seoTitle = seoTitle.trim();
-        if (seoTitle !== detail.title) {
-          console.log(`[rad-collector] SEO title cleaned: "${detail.title}" → "${seoTitle}" (removed variation attrs)`);
-        }
+      const canonResult = getCanonicalTitle(detail.title, seoVarAttrs || null);
+      const seoTitle = canonResult.canonical;
+      if (canonResult.removed_tokens.length > 0) {
+        console.log(`[rad-collector] SEO canonical title: "${detail.title}" → "${seoTitle}" (removed: ${canonResult.removed_tokens.join(', ')})`);
       }
 
       // Build product context tokens from all available fields
