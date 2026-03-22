@@ -352,7 +352,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
       label: "Atacado",
       icon: <Package className="h-3.5 w-3.5" />,
       status: wa.status === 'active' ? "good" : wa.status === 'partial' ? "warning" : wa.status === 'not_eligible' ? "neutral" : "bad",
-      detail: wa.status === 'active' ? `Ativo (${wa.ranges_count} faixas)` : wa.status === 'partial' ? 'Parcial' : wa.status === 'not_eligible' ? wa.account_type === 'cpf' ? 'CPF' : 'Indisponível' : 'Não configurado',
+      detail: wa.status === 'active' ? `Ativo (${wa.ranges_count} faixas)` : wa.status === 'partial' ? 'Parcial' : wa.status === 'not_eligible' ? (wa.account_type === 'cpf' ? 'CPF' : 'Indisponível') : 'Não configurado',
     });
   }
 
@@ -771,13 +771,33 @@ function EvolutionPill({ label, delta, isCurrency }: { label: string; delta: num
 function MediaCard({ item }: { item: HealthCurrentItem }) {
   const [expanded, setExpanded] = useState(false);
 
-  // Try to get per-image data from seo_analysis_json or media analysis
-  const mediaJson = (item as any).media_analysis_json;
+  // Try to get per-image data from media_analysis_json
+  const mediaJson = item.media_analysis_json;
   const perImage: Array<{ image_index: number; width: number; height: number; is_1200x1200: boolean; is_primary: boolean; resolution_status: string; recommendation: string | null }> = mediaJson?.per_image || [];
   const imagesAt1200 = mediaJson?.images_at_1200 ?? perImage.filter(i => i.is_1200x1200).length;
   const totalImages = mediaJson?.total_images ?? (item.photos_count ?? 0);
   const resLabel = totalImages > 0 ? `${imagesAt1200}/${totalImages} em 1200x1200` : "Sem dados";
   const resColor = totalImages === 0 ? "neutral" : imagesAt1200 === totalImages ? "good" : imagesAt1200 > 0 ? "warning" : "bad";
+
+  // First image status based on actual resolution
+  const firstImage = perImage.find(i => i.is_primary || i.image_index === 1);
+  let firstImageStatus: string;
+  let firstImageColor: string;
+  if (firstImage) {
+    if (firstImage.is_1200x1200) {
+      firstImageStatus = `OK (${firstImage.width}x${firstImage.height})`;
+      firstImageColor = "good";
+    } else if (firstImage.width > 0) {
+      firstImageStatus = `${firstImage.width}x${firstImage.height}`;
+      firstImageColor = "warning";
+    } else {
+      firstImageStatus = "Sem dados";
+      firstImageColor = "neutral";
+    }
+  } else {
+    firstImageStatus = item.thumbnail ? "Presente" : "Sem";
+    firstImageColor = item.thumbnail ? "neutral" : "bad";
+  }
 
   return (
     <SectionCard title="Mídia" icon={<Camera className="h-4 w-4 text-violet-400" />}>
@@ -793,9 +813,9 @@ function MediaCard({ item }: { item: HealthCurrentItem }) {
           <Video className="h-3.5 w-3.5" />
           <div><span className="font-medium">Vídeo</span><span className="ml-1.5 opacity-80">{item.has_video ? "Sim" : "Não"}</span></div>
         </div>
-        <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${factorStatusStyles.neutral}`}>
+        <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${factorStatusStyles[firstImageColor as keyof typeof factorStatusStyles]}`}>
           <Image className="h-3.5 w-3.5" />
-          <div><span className="font-medium">1ª imagem</span><span className="ml-1.5 opacity-80">{item.thumbnail ? "OK" : "Sem"}</span></div>
+          <div><span className="font-medium">1ª imagem</span><span className="ml-1.5 opacity-80">{firstImageStatus}</span></div>
         </div>
         <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${factorStatusStyles[resColor as keyof typeof factorStatusStyles]}`}>
           <Scan className="h-3.5 w-3.5" />
@@ -845,7 +865,7 @@ function WholesaleCard({ item }: { item: HealthCurrentItem }) {
   if (!w) return null;
 
   const statusColor = w.status === 'active' ? 'emerald' : w.status === 'partial' ? 'amber' : w.status === 'not_eligible' ? 'slate' : 'red';
-  const statusLabel = w.status === 'active' ? 'Ativo' : w.status === 'partial' ? 'Parcial' : w.status === 'not_eligible' ? 'Indisponível' : 'Não configurado';
+  const statusLabel = w.status === 'active' ? 'Ativo no Mercado Livre' : w.status === 'partial' ? 'Parcial' : w.status === 'not_eligible' ? (w.account_type === 'cpf' ? 'Indisponível para CPF' : 'Indisponível') : 'Preço de atacado não configurado';
   const scoreDisplay = w.is_eligible ? w.score : null;
   const icon = w.status === 'active' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> :
                w.status === 'not_eligible' ? <X className="h-3.5 w-3.5 text-slate-400" /> :

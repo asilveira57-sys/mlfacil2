@@ -2369,6 +2369,7 @@ async function analyzeWholesaleForItem(
   sellerId: string,
   accountType: 'cpf' | 'cnpj' | 'unknown',
   tenantId: string | null,
+  token: string | null,
 ): Promise<WholesaleAnalysis> {
   // CPF → not eligible
   if (accountType === 'cpf') {
@@ -2396,20 +2397,83 @@ async function analyzeWholesaleForItem(
     };
   }
 
-  // CNPJ → check wholesale config
-  if (!tenantId) {
-    return {
-      score: 0, account_type: 'cnpj', is_eligible: true,
-      has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
-      status: 'not_configured',
-      summary: 'Este anúncio não possui preço por quantidade configurado.',
-      positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
-      improvement_actions: ['Criar faixas de preço para compras em maior volume.', 'Configurar política de atacado para aumentar competitividade.'],
-      cta_available: true,
-    };
-  }
-
+  // CNPJ → check ML API for sale_terms wholesale first, then internal tables
   try {
+    // 1. Check ML API for wholesale config on this item
+    let hasMLWholesale = false;
+    let mlRangesCount = 0;
+    if (token) {
+      try {
+        const resp = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,sale_terms`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          const itemData = await resp.json();
+          const saleTerms = Array.isArray(itemData.sale_terms) ? itemData.sale_terms : [];
+          // Check for WHOLESALE or QUANTITY_DISCOUNTS
+          for (const term of saleTerms) {
+            if (term.id === 'WHOLESALE' || term.id === 'QUANTITY_DISCOUNTS') {
+              hasMLWholesale = true;
+              // Count discount ranges if available
+              if (Array.isArray(term.values)) {
+                mlRangesCount = term.values.length;
+              }
+              break;
+            }
+          }
+          // Also check via item.sale_conditions or price breakdown
+          if (!hasMLWholesale) {
+            // Try fetching price layers
+            try {
+              const priceResp = await fetch(`https://api.mercadolibre.com/items/${itemId}/prices`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (priceResp.ok) {
+                const priceData = await priceResp.json();
+                if (priceData.prices && Array.isArray(priceData.prices)) {
+                  const bulkPrices = priceData.prices.filter((p: any) => p.type === 'bulk' || p.type === 'promotion' && p.conditions?.quantity);
+                  if (bulkPrices.length > 0) {
+                    hasMLWholesale = true;
+                    mlRangesCount = bulkPrices.length;
+                  }
+                }
+              }
+            } catch {}
+          }
+        }
+      } catch (mlErr) {
+        console.warn(`[rad-collector] Wholesale ML API check failed for ${itemId}:`, mlErr);
+      }
+    }
+
+    // If ML has wholesale configured → return active
+    if (hasMLWholesale) {
+      console.log(`[rad-collector] Wholesale: ${itemId} has ML wholesale active (${mlRangesCount} ranges)`);
+      return {
+        score: mlRangesCount >= 2 ? 100 : 80, account_type: 'cnpj', is_eligible: true,
+        has_wholesale_layer: true, has_valid_ranges: mlRangesCount >= 2, ranges_count: mlRangesCount, is_linked_to_listing: true,
+        status: 'active',
+        summary: 'Preço por atacado ativo no Mercado Livre.',
+        positives: ['Anúncio preparado para vendas em volume.', 'Estratégia comercial mais competitiva.', ...(mlRangesCount > 0 ? [`${mlRangesCount} faixas de preço configuradas.`] : [])],
+        negatives: [],
+        improvement_actions: [],
+        cta_available: false,
+      };
+    }
+
+    // 2. Fallback: check internal tables
+    if (!tenantId) {
+      return {
+        score: 0, account_type: 'cnpj', is_eligible: true,
+        has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
+        status: 'not_configured',
+        summary: 'Preço de atacado não configurado neste anúncio.',
+        positives: [], negatives: ['Nenhuma faixa de preço por quantidade encontrada.'],
+        improvement_actions: ['Criar faixas de preço para compras em maior volume.', 'Configurar política de atacado para aumentar competitividade.'],
+        cta_available: true,
+      };
+    }
+
     // Check if item has a wholesale override
     const { data: override } = await supabase
       .from('wholesale_product_overrides')
@@ -2445,8 +2509,8 @@ async function analyzeWholesaleForItem(
         score: 0, account_type: 'cnpj', is_eligible: true,
         has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
         status: 'not_configured',
-        summary: 'Este anúncio não possui preço por quantidade configurado.',
-        positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
+        summary: 'Preço de atacado não configurado neste anúncio.',
+        positives: [], negatives: ['Nenhuma faixa de preço por quantidade encontrada.'],
         improvement_actions: ['Criar faixas de preço para compras em maior volume.', 'Configurar política de atacado para aumentar competitividade.'],
         cta_available: true,
       };
@@ -2475,8 +2539,8 @@ async function analyzeWholesaleForItem(
         score: 0, account_type: 'cnpj', is_eligible: true,
         has_wholesale_layer: false, has_valid_ranges: false, ranges_count: 0, is_linked_to_listing: false,
         status: 'not_configured',
-        summary: 'Este anúncio não possui preço por quantidade configurado.',
-        positives: [], negatives: ['Nenhuma faixa de atacado encontrada.'],
+        summary: 'Preço de atacado não configurado neste anúncio.',
+        positives: [], negatives: ['Nenhuma faixa de preço por quantidade encontrada.'],
         improvement_actions: ['Criar faixas de preço para compras em maior volume.'],
         cta_available: true,
       };
@@ -2749,10 +2813,11 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     // Photos from API — capture per-image resolution
     const token = await getValidToken(supabase, sellerId);
     const photosMap = new Map<string, { count: number; hasVideo: boolean; images: Array<{ url: string; width: number; height: number }> }>();
+    const variationMap = new Map<string, Set<string>>();
     if (token) {
       for (let i = 0; i < allIds.length; i += 20) {
         try {
-          const resp = await fetch(`https://api.mercadolibre.com/items?ids=${allIds.slice(i,i+20).join(',')}&attributes=id,pictures,video_id`, { headers: { Authorization: `Bearer ${token}` } });
+          const resp = await fetch(`https://api.mercadolibre.com/items?ids=${allIds.slice(i,i+20).join(',')}&attributes=id,pictures,video_id,variations,title`, { headers: { Authorization: `Bearer ${token}` } });
           if (resp.ok) {
             const d = await resp.json();
             for (const e of d) {
@@ -2764,6 +2829,19 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
                   height: p.max_size ? parseInt(String(p.max_size).split('x')[1]) || 0 : 0,
                 }));
                 photosMap.set(e.body.id, { count: pics.length, hasVideo: !!e.body.video_id, images });
+                
+                // Extract variation attribute values for title cleaning
+                const variations = Array.isArray(e.body.variations) ? e.body.variations : [];
+                if (variations.length > 0) {
+                  const varAttrs = new Set<string>();
+                  for (const v of variations) {
+                    const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
+                    for (const c of combos) {
+                      if (c.value_name) varAttrs.add(c.value_name);
+                    }
+                  }
+                  if (varAttrs.size > 0) variationMap.set(e.body.id, varAttrs);
+                }
               }
             }
           }
@@ -2859,7 +2937,22 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const listing = detailMap.get(item.item_id) || {};
         const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false, images: [] };
         const covDays = covByItem.get(item.item_id) || 0;
-        const title = listing.title || item.title || '';
+        // Clean title: strip variation attribute suffixes
+        let title = listing.title || item.title || '';
+        const varAttrs = variationMap.get(item.item_id);
+        if (varAttrs && varAttrs.size > 0) {
+          for (const va of varAttrs) {
+            // Remove variation value from end of title (e.g., "...Branco Nenhum" → "...")
+            const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+            title = title.replace(regex, '');
+          }
+          // Second pass for remaining values
+          for (const va of varAttrs) {
+            const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+            title = title.replace(regex, '');
+          }
+          title = title.trim();
+        }
         const merged = { ...item, ...listing, is_ads_active: adsActiveSet.has(item.item_id) || null, is_promotion_active: promoActiveSet.has(item.item_id) || null };
         const covStatus = classifyCoverage(covDays, 30);
 
@@ -2871,7 +2964,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         const scores = computeSubScores(merged, photos, title.length, covDays, v7d, v30d, s30d);
 
         // Wholesale analysis
-        const wholesaleResult = await analyzeWholesaleForItem(supabase, item.item_id, sellerId, accountType, tenantId);
+        const wholesaleResult = await analyzeWholesaleForItem(supabase, item.item_id, sellerId, accountType, tenantId, token);
         // Add wholesale to scores; if not eligible, remove weight from calculation
         if (wholesaleResult.is_eligible) {
           scores.wholesale = wholesaleResult.score;
@@ -3195,17 +3288,69 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
   });
 
   try {
-    const { data: listing, error: listingErr } = await supabase.from('meli_listings_cache')
+    // Try meli_listings_cache first, then listing_health_current as fallback
+    let listing: any = null;
+    const { data: cacheRow, error: listingErr } = await supabase.from('meli_listings_cache')
       .select('item_id, title, category_id')
       .eq('item_id', itemId).eq('seller_id', sellerId).maybeSingle();
     if (listingErr) console.error('[rad-collector] GENERATE_TITLE listing fetch error:', listingErr);
-    if (!listing?.title) return { success: false, error: 'Item not found in listings cache' };
+    listing = cacheRow;
+    
+    // Fallback to listing_health_current
+    if (!listing?.title) {
+      const { data: healthRow } = await supabase.from('listing_health_current')
+        .select('item_id, title')
+        .eq('item_id', itemId).eq('seller_id', sellerId).maybeSingle();
+      if (healthRow?.title) {
+        listing = { item_id: itemId, title: healthRow.title, category_id: null };
+      }
+    }
+    
+    if (!listing?.title) return { success: false, error: 'Anúncio não encontrado no cache local. Atualize os dados para gerar a análise.' };
 
-    const currentTitle = listing.title;
+    // Fetch variation attributes from ML API to strip from title
+    const variationAttrs: string[] = [];
+    const token = await getValidToken(supabase, sellerId);
+    if (token) {
+      try {
+        const resp = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,variations,title`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          const itemData = await resp.json();
+          const vars = Array.isArray(itemData.variations) ? itemData.variations : [];
+          for (const v of vars) {
+            const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
+            for (const c of combos) {
+              if (c.value_name && !variationAttrs.includes(normalizeText(c.value_name))) {
+                variationAttrs.push(normalizeText(c.value_name));
+              }
+            }
+          }
+        }
+      } catch (varErr) {
+        console.warn(`[rad-collector] GENERATE_TITLE: variation fetch failed:`, varErr);
+      }
+    }
+
+    // Clean title by stripping variation suffixes
+    let currentTitle = listing.title;
+    if (variationAttrs.length > 0) {
+      for (const va of variationAttrs) {
+        const original = currentTitle;
+        // Try to remove the variation value from the end of the title
+        const tokens = currentTitle.split(/\s+/);
+        const vaTokens = va.split(/\s+/);
+        // Check if last N tokens match variation
+        if (tokens.length > vaTokens.length) {
+          const lastTokens = tokens.slice(-vaTokens.length).map(t => normalizeText(t));
+          if (lastTokens.every((t, i) => t === vaTokens[i])) {
+            currentTitle = tokens.slice(0, -vaTokens.length).join(' ').trim();
+          }
+        }
+      }
+    }
     const categoryId = listing.category_id;
-
-    // Variation attributes not available in meli_listings_cache - skip variation filtering
-    // Future: fetch from API or analyzed_items if needed
 
     const { data: feedback } = await supabase.from('listing_keyword_feedback')
       .select('keyword, is_relevant').eq('seller_id', sellerId).eq('listing_id', itemId);
