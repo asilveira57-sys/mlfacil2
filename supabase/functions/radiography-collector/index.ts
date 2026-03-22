@@ -2846,6 +2846,11 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     let tenantId: string | null = null;
     if (acct?.user_id) { const { data: mem } = await supabase.from('company_members').select('company_id').eq('user_id', acct.user_id).limit(1).maybeSingle(); tenantId = mem?.company_id || null; }
 
+    // Detect account type for wholesale analysis
+    const accountType = await detectAccountType(supabase, token, sellerId);
+    console.log(`[rad-collector] ANALYZE: Account type for ${sellerId}: ${accountType}`);
+    await supabase.from('listing_health_logs').insert({ seller_id: sellerId, log_type: 'analysis', log_level: 'info', action: 'WHOLESALE_ACCOUNT_TYPE_DETECTED', message: `Account type: ${accountType}` });
+
     let analyzed = 0, errCount = 0;
     const newAlerts: any[] = [], newRecs: any[] = [], updateRows: any[] = [], mediaRows: any[] = [];
 
