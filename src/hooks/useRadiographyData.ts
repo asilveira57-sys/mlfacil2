@@ -23,6 +23,32 @@ export interface ChangeFlag {
   pct_change?: number;
 }
 
+export interface SeoLayerAnalysis {
+  score?: number;
+  length?: number;
+  limit_status?: string;
+  length_status?: string;
+  density?: number;
+  filled_ratio?: number;
+  total?: number;
+  filled?: number;
+  current_value?: string | null;
+  brand_value?: string | null;
+  is_search_friendly?: boolean;
+  matched_keywords?: string[];
+  missing_keywords?: string[];
+  strong_attributes?: string[];
+  weak_attributes_detail?: string[];
+  missing?: string[];
+  description_preview?: string;
+  positives?: string[];
+  negatives?: string[];
+  improvement_actions?: string[];
+  summary?: string;
+  issues?: string[];
+  suggestions?: string[];
+}
+
 export interface SeoAnalysis {
   structural_score?: number;
   keyword_score?: number;
@@ -38,6 +64,11 @@ export interface SeoAnalysis {
   model_value?: string | null;
   missing_attributes?: string[];
   weak_attributes?: string[];
+  // Layer analyses
+  title_analysis?: SeoLayerAnalysis;
+  description_analysis?: SeoLayerAnalysis;
+  attributes_analysis?: SeoLayerAnalysis;
+  model_analysis?: SeoLayerAnalysis;
   // Keywords
   category_id?: string;
   category_name?: string;
