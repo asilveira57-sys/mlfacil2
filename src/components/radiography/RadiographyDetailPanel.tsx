@@ -1382,6 +1382,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                 </div>
               )}
             </div>
+          )}
 
           {/* Validation prompt */}
           {(foundKws.length > 0 || missingKws.length > 0 || (seo.details && seo.details.length > 0)) && (
