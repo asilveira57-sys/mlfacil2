@@ -2399,14 +2399,12 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
 
     const filteredKeywords = keywords.filter(kw => feedbackMap.get(kw.normalized) !== false);
     const validKeywords = filteredKeywords.filter(kw => {
-      if (variationAttrs.some(va => kw.normalized.includes(va) || va.includes(kw.normalized))) return false;
       if (GENERIC_IRRELEVANT_WORDS.has(kw.keyword)) return false;
       return true;
     });
 
     const currentTokens = tokenize(currentTitle);
     const currentTokensClean = currentTokens.filter(t => {
-      if (variationAttrs.some(va => t === va || va.includes(t))) return false;
       if (GENERIC_IRRELEVANT_WORDS.has(t)) return false;
       return true;
     });
