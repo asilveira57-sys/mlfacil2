@@ -352,7 +352,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
       label: "Atacado",
       icon: <Package className="h-3.5 w-3.5" />,
       status: wa.status === 'active' ? "good" : wa.status === 'partial' ? "warning" : wa.status === 'not_eligible' ? "neutral" : "bad",
-      detail: wa.status === 'active' ? `Ativo (${wa.ranges_count} faixas)` : wa.status === 'partial' ? 'Parcial' : wa.status === 'not_eligible' ? wa.account_type === 'cpf' ? 'CPF' : 'Indisponível' : 'Não configurado',
+      detail: wa.status === 'active' ? `Ativo (${wa.ranges_count} faixas)` : wa.status === 'partial' ? 'Parcial' : wa.status === 'not_eligible' ? (wa.account_type === 'cpf' ? 'CPF' : 'Indisponível') : 'Não configurado',
     });
   }
 
