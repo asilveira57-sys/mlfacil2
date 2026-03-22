@@ -1559,6 +1559,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
         keyword_coverage_ratio: Number(adherence.coverage_ratio.toFixed(4)),
         missing_keywords: adherence.missing.slice(0, 15),
         irrelevant_keywords: adherence.irrelevant.slice(0, 10),
+        keywords_relevantes: catKeywords.map(k => k.keyword).slice(0, 30),
+        keywords_presentes: adherence.found.slice(0, 20),
+        keywords_faltantes: adherence.missing.slice(0, 15),
         issues: allIssues, suggestions: allSuggestions,
         analysis_details: {
           structural, adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length, details: adherence.details.filter(d => d.relevance !== 'low').slice(0, 15) },
