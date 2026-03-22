@@ -339,7 +339,17 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
     detail: item.is_promotion_active ? "Em promoção" : item.is_promotion_active === false ? "Sem promoção" : "Sem dados",
   });
 
-  return (
+  // Wholesale
+  const wa = item.wholesale_analysis_json;
+  if (wa) {
+    healthFactors.push({
+      label: "Atacado",
+      icon: <Package className="h-3.5 w-3.5" />,
+      status: wa.status === 'active' ? "good" : wa.status === 'partial' ? "warning" : wa.status === 'not_eligible' ? "neutral" : "bad",
+      detail: wa.status === 'active' ? `Ativo (${wa.ranges_count} faixas)` : wa.status === 'partial' ? 'Parcial' : wa.status === 'not_eligible' ? wa.account_type === 'cpf' ? 'CPF' : 'Indisponível' : 'Não configurado',
+    });
+  }
+
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl p-0 bg-slate-900 border-slate-700">
         {/* HEADER */}
