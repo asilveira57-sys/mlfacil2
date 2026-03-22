@@ -65,7 +65,7 @@ function saveProgress(p: OnboardingProgress) {
 // ── Main Component ────────────────────────────────────────────────
 const PrimeiroAcesso = () => {
   const navigate = useNavigate();
-  const { loading: accessLoading, isAuthenticated, requiresOnboarding, updateOnboarding, refetch } = useUserAccess();
+  const { loading: accessLoading, isAuthenticated, requiresOnboarding, updateOnboarding, selectPlan, refetch } = useUserAccess();
   const { registerEvent } = useOnboardingEvents();
   const { uploadLogo, uploading: logoUploading, error: logoError } = useCompanyLogoUpload();
 
@@ -75,6 +75,7 @@ const PrimeiroAcesso = () => {
   const [companyNameInput, setCompanyNameInput] = useState(progress.companyName);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(progress.logoUrl);
+  const [selectingPlan, setSelectingPlan] = useState(false);
 
   const currentStep = progress.currentStep;
   const completedSteps = progress.completedSteps;
