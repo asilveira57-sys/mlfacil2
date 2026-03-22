@@ -1719,9 +1719,11 @@ function generateSmartRecs(item: any, scores: Record<string, number>, mainProble
   if (item.is_ads_active && v30d < 15 && !has('review_campaign'))
     recs.push({ recommendation_type: 'review_campaign', priority: 'high', title: 'Revisar campanha ADS', description: 'ADS ativo mas sem gerar tráfego. Ajuste a campanha ou atratividade do anúncio.', category: 'exposure', estimated_impact: 'alto' });
 
-  // Promo — good conversion, has traffic
+  // Promo — contextual suggestions
   if (!item.is_promotion_active && scores.conversion >= 60 && hasTraffic && !has('consider_promo'))
     recs.push({ recommendation_type: 'consider_promo', priority: 'low', title: 'Considerar promoção', description: 'Anúncio com boa conversão pode se beneficiar de promoções para escalar vendas.', category: 'exposure', estimated_impact: 'médio' });
+  if (item.is_promotion_active && !has('check_more_promos'))
+    recs.push({ recommendation_type: 'check_more_promos', priority: 'low', title: 'Promoção ativa — verifique disponibilidade', description: 'Este anúncio já participa de promoção. Verifique se há mais promoções disponíveis para ampliar a exposição.', category: 'exposure', estimated_impact: 'médio' });
 
   // BLOCK: Content/media suggestions ONLY if has traffic
   if (hasTraffic && scores.content < 60) {
@@ -1860,7 +1862,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           if (promoItems) {
             for (const r of promoItems) {
               promoStatusMap.set(r.item_id, r.item_status);
-              if (r.item_status === 'candidate' || r.item_status === 'active') promoActiveSet.add(r.item_id);
+              if (['candidate', 'active', 'started'].includes(r.item_status)) promoActiveSet.add(r.item_id);
             }
           }
         }

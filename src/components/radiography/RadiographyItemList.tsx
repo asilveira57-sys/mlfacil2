@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CopyMlbId } from "@/components/ui/CopyMlbId";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
@@ -456,6 +457,7 @@ function ItemCard({ item, onSelectItem, selectedPeriod }: { item: HealthCurrentI
             </a>
           )}
         </div>
+        <CopyMlbId itemId={item.item_id} className="mb-0.5" />
         {/* Metrics row */}
         <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
           <span className="flex items-center gap-1">
