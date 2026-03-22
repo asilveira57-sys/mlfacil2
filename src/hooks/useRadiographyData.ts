@@ -24,17 +24,29 @@ export interface ChangeFlag {
 }
 
 export interface SeoAnalysis {
-  category_name: string;
-  l1_category_name: string;
-  total_trending_keywords: number;
-  analyzed_keywords: number;
-  relevant_keywords: number;
-  found_count: number;
+  structural_score?: number;
+  keyword_score?: number;
   score: number;
+  grade?: string;
+  category_id?: string;
+  category_name?: string;
+  l1_category_name?: string;
+  total_keywords?: number;
+  total_trending_keywords?: number;
+  analyzed_keywords?: number;
+  relevant_keywords?: number;
+  found_count: number;
+  missing_count?: number;
+  coverage_ratio?: number;
+  irrelevant_keywords?: string[];
+  irrelevant_count?: number;
+  issues?: string[];
+  suggestions?: string[];
   details: Array<{
     keyword: string;
     found_in_title: boolean;
     relevance: "high" | "medium" | "low";
+    weight?: number;
   }>;
   analyzed_at: string;
 }
