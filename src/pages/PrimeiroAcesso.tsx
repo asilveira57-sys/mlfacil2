@@ -27,6 +27,7 @@ interface OnboardingStepDef {
 
 const STEPS: OnboardingStepDef[] = [
   { id: "validate",  title: "Validar conta",               description: "Verificação de sessão e dados básicos",       icon: Shield },
+  { id: "plan",      title: "Como vai usar o sistema",     description: "Escolha o tipo de uso do sistema",            icon: Layers },
   { id: "company",   title: "Dados da empresa",            description: "Criar ou confirmar sua empresa no sistema",   icon: Building2 },
   { id: "logo",      title: "Logomarca da empresa",        description: "Personalize relatórios e documentos",         icon: ImageIcon, optional: true },
   { id: "prefs",     title: "Preferências iniciais",       description: "Configurações base do seu ambiente",          icon: Settings2 },
@@ -34,6 +35,9 @@ const STEPS: OnboardingStepDef[] = [
   { id: "import",    title: "Importação inicial",          description: "Importar últimos 30 dias de operação",        icon: Database },
   { id: "activate",  title: "Ativar ambiente",             description: "Liberar acesso ao painel principal",          icon: Rocket },
 ];
+
+// ZPL plan tier ID — must match DB
+const ZPL_PLAN_ID = 'a0000000-0000-0000-0000-000000000001';
 
 // ── Persisted state ───────────────────────────────────────────────
 interface OnboardingProgress {
