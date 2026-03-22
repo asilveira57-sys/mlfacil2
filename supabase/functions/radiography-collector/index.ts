@@ -2163,7 +2163,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
             improvement_actions: modelResult.improvement_actions, summary: modelResult.summary,
             issues: modelResult.issues, suggestions: modelResult.suggestions,
           },
-          adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length },
+          adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length, total_raw_keywords: rawCatKeywords.length, discarded_count: discardedKeywords.length },
           analyzed_at: new Date().toISOString(),
         },
         updated_at: new Date().toISOString(),
