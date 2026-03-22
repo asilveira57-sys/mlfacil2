@@ -669,9 +669,10 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               )}
             </SectionCard>
 
-            {/* SECTION 8 — SEO */}
+            {/* SECTION 8 — SEO Interativo + Título */}
             {item.seo_analysis_json && (
-              <SeoAnalysisCard
+              <InteractiveSeoCard
+                item={item}
                 seo={item.seo_analysis_json}
                 score={item.seo_score}
                 found={item.seo_keywords_found}
