@@ -502,35 +502,8 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               )}
             </SectionCard>
 
-            {/* SECTION 3 — Media */}
-            <SectionCard title="Mídia" icon={<Camera className="h-4 w-4 text-violet-400" />}>
-              <div className="grid grid-cols-3 gap-2">
-                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${
-                  (item.photos_count ?? 0) >= 5 ? factorStatusStyles.good :
-                  (item.photos_count ?? 0) >= 3 ? factorStatusStyles.warning : factorStatusStyles.bad
-                }`}>
-                  <Image className="h-3.5 w-3.5" />
-                  <div>
-                    <span className="font-medium">Fotos</span>
-                    <span className="ml-1.5 opacity-80">{item.photos_count ?? "?"}</span>
-                  </div>
-                </div>
-                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${item.has_video ? factorStatusStyles.good : factorStatusStyles.warning}`}>
-                  <Video className="h-3.5 w-3.5" />
-                  <div>
-                    <span className="font-medium">Vídeo</span>
-                    <span className="ml-1.5 opacity-80">{item.has_video ? "Sim" : "Não"}</span>
-                  </div>
-                </div>
-                <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${factorStatusStyles.neutral}`}>
-                  <Image className="h-3.5 w-3.5" />
-                  <div>
-                    <span className="font-medium">1ª imagem</span>
-                    <span className="ml-1.5 opacity-80">{item.thumbnail ? "OK" : "Sem"}</span>
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
+            {/* SECTION 3 — Media (expanded with per-image resolution) */}
+            <MediaCard item={item} />
 
             {/* SECTION 4 — Health breakdown */}
             <SectionCard title="Fatores de Saúde" icon={<HeartPulse className="h-4 w-4 text-cyan-400" />} subtitle={config.description}>
