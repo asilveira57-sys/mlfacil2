@@ -1228,8 +1228,18 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
 }
 
 // ============================================================================
-// FLOW 6 — SEO ANALYSIS (cross-reference with Trends keywords)
+// FLOW 6 — SEO ANALYSIS (Two-layer: Structural + Keyword Adherence)
 // ============================================================================
+
+const SEO_STOPWORDS = new Set([
+  'de','para','com','e','a','o','os','as','do','da','dos','das','em','no','na','nos','nas',
+  'um','uma','uns','umas','por','se','que','ao','ou','mais','não','sim','x','mm','cm','kg','ml','un',
+]);
+
+const GENERIC_IRRELEVANT_WORDS = new Set([
+  'promoção','promocao','barato','qualidade','top','melhor','oferta','super','mega','ultra',
+  'premium','original','novo','lançamento','lancamento','desconto','grátis','gratis','frete',
+]);
 
 function normalizeText(text: string): string {
   return text.toLowerCase()
@@ -1239,13 +1249,15 @@ function normalizeText(text: string): string {
     .trim();
 }
 
+function tokenize(text: string): string[] {
+  return normalizeText(text).split(" ").filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+}
+
 function checkKeywordInText(keyword: string, normalizedTitle: string): boolean {
   const normalizedKw = normalizeText(keyword);
-  // Check if all words of the keyword appear in the title
   const kwWords = normalizedKw.split(" ").filter(w => w.length > 2);
   if (kwWords.length === 0) return false;
   const matchCount = kwWords.filter(w => normalizedTitle.includes(w)).length;
-  // At least 70% of keyword words must appear
   return matchCount / kwWords.length >= 0.7;
 }
 
@@ -1254,164 +1266,347 @@ function assessKeywordRelevance(keyword: string, title: string, categoryName: st
   const normalizedTitle = normalizeText(title);
   const kwWords = normalizedKw.split(" ").filter(w => w.length > 2);
   const titleWords = normalizedTitle.split(" ").filter(w => w.length > 2);
-  
   if (kwWords.length === 0 || titleWords.length === 0) return "low";
-  
-  // How many keyword words overlap with title words?
   const overlapCount = kwWords.filter(kw => titleWords.some(tw => tw === kw || tw.includes(kw) || kw.includes(tw))).length;
   const overlapRatio = overlapCount / kwWords.length;
-  
   if (overlapRatio >= 0.5) return "high";
   if (overlapRatio >= 0.25) return "medium";
   return "low";
 }
 
-async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: string[]) {
-  if (!itemIds || itemIds.length === 0) return;
-  console.log(`[rad-collector] SEO analysis for ${sellerId}: ${itemIds.length} items`);
+// --- STRUCTURAL SEO ANALYSIS ---
+function computeStructuralSeo(item: {
+  title?: string;
+  photos_count?: number;
+  has_video?: boolean;
+}): { score: number; issues: string[]; suggestions: string[] } {
+  let score = 0;
+  const issues: string[] = [];
+  const suggestions: string[] = [];
+  const titleLen = (item.title || '').length;
+
+  // Title: 50-70 chars ideal → +25
+  if (titleLen >= 50 && titleLen <= 70) { score += 25; }
+  else if (titleLen >= 40 && titleLen <= 80) { score += 20; }
+  else if (titleLen >= 30) { score += 12; }
+  else { issues.push('Título muito curto'); suggestions.push('Expanda o título para 50-70 caracteres com termos relevantes'); }
+
+  // Images >= 5 → +25
+  if ((item.photos_count || 0) >= 6) { score += 25; }
+  else if ((item.photos_count || 0) >= 4) { score += 18; }
+  else if ((item.photos_count || 0) >= 2) { score += 10; }
+  else { issues.push('Poucas fotos'); suggestions.push('Adicione pelo menos 6 fotos de qualidade'); }
+
+  // Video → +20
+  if (item.has_video) { score += 20; }
+  else { suggestions.push('Adicionar vídeo melhora ranqueamento e conversão'); }
+
+  // Title word variety → +30
+  const tokens = tokenize(item.title || '');
+  const uniqueTokens = new Set(tokens);
+  if (uniqueTokens.size >= 6) { score += 30; }
+  else if (uniqueTokens.size >= 4) { score += 20; }
+  else if (uniqueTokens.size >= 2) { score += 10; }
+  else { issues.push('Baixa variação semântica no título'); suggestions.push('Use mais termos descritivos no título'); }
+
+  return { score: Math.min(score, 100), issues, suggestions };
+}
+
+// --- KEYWORD ADHERENCE (Tendências / Sales keywords) ---
+function computeKeywordAdherence(
+  titleTokens: string[],
+  keywords: Array<{ keyword: string; normalized: string; weight: number }>
+): {
+  score: number;
+  coverage_ratio: number;
+  found: string[];
+  missing: string[];
+  irrelevant: string[];
+  details: Array<{ keyword: string; found_in_title: boolean; relevance: string; weight: number }>;
+} {
+  if (keywords.length === 0) return { score: 0, coverage_ratio: 0, found: [], missing: [], irrelevant: [], details: [] };
+
+  let totalWeightedScore = 0;
+  let maxPossibleScore = 0;
+  const found: string[] = [];
+  const missing: string[] = [];
+  const details: Array<{ keyword: string; found_in_title: boolean; relevance: string; weight: number }> = [];
+
+  for (const kw of keywords) {
+    const kwTokens = kw.normalized.split(" ").filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+    if (kwTokens.length === 0) continue;
+    maxPossibleScore += kw.weight;
+
+    const titleMatch = kwTokens.filter(t => titleTokens.some(tt => tt === t || tt.includes(t) || t.includes(tt))).length / kwTokens.length;
+    const foundInTitle = titleMatch >= 0.7;
+    if (foundInTitle) { totalWeightedScore += kw.weight; found.push(kw.keyword); }
+
+    const relevance = titleMatch >= 0.5 ? 'high' : titleMatch >= 0.25 ? 'medium' : 'low';
+    details.push({ keyword: kw.keyword, found_in_title: foundInTitle, relevance, weight: kw.weight });
+
+    if (!foundInTitle && relevance !== 'low') missing.push(kw.keyword);
+  }
+
+  const coverage_ratio = keywords.length > 0 ? found.length / keywords.length : 0;
+  const score = maxPossibleScore > 0 ? Math.round((totalWeightedScore / maxPossibleScore) * 100) : 0;
+
+  // Detect irrelevant words in title
+  const irrelevant: string[] = [];
+  const titleText = titleTokens.join(' ');
+  for (const word of GENERIC_IRRELEVANT_WORDS) { if (titleText.includes(normalizeText(word))) irrelevant.push(word); }
+  const wordCount = new Map<string, number>();
+  for (const t of titleTokens) { wordCount.set(t, (wordCount.get(t) || 0) + 1); }
+  for (const [w, c] of wordCount) { if (c >= 3) irrelevant.push(`${w} (${c}x)`); }
+
+  return { score: Math.min(score, 100), coverage_ratio, found, missing, irrelevant, details };
+}
+
+// --- REFRESH MARKET KEYWORDS FROM SALES DATA ---
+async function handleRefreshMarketKeywords(supabase: any, categoryId?: string) {
+  const startTime = Date.now();
+  console.log(`[rad-collector] REFRESH_KEYWORDS started${categoryId ? ` for category ${categoryId}` : ' (all active)'}`);
+
+  await supabase.from('seo_analysis_logs').insert({
+    status: 'started', action: 'REFRESH_KEYWORDS_STARTED',
+    message: `Refreshing keywords${categoryId ? ` for ${categoryId}` : ' for all active categories'}`,
+  });
 
   try {
-    // 1. Get item details from meli_listings_cache (title + category_id)
+    const cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
+    let categoryIds: string[] = [];
+
+    if (categoryId) {
+      categoryIds = [categoryId];
+    } else {
+      const { data: cats } = await supabase
+        .from('meli_order_items_cache')
+        .select('category_id')
+        .gte('created_at', cutoff)
+        .not('category_id', 'is', null);
+      if (cats) categoryIds = [...new Set(cats.map((c: any) => c.category_id).filter(Boolean))];
+    }
+
+    console.log(`[rad-collector] KEYWORDS: ${categoryIds.length} categories to process`);
+    let totalKeywords = 0;
+
+    for (const catId of categoryIds) {
+      if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 5000) break;
+
+      let allTitles: string[] = [];
+      let from = 0;
+      while (true) {
+        const { data: items } = await supabase
+          .from('meli_order_items_cache')
+          .select('title')
+          .eq('category_id', catId)
+          .gte('created_at', cutoff)
+          .not('title', 'is', null)
+          .range(from, from + 999);
+        if (!items || items.length === 0) break;
+        allTitles.push(...items.map((i: any) => i.title));
+        if (items.length < 1000) break;
+        from += 1000;
+      }
+
+      if (allTitles.length < 3) continue;
+
+      const wordFreq = new Map<string, number>();
+      for (const title of allTitles) {
+        const tokens = tokenize(title);
+        const unique = new Set(tokens);
+        for (const w of unique) { wordFreq.set(w, (wordFreq.get(w) || 0) + 1); }
+      }
+
+      const totalOccurrences = [...wordFreq.values()].reduce((a, b) => a + b, 0);
+      const sorted = [...wordFreq.entries()]
+        .map(([word, count]) => ({ word, count, weight: count / totalOccurrences }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 50);
+
+      if (sorted.length === 0) continue;
+
+      const rows = sorted.map(s => ({
+        category_id: catId, keyword: s.word, normalized_keyword: s.word,
+        weight: Number(s.weight.toFixed(6)), source: 'sales',
+        occurrence_count: s.count, last_updated_at: new Date().toISOString(),
+      }));
+
+      const { error } = await supabase.from('market_keywords_cache')
+        .upsert(rows, { onConflict: 'category_id,normalized_keyword' });
+      if (error) console.warn(`[rad-collector] KEYWORDS upsert err for ${catId}:`, error.message);
+      else totalKeywords += rows.length;
+    }
+
+    const dur = Date.now() - startTime;
+    await supabase.from('seo_analysis_logs').insert({
+      status: 'completed', action: 'REFRESH_KEYWORDS_COMPLETED',
+      score: totalKeywords, execution_time_ms: dur,
+      message: `${categoryIds.length} categories, ${totalKeywords} keywords`,
+    });
+
+    return { success: true, categories: categoryIds.length, keywords: totalKeywords, duration_ms: dur };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown';
+    await supabase.from('seo_analysis_logs').insert({ status: 'error', action: 'REFRESH_KEYWORDS_FAILED', message: msg, execution_time_ms: Date.now() - startTime });
+    return { success: false, error: msg };
+  }
+}
+
+// --- FULL SEO ANALYSIS FOR ITEMS (Two-layer) ---
+async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: string[], tenantId?: string | null) {
+  if (!itemIds || itemIds.length === 0) return;
+  const startTime = Date.now();
+  console.log(`[rad-collector] SEO analysis for ${sellerId}: ${itemIds.length} items`);
+
+  await supabase.from('seo_analysis_logs').insert({
+    seller_id: sellerId, tenant_id: tenantId, status: 'started', action: 'SEO_ANALYSIS_STARTED',
+    message: `Analyzing ${itemIds.length} items`,
+  });
+
+  try {
+    // 1. Get item details
     const itemDetails = new Map<string, { title: string; category_id: string }>();
     for (let i = 0; i < itemIds.length; i += 500) {
-      const chunk = itemIds.slice(i, i + 500);
-      const { data } = await supabase
-        .from("meli_listings_cache")
-        .select("item_id, title, category_id")
-        .eq("seller_id", sellerId)
-        .in("item_id", chunk);
-      if (data) {
-        for (const row of data) {
-          if (row.title && row.category_id && !itemDetails.has(row.item_id)) {
-            itemDetails.set(row.item_id, { title: row.title, category_id: row.category_id });
-          }
-        }
+      const { data } = await supabase.from("meli_listings_cache")
+        .select("item_id, title, category_id").eq("seller_id", sellerId)
+        .in("item_id", itemIds.slice(i, i + 500));
+      if (data) for (const row of data) if (row.title && row.category_id && !itemDetails.has(row.item_id)) itemDetails.set(row.item_id, { title: row.title, category_id: row.category_id });
+    }
+    if (itemDetails.size === 0) return;
+
+    // 2. Get health data for photo/video
+    const healthMap = new Map<string, any>();
+    for (let i = 0; i < itemIds.length; i += 500) {
+      const { data } = await supabase.from('listing_health_current')
+        .select('item_id, photos_count, has_video').eq('seller_id', sellerId)
+        .in('item_id', itemIds.slice(i, i + 500));
+      if (data) for (const r of data) healthMap.set(r.item_id, r);
+    }
+
+    // 3. Get keywords from market_keywords_cache
+    const categories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
+    const keywordsByCategory = new Map<string, Array<{ keyword: string; normalized: string; weight: number }>>();
+    for (let i = 0; i < categories.length; i += 50) {
+      const { data } = await supabase.from('market_keywords_cache')
+        .select('category_id, keyword, normalized_keyword, weight')
+        .in('category_id', categories.slice(i, i + 50))
+        .order('weight', { ascending: false });
+      if (data) for (const r of data) {
+        const arr = keywordsByCategory.get(r.category_id) || [];
+        arr.push({ keyword: r.keyword, normalized: r.normalized_keyword, weight: r.weight });
+        keywordsByCategory.set(r.category_id, arr);
       }
     }
 
-    if (itemDetails.size === 0) {
-      console.log(`[rad-collector] SEO: No items with title+category found`);
-      return;
-    }
-
-    // 2. Get unique leaf categories and map to level1 via account_category_activity
-    const leafCategories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
-    const categoryToL1 = new Map<string, { l1_id: string; l1_name: string; cat_name: string }>();
-    
-    for (let i = 0; i < leafCategories.length; i += 500) {
-      const chunk = leafCategories.slice(i, i + 500);
-      const { data } = await supabase
-        .from("account_category_activity")
-        .select("category_id, level1_category_id, level1_category_name, category_name")
-        .in("category_id", chunk);
-      if (data) {
-        for (const row of data) {
-          if (row.level1_category_id) {
-            categoryToL1.set(row.category_id, {
-              l1_id: row.level1_category_id,
-              l1_name: row.level1_category_name || "",
-              cat_name: row.category_name || "",
-            });
-          }
-        }
+    // Fallback: trend_snapshots for categories without sales keywords
+    const missingCats = categories.filter(c => !keywordsByCategory.has(c) || (keywordsByCategory.get(c)?.length || 0) === 0);
+    if (missingCats.length > 0) {
+      const categoryToL1 = new Map<string, string>();
+      for (let i = 0; i < missingCats.length; i += 500) {
+        const { data } = await supabase.from("account_category_activity")
+          .select("category_id, level1_category_id")
+          .in("category_id", missingCats.slice(i, i + 500));
+        if (data) for (const row of data) if (row.level1_category_id) categoryToL1.set(row.category_id, row.level1_category_id);
       }
-    }
-
-    // 3. Get trending keywords from trend_snapshots for these L1 categories
-    const l1Ids = [...new Set([...categoryToL1.values()].map(v => v.l1_id))];
-    const keywordsByL1 = new Map<string, Array<{ keyword: string; url: string }>>();
-
-    if (l1Ids.length > 0) {
-      // Get the most recent snapshot for each L1 category
+      const l1Ids = [...new Set(categoryToL1.values())];
       for (const l1Id of l1Ids) {
-        const { data } = await supabase
-          .from("trend_snapshots")
-          .select("trends_data")
-          .eq("category_id", l1Id)
-          .order("snapshot_date", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        
+        const { data } = await supabase.from("trend_snapshots")
+          .select("trends_data").eq("category_id", l1Id)
+          .order("snapshot_date", { ascending: false }).limit(1).maybeSingle();
         if (data?.trends_data && Array.isArray(data.trends_data)) {
-          keywordsByL1.set(l1Id, data.trends_data.slice(0, 30)); // Top 30 keywords
+          for (const [catId, l1] of categoryToL1) {
+            if (l1 === l1Id && (!keywordsByCategory.has(catId) || (keywordsByCategory.get(catId)?.length || 0) === 0)) {
+              keywordsByCategory.set(catId, data.trends_data.slice(0, 30).map((t: any) => ({
+                keyword: t.keyword, normalized: normalizeText(t.keyword), weight: 0.5,
+              })));
+            }
+          }
         }
       }
     }
 
-    console.log(`[rad-collector] SEO: ${itemDetails.size} items, ${categoryToL1.size} categories mapped, ${keywordsByL1.size} L1s with keywords`);
+    console.log(`[rad-collector] SEO: ${itemDetails.size} items, ${keywordsByCategory.size} categories with keywords`);
 
     // 4. Analyze each item
     let analyzed = 0;
+    const seoRows: any[] = [];
+
     for (const [itemId, detail] of itemDetails) {
-      const mapping = categoryToL1.get(detail.category_id);
-      if (!mapping) continue;
+      const health = healthMap.get(itemId) || {};
+      const catKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 30);
 
-      const trendKeywords = keywordsByL1.get(mapping.l1_id);
-      if (!trendKeywords || trendKeywords.length === 0) continue;
+      const structural = computeStructuralSeo({
+        title: detail.title, photos_count: health.photos_count || 0, has_video: health.has_video || false,
+      });
 
-      const normalizedTitle = normalizeText(detail.title);
-      const found: string[] = [];
-      const missing: string[] = [];
-      const analysisDetails: Array<{
-        keyword: string;
-        found_in_title: boolean;
-        relevance: "high" | "medium" | "low";
-      }> = [];
+      const titleTokens = tokenize(detail.title);
+      const adherence = computeKeywordAdherence(titleTokens, catKeywords);
 
-      // Check top 15 keywords for SEO coverage
-      const topKeywords = trendKeywords.slice(0, 15);
-      for (const kw of topKeywords) {
-        const foundInTitle = checkKeywordInText(kw.keyword, normalizedTitle);
-        const relevance = assessKeywordRelevance(kw.keyword, detail.title, mapping.cat_name);
+      const seoScore = Math.round(structural.score * 0.6 + adherence.score * 0.4);
+      const seoGrade = seoScore >= 85 ? 'A' : seoScore >= 70 ? 'B' : seoScore >= 50 ? 'C' : 'D';
 
-        analysisDetails.push({
-          keyword: kw.keyword,
-          found_in_title: foundInTitle,
-          relevance,
-        });
+      const allIssues = [...structural.issues];
+      if (adherence.coverage_ratio < 0.3 && catKeywords.length > 0) allIssues.push('Baixa cobertura de palavras-chave relevantes');
+      if (adherence.irrelevant.length > 0) allIssues.push('Termos genéricos detectados no título');
 
-        if (foundInTitle) {
-          found.push(kw.keyword);
-        } else if (relevance !== "low") {
-          // Only suggest missing keywords that are at least medium relevance
-          missing.push(kw.keyword);
-        }
-      }
+      const allSuggestions = [...structural.suggestions];
+      if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
+      if (adherence.irrelevant.length > 0) allSuggestions.push('Remover termos genéricos que não ajudam no ranqueamento');
 
-      // Calculate SEO score (0-100)
-      const relevantKeywords = analysisDetails.filter(a => a.relevance !== "low");
-      const totalRelevant = relevantKeywords.length || 1;
-      const foundRelevant = relevantKeywords.filter(a => a.found_in_title).length;
-      const seoScore = Math.round((foundRelevant / totalRelevant) * 100);
+      seoRows.push({ seller_id: sellerId, item_id: itemId, tenant_id: tenantId,
+        seo_structural_score: structural.score, seo_keyword_score: adherence.score,
+        seo_score: seoScore, seo_grade: seoGrade,
+        keyword_coverage_ratio: Number(adherence.coverage_ratio.toFixed(4)),
+        missing_keywords: adherence.missing.slice(0, 15),
+        irrelevant_keywords: adherence.irrelevant.slice(0, 10),
+        issues: allIssues, suggestions: allSuggestions,
+        analysis_details: {
+          structural, adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length, details: adherence.details.filter(d => d.relevance !== 'low').slice(0, 15) },
+          analyzed_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      });
 
       // Update listing_health_current
-      await supabase
-        .from("listing_health_current")
-        .update({
-          seo_score: seoScore,
-          seo_keywords_found: found.slice(0, 10),
-          seo_keywords_missing: missing.slice(0, 10),
-          seo_analysis_json: {
-            category_name: mapping.cat_name,
-            l1_category_name: mapping.l1_name,
-            total_trending_keywords: trendKeywords.length,
-            analyzed_keywords: analysisDetails.length,
-            relevant_keywords: totalRelevant,
-            found_count: foundRelevant,
-            score: seoScore,
-            details: analysisDetails,
-            analyzed_at: new Date().toISOString(),
-          },
-        })
-        .eq("seller_id", sellerId)
-        .eq("item_id", itemId);
+      await supabase.from("listing_health_current").update({
+        seo_score: seoScore, seo_grade: seoGrade, seo_structural_score: structural.score, seo_keyword_score: adherence.score,
+        seo_keywords_found: adherence.found.slice(0, 10), seo_keywords_missing: adherence.missing.slice(0, 10),
+        seo_analysis_json: {
+          structural_score: structural.score, keyword_score: adherence.score, score: seoScore, grade: seoGrade,
+          total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
+          irrelevant_keywords: adherence.irrelevant.slice(0, 10),
+          issues: allIssues, suggestions: allSuggestions,
+          details: adherence.details.filter(d => d.relevance !== 'low').slice(0, 15),
+          analyzed_at: new Date().toISOString(),
+        },
+        seo_updated_at: new Date().toISOString(),
+      }).eq("seller_id", sellerId).eq("item_id", itemId);
 
       analyzed++;
     }
 
-    console.log(`[rad-collector] SEO: ${analyzed} items analyzed`);
+    // Persist to listing_seo_analysis
+    for (let i = 0; i < seoRows.length; i += 100) {
+      const { error } = await supabase.from('listing_seo_analysis')
+        .upsert(seoRows.slice(i, i + 100), { onConflict: 'seller_id,item_id' });
+      if (error) console.warn(`[rad-collector] SEO listing_seo_analysis upsert err:`, error.message);
+    }
+
+    const dur = Date.now() - startTime;
+    await supabase.from('seo_analysis_logs').insert({
+      seller_id: sellerId, tenant_id: tenantId, status: 'completed', action: 'SEO_ANALYSIS_COMPLETED',
+      score: analyzed, execution_time_ms: dur,
+      message: `${analyzed} items analyzed`,
+      metadata_json: { items_analyzed: analyzed, categories_with_keywords: keywordsByCategory.size },
+    });
+
+    console.log(`[rad-collector] SEO: ${analyzed} items analyzed, ${dur}ms`);
   } catch (err) {
     console.warn(`[rad-collector] SEO analysis error:`, err);
+    await supabase.from('seo_analysis_logs').insert({
+      seller_id: sellerId, tenant_id: tenantId, status: 'error', action: 'SEO_ANALYSIS_FAILED',
+      message: err instanceof Error ? err.message : 'Unknown', execution_time_ms: Date.now() - startTime,
+    });
   }
 }
 
