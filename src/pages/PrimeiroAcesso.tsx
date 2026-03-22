@@ -7,8 +7,10 @@ import { useCompanyLogoUpload } from "@/hooks/useCompanyLogoUpload";
 import {
   BarChart3, Loader2, CheckCircle2, Circle, ArrowRight, ArrowLeft,
   Rocket, Building2, Upload, ImageIcon, Settings2, Link2, Database, Shield,
+  Layers, Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
