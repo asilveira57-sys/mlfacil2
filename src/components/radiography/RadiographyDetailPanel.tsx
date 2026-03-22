@@ -398,10 +398,11 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
                 <MiniStat label={`Visitas (${period}d)`} value={visits != null ? visits.toLocaleString("pt-BR") : "—"} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
                 <MiniStat label={`Vendas (${period}d)`} value={String(sales ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
                 <MiniStat label="Conversão" value={
-                  coverage.status === 'insufficient' ? "dados insuf." :
-                  conv != null ? `${conv.toFixed(1)}%` : "—"
+                  conv != null && visits != null && visits > 0 ? `${conv.toFixed(1)}%` :
+                  (visits === 0 || visits == null) && (sales ?? 0) > 0 ? "s/ visitas" :
+                  "—"
                 } icon={<BarChart3 className="h-3 w-3 text-violet-400" />}
-                  subtitle={coverage.status === 'partial' ? `base: ${coverage.days_with_data}d` : undefined}
+                  subtitle={coverage.status !== 'good' && coverage.days_with_data > 0 ? `base: ${coverage.days_with_data}d` : undefined}
                 />
                 <MiniStat label="Dias s/ venda" value={item.days_without_sale != null ? String(item.days_without_sale) : "—"} icon={<Clock className="h-3 w-3 text-amber-400" />} highlight={item.days_without_sale != null && item.days_without_sale > 14} />
               </div>
