@@ -2397,64 +2397,96 @@ async function analyzeWholesaleForItem(
     };
   }
 
-  // CNPJ → check ML API for sale_terms wholesale first, then internal tables
+  // CNPJ → check ML API for PxQ (price by quantity) first, then internal tables
   try {
-    // 1. Check ML API for wholesale config on this item
+    // 1. Check ML API for wholesale/PxQ config on this item
     let hasMLWholesale = false;
     let mlRangesCount = 0;
+    let detectionSource = 'none';
     if (token) {
       try {
-        const resp = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,sale_terms`, {
+        // Strategy 1: Check item tags for standard_price_by_quantity
+        const resp = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,sale_terms,tags`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (resp.ok) {
           const itemData = await resp.json();
-          const saleTerms = Array.isArray(itemData.sale_terms) ? itemData.sale_terms : [];
-          // Check for WHOLESALE or QUANTITY_DISCOUNTS
-          for (const term of saleTerms) {
-            if (term.id === 'WHOLESALE' || term.id === 'QUANTITY_DISCOUNTS') {
-              hasMLWholesale = true;
-              // Count discount ranges if available
-              if (Array.isArray(term.values)) {
-                mlRangesCount = term.values.length;
+          
+          // Check tags for PxQ indicator
+          const tags = Array.isArray(itemData.tags) ? itemData.tags : [];
+          if (tags.includes('standard_price_by_quantity')) {
+            hasMLWholesale = true;
+            detectionSource = 'tag:standard_price_by_quantity';
+            console.log(`[rad-collector] Wholesale: ${itemId} detected via tag standard_price_by_quantity`);
+          }
+          
+          // Check sale_terms for WHOLESALE or QUANTITY_DISCOUNTS
+          if (!hasMLWholesale) {
+            const saleTerms = Array.isArray(itemData.sale_terms) ? itemData.sale_terms : [];
+            for (const term of saleTerms) {
+              if (term.id === 'WHOLESALE' || term.id === 'QUANTITY_DISCOUNTS') {
+                hasMLWholesale = true;
+                detectionSource = `sale_term:${term.id}`;
+                if (Array.isArray(term.values)) mlRangesCount = term.values.length;
+                break;
               }
-              break;
             }
           }
-          // Also check via item.sale_conditions or price breakdown
-          if (!hasMLWholesale) {
-            // Try fetching price layers
-            try {
-              const priceResp = await fetch(`https://api.mercadolibre.com/items/${itemId}/prices`, {
-                headers: { Authorization: `Bearer ${token}` },
+        }
+        
+        // Strategy 2: Check /items/{id}/prices for standard prices with min_purchase_unit
+        if (!hasMLWholesale || mlRangesCount === 0) {
+          try {
+            const priceResp = await fetch(`https://api.mercadolibre.com/items/${itemId}/prices`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (priceResp.ok) {
+              const priceData = await priceResp.json();
+              const prices = Array.isArray(priceData.prices) ? priceData.prices : [];
+              // PxQ uses type="standard" with conditions.context_restrictions containing user_type_business
+              // or conditions.min_purchase_unit
+              const pxqPrices = prices.filter((p: any) => {
+                if (!p.conditions) return false;
+                // Check min_purchase_unit > 1
+                if (p.conditions.min_purchase_unit && p.conditions.min_purchase_unit > 1) return true;
+                // Check context_restrictions for business user
+                if (Array.isArray(p.conditions.context_restrictions)) {
+                  return p.conditions.context_restrictions.some((r: any) => r === 'user_type_business' || r?.user_type === 'business');
+                }
+                return false;
               });
-              if (priceResp.ok) {
-                const priceData = await priceResp.json();
-                if (priceData.prices && Array.isArray(priceData.prices)) {
-                  const bulkPrices = priceData.prices.filter((p: any) => p.type === 'bulk' || p.type === 'promotion' && p.conditions?.quantity);
-                  if (bulkPrices.length > 0) {
-                    hasMLWholesale = true;
-                    mlRangesCount = bulkPrices.length;
-                  }
+              if (pxqPrices.length > 0) {
+                hasMLWholesale = true;
+                mlRangesCount = Math.max(mlRangesCount, pxqPrices.length);
+                if (detectionSource === 'none') detectionSource = 'prices_api:pxq';
+              }
+              // Also check for bulk type as legacy fallback
+              if (!hasMLWholesale) {
+                const bulkPrices = prices.filter((p: any) => p.type === 'bulk');
+                if (bulkPrices.length > 0) {
+                  hasMLWholesale = true;
+                  mlRangesCount = bulkPrices.length;
+                  detectionSource = 'prices_api:bulk';
                 }
               }
-            } catch {}
-          }
+            }
+          } catch {}
         }
       } catch (mlErr) {
         console.warn(`[rad-collector] Wholesale ML API check failed for ${itemId}:`, mlErr);
       }
     }
 
+    console.log(`[rad-collector] Wholesale: ${itemId} result: detected=${hasMLWholesale}, source=${detectionSource}, ranges=${mlRangesCount}`);
+
     // If ML has wholesale configured → return active
     if (hasMLWholesale) {
-      console.log(`[rad-collector] Wholesale: ${itemId} has ML wholesale active (${mlRangesCount} ranges)`);
       return {
         score: mlRangesCount >= 2 ? 100 : 80, account_type: 'cnpj', is_eligible: true,
         has_wholesale_layer: true, has_valid_ranges: mlRangesCount >= 2, ranges_count: mlRangesCount, is_linked_to_listing: true,
         status: 'active',
         summary: 'Preço por atacado ativo no Mercado Livre.',
-        positives: ['Anúncio preparado para vendas em volume.', 'Estratégia comercial mais competitiva.', ...(mlRangesCount > 0 ? [`${mlRangesCount} faixas de preço configuradas.`] : [])],
+        positives: ['Anúncio preparado para vendas em volume.', 'Estratégia comercial mais competitiva.', ...(mlRangesCount > 0 ? [`${mlRangesCount} faixa(s) de preço configurada(s).`] : [])],
         negatives: [],
         improvement_actions: [],
         cta_available: false,
