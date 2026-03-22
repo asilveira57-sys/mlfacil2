@@ -1146,11 +1146,14 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>Título atual</span>
                   <span className={`font-mono ${(titleAnalysis.length || 0) > 60 ? 'text-red-400' : 'text-slate-400'}`}>
-                    {titleAnalysis.length || item.title?.length || 0}/60 chars
+                    {titleAnalysis.length || 0}/60 chars
                     {titleAnalysis.limit_status === 'above_limit' && ' ⚠️'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 bg-slate-900/50 p-1.5 rounded font-mono">{item.title || '—'}</p>
+                {(item.title?.length || 0) > (titleAnalysis.length || 0) && (
+                  <p className="text-[10px] text-slate-500 italic">Variação removida do cálculo de caracteres</p>
+                )}
                 {titleAnalysis.matched_keywords?.length > 0 && (
                   <div>
                     <span className="text-[10px] text-emerald-400">Keywords no título: </span>
