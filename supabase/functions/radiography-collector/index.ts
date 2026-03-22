@@ -2356,7 +2356,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     for (const item of items) {
       try {
         const listing = detailMap.get(item.item_id) || {};
-        const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false };
+        const photos = photosMap.get(item.item_id) || { count: item.photos_count || 0, hasVideo: item.has_video || false, images: [] };
         const covDays = covByItem.get(item.item_id) || 0;
         const title = listing.title || item.title || '';
         const merged = { ...item, ...listing, is_ads_active: adsActiveSet.has(item.item_id) || null, is_promotion_active: promoActiveSet.has(item.item_id) || null };
@@ -2389,12 +2389,45 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           });
         }
 
+        // Per-image resolution analysis
+        const imageAnalysis = (photos.images || []).map((img: any, idx: number) => {
+          const w = img.width || 0;
+          const h = img.height || 0;
+          const is1200 = w >= 1200 && h >= 1200;
+          const isSquare = w > 0 && h > 0 && Math.abs(w - h) < 50;
+          return {
+            image_index: idx + 1,
+            width: w, height: h,
+            is_square: isSquare,
+            is_1200x1200: is1200,
+            is_primary: idx === 0,
+            resolution_status: w === 0 ? 'unknown' : is1200 ? 'ok' : 'review',
+            recommendation: w === 0 ? 'Dimensão indisponível' : is1200 ? null : 'Recomenda-se ajustar para 1200x1200 px',
+          };
+        });
+        const imagesAt1200 = imageAnalysis.filter((i: any) => i.is_1200x1200).length;
+        const totalImages = imageAnalysis.length;
+        const resolutionRatio = totalImages > 0 ? imagesAt1200 / totalImages : 0;
+
+        // Media quality score with resolution component
+        let mediaQuality = 0;
+        if (photos.count >= 6) mediaQuality += 35; else if (photos.count >= 3) mediaQuality += 20; else if (photos.count >= 1) mediaQuality += 10;
+        if (photos.hasVideo) mediaQuality += 25;
+        if (resolutionRatio >= 1) mediaQuality += 30; else if (resolutionRatio >= 0.7) mediaQuality += 20; else if (resolutionRatio >= 0.3) mediaQuality += 10;
+        if (totalImages > 0 && imageAnalysis[0]?.is_1200x1200) mediaQuality += 10;
+        mediaQuality = Math.min(mediaQuality, 100);
+
         // Media
         mediaRows.push({
           seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId,
           photos_count: photos.count, has_video: photos.hasVideo,
-          quality_score: photos.count >= 6 && photos.hasVideo ? 100 : photos.count >= 6 ? 70 : photos.count >= 3 ? 50 : photos.count >= 1 ? 25 : 0,
-          analysis_json: { photos_count: photos.count, has_video: photos.hasVideo, title_length: title.length },
+          quality_score: mediaQuality,
+          analysis_json: {
+            photos_count: photos.count, has_video: photos.hasVideo,
+            images_at_1200: imagesAt1200, total_images: totalImages,
+            resolution_ratio: Number(resolutionRatio.toFixed(2)),
+            per_image: imageAnalysis,
+          },
           analyzed_at: new Date().toISOString(),
         });
 
