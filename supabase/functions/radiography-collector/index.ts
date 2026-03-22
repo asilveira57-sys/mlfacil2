@@ -3855,7 +3855,7 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
 
     // Variation 2: Keywords-first
     const v2 = compressTitle(wordPool.slice(0, 12).map(w => capitalize(w.word)), MAX_TITLE_LENGTH);
-    if (v2.length >= 10) { const r = scoreTitleSuggestion(v2, validKeywords, variationAttrs); suggestions.push({ title: v2, ...r, length: v2.length }); }
+    if (v2.length >= 10) { const r = scoreTitleSuggestion(v2, validKeywords, variationValues); suggestions.push({ title: v2, ...r, length: v2.length }); }
 
     // Variation 3: Mixed
     const v3Words = [...currentTokensClean.slice(0, 5), ...wordPool.filter(w => w.source === 'category').slice(0, 5).map(m => m.word)];
