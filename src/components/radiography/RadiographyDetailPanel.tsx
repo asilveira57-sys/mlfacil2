@@ -1263,7 +1263,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             <span className="text-xs text-slate-500">/100</span>
           </div>
         }
-        subtitle={`Análise em 4 camadas${totalKws > 0 ? ` · ${totalKws} palavras-chave` : ''} · Clique em cada camada para detalhes`}
+        subtitle={`Análise em 4 camadas${totalKws > 0 ? ` · ${totalKws} palavras relevantes` : ''}${discardedCount > 0 ? ` · ${discardedCount} descartadas` : ''} · Clique em cada camada para detalhes`}
       >
         <div className="space-y-2">
           {/* 4-layer expandable cards */}
