@@ -91,6 +91,9 @@ export interface SeoAnalysis {
   l1_category_name?: string;
   total_keywords?: number;
   total_trending_keywords?: number;
+  total_raw_keywords?: number;
+  discarded_count?: number;
+  discarded_keywords?: string[];
   analyzed_keywords?: number;
   relevant_keywords?: number;
   found_count: number;

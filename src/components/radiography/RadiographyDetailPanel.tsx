@@ -15,7 +15,7 @@ import {
   BarChart3, ArrowUpDown, AlertOctagon, Lightbulb, Search, Check,
   X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck, Megaphone,
   Copy, RefreshCw, Loader2, ThumbsUp, ThumbsDown, Sparkles, Type,
-  FileText, ClipboardList, ChevronDown, ChevronUp,
+  FileText, ClipboardList, ChevronDown, ChevronUp, Filter,
 } from "lucide-react";
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -1003,6 +1003,9 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   const foundKws = found || [];
   const missingKws = missing || [];
   const totalKws = seo.total_keywords ?? seo.total_trending_keywords ?? 0;
+  const totalRawKws = seo.total_raw_keywords ?? 0;
+  const discardedCount = seo.discarded_count ?? 0;
+  const discardedKws = seo.discarded_keywords || [];
   const coverageRatio = seo.coverage_ratio != null ? Math.round(seo.coverage_ratio * 100) : null;
   const irrelevantKws = seo.irrelevant_keywords || [];
 
@@ -1049,14 +1052,35 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
 
   const toggleLayer = (layer: string) => setExpandedLayer(expandedLayer === layer ? null : layer);
 
-  // Layer summary lines
+  // Layer summary lines — never generic
   const getLayerSummary = (layer: string, layerScore: number | null): string => {
     if (layerScore == null) return '';
     const analysis = layer === 'title' ? titleAnalysis : layer === 'description' ? descAnalysis : layer === 'attributes' ? attrAnalysis : modelAnalysis;
     if (analysis?.summary) return analysis.summary;
-    if (layerScore >= 70) return 'Boa performance nesta camada.';
-    if (layerScore >= 40) return 'Pode melhorar com ajustes pontuais.';
-    return 'Precisa de atenção para melhorar o SEO.';
+    // Specific fallbacks per layer
+    if (layer === 'title') {
+      if (layerScore >= 70) return `Título bem estruturado com ${titleAnalysis?.length || item.title?.length || 0} caracteres.`;
+      if (layerScore >= 40) return `Título com oportunidades de melhoria — ${titleAnalysis?.missing_keywords?.length || 0} palavras-chave ausentes.`;
+      return `Título precisa de revisão — cobertura baixa de palavras-chave relevantes.`;
+    }
+    if (layer === 'description') {
+      const len = descAnalysis?.length || descLength || 0;
+      if (layerScore >= 70) return `Descrição com ${len} caracteres e boa cobertura de keywords.`;
+      if (layerScore >= 40) return `Descrição com ${len} caracteres — faltam palavras-chave importantes.`;
+      return `Descrição ${len < 300 ? 'muito curta' : 'com baixa densidade'} de palavras-chave.`;
+    }
+    if (layer === 'attributes') {
+      if (layerScore >= 70) return `Ficha técnica bem preenchida (${attrAnalysis?.filled || 0}/${attrAnalysis?.total || 0} atributos).`;
+      if (layerScore >= 40) return `Ficha técnica incompleta — ${attrAnalysis?.missing?.length || 0} atributos faltantes.`;
+      return `Ficha técnica precisa de preenchimento urgente.`;
+    }
+    if (layer === 'model') {
+      const val = modelAnalysis?.current_value;
+      if (!val || val === 'não informado') return 'Campo modelo vazio — oportunidade de incluir termos pesquisáveis.';
+      if (layerScore >= 70) return `Modelo "${val}" — pesquisável e útil para indexação.`;
+      return `Modelo "${val}" — pode ser mais descritivo para melhorar buscas.`;
+    }
+    return '';
   };
 
   const DetailSection = ({ items, icon, title: secTitle, colorClass }: { items: string[]; icon: React.ReactNode; title: string; colorClass: string }) => {
@@ -1239,7 +1263,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             <span className="text-xs text-slate-500">/100</span>
           </div>
         }
-        subtitle={`Análise em 4 camadas${totalKws > 0 ? ` · ${totalKws} palavras-chave` : ''} · Clique em cada camada para detalhes`}
+        subtitle={`Análise em 4 camadas${totalKws > 0 ? ` · ${totalKws} palavras relevantes` : ''}${discardedCount > 0 ? ` · ${discardedCount} descartadas` : ''} · Clique em cada camada para detalhes`}
       >
         <div className="space-y-2">
           {/* 4-layer expandable cards */}
@@ -1339,6 +1363,24 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                   <Badge key={kw} variant="outline" className="text-xs border-red-500/30 text-red-300 bg-red-500/5">{kw}</Badge>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Discarded keywords (not relevant to this product) */}
+          {discardedCount > 0 && (
+            <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/20">
+              <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                <Filter className="h-2.5 w-2.5" />
+                {discardedCount} palavras da categoria foram ignoradas por não terem relação com este produto.
+              </div>
+              {discardedKws.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {discardedKws.slice(0, 8).map((kw) => (
+                    <span key={kw} className="text-[10px] text-slate-600 bg-slate-800/50 px-1.5 py-0.5 rounded">{kw}</span>
+                  ))}
+                  {discardedKws.length > 8 && <span className="text-[10px] text-slate-600">+{discardedKws.length - 8} mais</span>}
+                </div>
+              )}
             </div>
           )}
 
