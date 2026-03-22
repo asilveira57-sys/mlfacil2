@@ -3901,7 +3901,7 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
       metadata_json: { current_length: currentTitle.length, best_length: best?.title?.length, keywords_used: validKeywords.length },
     });
 
-    return { success: true, current_title: currentTitle, current_length: currentTitle.length, best, suggestions: uniqueSuggestions, issues, keywords_used: validKeywords.length, variation_attrs_excluded: variationAttrs, duration_ms: dur };
+    return { success: true, current_title: currentTitle, current_length: currentTitle.length, best, suggestions: uniqueSuggestions, issues, keywords_used: validKeywords.length, variation_attrs_excluded: variationValues, duration_ms: dur };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown';
     await supabase.from('title_suggestion_logs').insert({
