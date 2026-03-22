@@ -2026,15 +2026,16 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
     // 3. Fetch item descriptions + attributes from ML API (batched)
     const itemExtras = new Map<string, { description: string | null; attributes: any[]; }>();
+    const seoVariationMap = new Map<string, Set<string>>(); // variation attrs per item for title cleaning
     if (accessToken) {
       const allItemIds = [...itemDetails.keys()];
-      // Batch multiget for attributes
+      // Batch multiget for attributes + variations
       for (let i = 0; i < allItemIds.length; i += 20) {
         if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 15000) break;
         const batch = allItemIds.slice(i, i + 20);
         const idsParam = batch.join(',');
         try {
-          const res = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,attributes`, {
+          const res = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,attributes,variations`, {
             headers: { Authorization: `Bearer ${accessToken}` },
           });
           if (res.ok) {
@@ -2045,6 +2046,18 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
                   description: null,
                   attributes: r.body.attributes || [],
                 });
+                // Extract variation attribute values for title cleaning
+                const vars = Array.isArray(r.body.variations) ? r.body.variations : [];
+                if (vars.length > 0) {
+                  const varAttrs = new Set<string>();
+                  for (const v of vars) {
+                    const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
+                    for (const c of combos) {
+                      if (c.value_name) varAttrs.add(c.value_name);
+                    }
+                  }
+                  if (varAttrs.size > 0) seoVariationMap.set(r.body.id, varAttrs);
+                }
               }
             }
           }
@@ -2125,19 +2138,38 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       const rawCatKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 50);
       const extras = itemExtras.get(itemId) || { description: null, attributes: [] };
 
+      // CRITICAL: Strip variation attribute suffixes from title before any SEO analysis
+      let seoTitle = detail.title;
+      const seoVarAttrs = seoVariationMap.get(itemId);
+      if (seoVarAttrs && seoVarAttrs.size > 0) {
+        for (const va of seoVarAttrs) {
+          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+          seoTitle = seoTitle.replace(regex, '');
+        }
+        // Second pass for chained variation values (e.g., "Cor Branco" → "Branco" removed, then "Cor" if also variation)
+        for (const va of seoVarAttrs) {
+          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+          seoTitle = seoTitle.replace(regex, '');
+        }
+        seoTitle = seoTitle.trim();
+        if (seoTitle !== detail.title) {
+          console.log(`[rad-collector] SEO title cleaned: "${detail.title}" → "${seoTitle}" (removed variation attrs)`);
+        }
+      }
+
       // Build product context tokens from all available fields
       const modelAttr = (extras.attributes || []).find((a: any) => a.id === 'MODEL' || a.id === 'ALPHANUMERIC_MODEL');
-      const productTokens = buildProductTokens(detail.title, extras.description, extras.attributes || [], modelAttr?.value_name || '');
+      const productTokens = buildProductTokens(seoTitle, extras.description, extras.attributes || [], modelAttr?.value_name || '');
 
       // Filter keywords by product context — only keep relevant ones
       const { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
       console.log(`[rad-collector] SEO item ${itemId}: ${rawCatKeywords.length} raw kws → ${catKeywords.length} relevant, ${discardedKeywords.length} discarded`);
 
-      // Layer 1: Title (40%)
-      const titleResult = computeTitleSeo(detail.title, catKeywords);
+      // Layer 1: Title (40%) — uses cleaned title without variation
+      const titleResult = computeTitleSeo(seoTitle, catKeywords);
 
       // Layer 2: Description (25%)
-      const descResult = computeDescriptionSeo(extras.description, detail.title, catKeywords);
+      const descResult = computeDescriptionSeo(extras.description, seoTitle, catKeywords);
 
       // Layer 3: Attributes (20%)
       const attrResult = computeAttributesSeo(extras.attributes);
@@ -3484,7 +3516,7 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
     if (!listing?.title) return { success: false, error: 'Anúncio não encontrado no cache local. Atualize os dados para gerar a análise.' };
 
     // Fetch variation attributes from ML API to strip from title
-    const variationAttrs: string[] = [];
+    const variationValues: string[] = []; // individual variation values like "Branco", "Nenhum"
     const token = await getValidToken(supabase, sellerId);
     if (token) {
       try {
@@ -3497,8 +3529,12 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
           for (const v of vars) {
             const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
             for (const c of combos) {
-              if (c.value_name && !variationAttrs.includes(normalizeText(c.value_name))) {
-                variationAttrs.push(normalizeText(c.value_name));
+              if (c.value_name && !variationValues.includes(c.value_name)) {
+                variationValues.push(c.value_name);
+              }
+              // Also capture "Cor", "Tamanho" etc. — ML sometimes appends attribute name too
+              if (c.name && !variationValues.includes(c.name)) {
+                variationValues.push(c.name);
               }
             }
           }
@@ -3508,21 +3544,24 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
       }
     }
 
-    // Clean title by stripping variation suffixes
+    // Clean title by stripping variation suffixes from the end
     let currentTitle = listing.title;
-    if (variationAttrs.length > 0) {
-      for (const va of variationAttrs) {
-        const original = currentTitle;
-        // Try to remove the variation value from the end of the title
-        const tokens = currentTitle.split(/\s+/);
-        const vaTokens = va.split(/\s+/);
-        // Check if last N tokens match variation
-        if (tokens.length > vaTokens.length) {
-          const lastTokens = tokens.slice(-vaTokens.length).map(t => normalizeText(t));
-          if (lastTokens.every((t, i) => t === vaTokens[i])) {
-            currentTitle = tokens.slice(0, -vaTokens.length).join(' ').trim();
-          }
+    if (variationValues.length > 0) {
+      // Sort by length descending to remove longer matches first (e.g., "Cor Branco" before "Branco")
+      const sortedVars = [...variationValues].sort((a, b) => b.length - a.length);
+      // Multiple passes to strip chained variation tokens
+      for (let pass = 0; pass < 3; pass++) {
+        let changed = false;
+        for (const va of sortedVars) {
+          const regex = new RegExp(`\\s+${va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+          const before = currentTitle;
+          currentTitle = currentTitle.replace(regex, '').trim();
+          if (currentTitle !== before) changed = true;
         }
+        if (!changed) break;
+      }
+      if (currentTitle !== listing.title) {
+        console.log(`[rad-collector] GENERATE_TITLE: cleaned "${listing.title}" → "${currentTitle}"`);
       }
     }
     const categoryId = listing.category_id;
