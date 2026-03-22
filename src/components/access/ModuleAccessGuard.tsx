@@ -21,91 +21,95 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   const location = useLocation();
   const { isCollaborator, isLoading, hasModuleAccess } = useCollaboratorAccess();
   const { data: routeMap } = useModuleRouteMap();
+  const { canAccessModule, hasPlanConfig, isLoading: planLoading } = useCanAccessModule();
   const [timedOut, setTimedOut] = useState(false);
-  // Prevent full-screen "blank" on background refetches.
-  // Once access has been resolved at least once, keep rendering children
-  // even if the underlying hook briefly flips to loading.
+  const [planBlocked, setPlanBlocked] = useState(false);
   const hasResolvedOnceRef = useRef(false);
 
+  const combinedLoading = isLoading || planLoading;
+
   useEffect(() => {
-    if (!isLoading) hasResolvedOnceRef.current = true;
-  }, [isLoading]);
+    if (!combinedLoading) hasResolvedOnceRef.current = true;
+  }, [combinedLoading]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
     console.info('[MOUNT] ModuleAccessGuard');
-    return () => {
-      // eslint-disable-next-line no-console
-      console.info('[UNMOUNT] ModuleAccessGuard');
-    };
+    return () => { console.info('[UNMOUNT] ModuleAccessGuard'); };
   }, []);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
     console.info('[NAV] ModuleAccessGuard', location.pathname);
   }, [location.pathname]);
 
   useEffect(() => {
-    if (!isLoading) {
+    if (!combinedLoading) {
       setTimedOut(false);
       return;
     }
     setTimedOut(false);
-    // Fail-open after 5s — RLS still protects data server-side
     const t = window.setTimeout(() => {
       console.warn('[ModuleAccessGuard] Permission check timed out after 5s, failing open');
       setTimedOut(true);
     }, 5_000);
     return () => window.clearTimeout(t);
-  }, [isLoading, location.pathname]);
+  }, [combinedLoading, location.pathname]);
 
-  // Pre-warm the route map cache for getModuleKeyFromRouteSync
+  // Pre-warm the route map cache
   useEffect(() => {
     if (routeMap) {
-      // routeMap from useModuleRouteMap populates the react-query cache;
-      // but getModuleKeyFromRouteSync uses its own module-level cache.
-      // We trigger loadRouteMap to populate it.
       import('@/hooks/useCollaboratorAccess').then(m => m.getModuleKeyFromRoute('/'));
     }
   }, [routeMap]);
 
+  // Reset plan blocked state on route change
   useEffect(() => {
-    if (isLoading) return;
-    if (!isCollaborator) return; // Admin/owner has full access
+    setPlanBlocked(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (combinedLoading) return;
 
     const moduleKey = getModuleKeyFromRouteSync(location.pathname);
     
-    // Routes that don't require module access check
     const publicRoutes = ['/dashboard', '/settings', '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/'];
     if (publicRoutes.includes(location.pathname)) return;
 
-    // If route is not in module map, allow it (might be a misc route)
     if (!moduleKey) return;
 
-    // Check access
-    if (!hasModuleAccess(moduleKey)) {
+    // 1. Collaborator RBAC check
+    if (isCollaborator && !hasModuleAccess(moduleKey)) {
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
         console.warn('[ACCESS] collaborator blocked route', { moduleKey, pathname: location.pathname });
       }
       toast.error('Acesso não liberado para este módulo');
       navigate('/dashboard', { replace: true });
+      return;
     }
-  }, [isLoading, isCollaborator, location.pathname, hasModuleAccess, navigate]);
 
-  if (isLoading) {
-    // If we already resolved once, never block the entire app frame.
+    // 2. Plan-based module check
+    if (hasPlanConfig && !canAccessModule(moduleKey)) {
+      if (import.meta.env.DEV) {
+        console.warn('[ACCESS] plan blocked route', { moduleKey, pathname: location.pathname });
+      }
+      setPlanBlocked(true);
+      return;
+    }
+  }, [combinedLoading, isCollaborator, location.pathname, hasModuleAccess, canAccessModule, hasPlanConfig, navigate]);
+
+  // Show friendly 403 screen for plan-blocked modules
+  if (planBlocked) {
+    return <ModuleAccessDenied />;
+  }
+
+  if (combinedLoading) {
     if (hasResolvedOnceRef.current) {
       return <>{children}</>;
     }
-
-    // Fail-open on timeout: render children, RLS protects data server-side
     if (timedOut) {
       return <>{children}</>;
     }
-
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
