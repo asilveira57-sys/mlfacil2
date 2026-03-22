@@ -1075,7 +1075,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           )}
 
           {/* Interactive keywords: Missing */}
-          {missingKws.length > 0 && (
+          {missingKws.length > 0 && !seo.details?.length && (
             <div>
               <div className="text-xs font-medium text-amber-400 mb-1.5 flex items-center gap-1">
                 <Target className="h-3 w-3" /> Ausentes ({missingKws.length})
