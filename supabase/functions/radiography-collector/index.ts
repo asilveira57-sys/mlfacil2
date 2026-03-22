@@ -2396,7 +2396,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
       // Keyword adherence (multi-field: title + description + attributes)
       const attrTexts = (extras.attributes || []).map((a: any) => `${a.name || ''} ${a.value_name || ''}`);
-      const adherence = computeKeywordAdherenceMultiField(detail.title, extras.description, attrTexts, catKeywords);
+      const adherence = computeKeywordAdherenceMultiField(seoTitle, extras.description, attrTexts, catKeywords);
 
       // Final score: weighted average
       const seoScore = Math.round(
