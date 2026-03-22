@@ -439,6 +439,23 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
         }
       }
 
+      // Fetch media analysis data
+      const allItemIds = healthRes.data.map(h => h.item_id);
+      const mediaMap: Record<string, any> = {};
+      for (let i = 0; i < allItemIds.length; i += 100) {
+        const batch = allItemIds.slice(i, i + 100);
+        const { data: mediaRows } = await supabase
+          .from("listing_media_analysis")
+          .select("item_id, analysis_json")
+          .in("item_id", batch)
+          .eq("seller_id", sellerId);
+        if (mediaRows) {
+          for (const row of mediaRows) {
+            if (!mediaMap[row.item_id]) mediaMap[row.item_id] = row.analysis_json;
+          }
+        }
+      }
+
       return healthRes.data.map((h) => {
         const cache = listings[h.item_id];
         const metrics = metricsMap[h.item_id];
@@ -448,6 +465,7 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
           alerts_json: (h.alerts_json as any as StructuredAlert[]) || [],
           seo_analysis_json: (h.seo_analysis_json as any as SeoAnalysis) || null,
           wholesale_analysis_json: (h.wholesale_analysis_json as any as WholesaleAnalysis) || null,
+          media_analysis_json: mediaMap[h.item_id] || null,
           title: h.title || cache?.title || null,
           thumbnail: h.thumbnail || cache?.thumbnail || null,
           permalink: h.permalink || cache?.permalink || null,
