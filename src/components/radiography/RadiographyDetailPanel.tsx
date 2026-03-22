@@ -1003,6 +1003,9 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   const foundKws = found || [];
   const missingKws = missing || [];
   const totalKws = seo.total_keywords ?? seo.total_trending_keywords ?? 0;
+  const totalRawKws = seo.total_raw_keywords ?? 0;
+  const discardedCount = seo.discarded_count ?? 0;
+  const discardedKws = seo.discarded_keywords || [];
   const coverageRatio = seo.coverage_ratio != null ? Math.round(seo.coverage_ratio * 100) : null;
   const irrelevantKws = seo.irrelevant_keywords || [];
 
