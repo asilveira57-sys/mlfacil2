@@ -1475,9 +1475,11 @@ function computeModelSeo(attributes: any[]): { score: number; modelValue: string
   return { score: Math.max(0, Math.min(score, 100)), modelValue, issues, suggestions };
 }
 
-// --- KEYWORD ADHERENCE (Tendências / Sales keywords) ---
-function computeKeywordAdherence(
-  titleTokens: string[],
+// --- KEYWORD ADHERENCE (multi-field: title + description + attributes) ---
+function computeKeywordAdherenceMultiField(
+  titleText: string,
+  descriptionText: string | null,
+  attributeTexts: string[],
   keywords: Array<{ keyword: string; normalized: string; weight: number }>
 ): {
   score: number;
@@ -1485,29 +1487,49 @@ function computeKeywordAdherence(
   found: string[];
   missing: string[];
   irrelevant: string[];
-  details: Array<{ keyword: string; found_in_title: boolean; relevance: string; weight: number }>;
+  details: Array<{ keyword: string; weight: number; matched_in_title: boolean; matched_in_description: boolean; matched_in_attributes: boolean; matched_overall: boolean }>;
 } {
   if (keywords.length === 0) return { score: 0, coverage_ratio: 0, found: [], missing: [], irrelevant: [], details: [] };
+
+  const titleNorm = normalizeText(titleText);
+  const titleTokens = tokenize(titleText);
+  const descNorm = descriptionText ? normalizeText(descriptionText) : '';
+  const attrNorm = attributeTexts.map(a => normalizeText(a)).join(' ');
 
   let totalWeightedScore = 0;
   let maxPossibleScore = 0;
   const found: string[] = [];
   const missing: string[] = [];
-  const details: Array<{ keyword: string; found_in_title: boolean; relevance: string; weight: number }> = [];
+  const details: Array<{ keyword: string; weight: number; matched_in_title: boolean; matched_in_description: boolean; matched_in_attributes: boolean; matched_overall: boolean }> = [];
 
   for (const kw of keywords) {
-    const kwTokens = kw.normalized.split(" ").filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+    const kwTokens = kw.normalized.split(" ").filter(w => {
+      if (SEO_STOPWORDS.has(w)) return false;
+      if (MEASUREMENT_RE.test(w)) return true;
+      return w.length > 2;
+    });
     if (kwTokens.length === 0) continue;
     maxPossibleScore += kw.weight;
 
-    const titleMatch = kwTokens.filter(t => titleTokens.some(tt => tt === t || tt.includes(t) || t.includes(tt))).length / kwTokens.length;
-    const foundInTitle = titleMatch >= 0.7;
-    if (foundInTitle) { totalWeightedScore += kw.weight; found.push(kw.keyword); }
+    // Mode A: token match (partial — each token of the keyword checked individually)
+    const titleMatchRatio = kwTokens.filter(t => titleTokens.some(tt => tt === t || tt.includes(t) || t.includes(tt))).length / kwTokens.length;
+    const matchedInTitle = titleMatchRatio >= 0.7;
 
-    const relevance = titleMatch >= 0.5 ? 'high' : titleMatch >= 0.25 ? 'medium' : 'low';
-    details.push({ keyword: kw.keyword, found_in_title: foundInTitle, relevance, weight: kw.weight });
+    // Mode B: also check description and attributes for compound terms
+    const matchedInDesc = descNorm ? checkKeywordInText(kw.keyword, descNorm) : false;
+    const matchedInAttrs = attrNorm ? checkKeywordInText(kw.keyword, attrNorm) : false;
+    const matchedOverall = matchedInTitle || matchedInDesc || matchedInAttrs;
 
-    if (!foundInTitle && relevance !== 'low') missing.push(kw.keyword);
+    // Weighted scoring: title match = full weight, desc/attrs = partial
+    if (matchedOverall) {
+      const fieldWeight = matchedInTitle ? 1.0 : matchedInDesc ? 0.7 : 0.5;
+      totalWeightedScore += kw.weight * fieldWeight;
+      found.push(kw.keyword);
+    }
+
+    details.push({ keyword: kw.keyword, weight: kw.weight, matched_in_title: matchedInTitle, matched_in_description: matchedInDesc, matched_in_attributes: matchedInAttrs, matched_overall: matchedOverall });
+
+    if (!matchedOverall) missing.push(kw.keyword);
   }
 
   const coverage_ratio = keywords.length > 0 ? found.length / keywords.length : 0;
@@ -1515,8 +1537,8 @@ function computeKeywordAdherence(
 
   // Detect irrelevant words in title
   const irrelevant: string[] = [];
-  const titleText = titleTokens.join(' ');
-  for (const word of GENERIC_IRRELEVANT_WORDS) { if (titleText.includes(normalizeText(word))) irrelevant.push(word); }
+  const titleJoined = titleTokens.join(' ');
+  for (const word of GENERIC_IRRELEVANT_WORDS) { if (titleJoined.includes(normalizeText(word))) irrelevant.push(word); }
   const wordCount = new Map<string, number>();
   for (const t of titleTokens) { wordCount.set(t, (wordCount.get(t) || 0) + 1); }
   for (const [w, c] of wordCount) { if (c >= 3) irrelevant.push(`${w} (${c}x)`); }
