@@ -447,6 +447,7 @@ export function useRadiographyData(sellerId: string | null, selectedPeriod: Peri
           change_flags: (h.change_flags as any as ChangeFlag[]) || [],
           alerts_json: (h.alerts_json as any as StructuredAlert[]) || [],
           seo_analysis_json: (h.seo_analysis_json as any as SeoAnalysis) || null,
+          wholesale_analysis_json: (h.wholesale_analysis_json as any as WholesaleAnalysis) || null,
           title: h.title || cache?.title || null,
           thumbnail: h.thumbnail || cache?.thumbnail || null,
           permalink: h.permalink || cache?.permalink || null,
