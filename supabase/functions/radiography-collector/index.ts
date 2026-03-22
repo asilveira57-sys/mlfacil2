@@ -3257,7 +3257,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
                 }));
                 photosMap.set(e.body.id, { count: pics.length, hasVideo: !!e.body.video_id, images });
                 
-                // Extract variation attribute values for title cleaning
+                // Extract variation attribute values AND names for title cleaning
                 const variations = Array.isArray(e.body.variations) ? e.body.variations : [];
                 if (variations.length > 0) {
                   const varAttrs = new Set<string>();
@@ -3265,6 +3265,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
                     const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
                     for (const c of combos) {
                       if (c.value_name) varAttrs.add(c.value_name);
+                      if (c.name) varAttrs.add(c.name); // Also capture "Cor", "Tamanho" etc.
                     }
                   }
                   if (varAttrs.size > 0) variationMap.set(e.body.id, varAttrs);
