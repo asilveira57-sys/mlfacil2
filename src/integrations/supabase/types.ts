@@ -6884,12 +6884,17 @@ export type Database = {
           sales_count_7d: number | null
           seller_id: string
           seo_analysis_json: Json | null
+          seo_attributes_score: number | null
+          seo_description_length: number | null
+          seo_description_score: number | null
           seo_grade: string | null
           seo_keyword_score: number | null
           seo_keywords_found: string[] | null
           seo_keywords_missing: string[] | null
+          seo_model_score: number | null
           seo_score: number | null
           seo_structural_score: number | null
+          seo_title_score: number | null
           seo_updated_at: string | null
           shipping_mode: string | null
           tenant_id: string | null
@@ -6949,12 +6954,17 @@ export type Database = {
           sales_count_7d?: number | null
           seller_id: string
           seo_analysis_json?: Json | null
+          seo_attributes_score?: number | null
+          seo_description_length?: number | null
+          seo_description_score?: number | null
           seo_grade?: string | null
           seo_keyword_score?: number | null
           seo_keywords_found?: string[] | null
           seo_keywords_missing?: string[] | null
+          seo_model_score?: number | null
           seo_score?: number | null
           seo_structural_score?: number | null
+          seo_title_score?: number | null
           seo_updated_at?: string | null
           shipping_mode?: string | null
           tenant_id?: string | null
@@ -7014,12 +7024,17 @@ export type Database = {
           sales_count_7d?: number | null
           seller_id?: string
           seo_analysis_json?: Json | null
+          seo_attributes_score?: number | null
+          seo_description_length?: number | null
+          seo_description_score?: number | null
           seo_grade?: string | null
           seo_keyword_score?: number | null
           seo_keywords_found?: string[] | null
           seo_keywords_missing?: string[] | null
+          seo_model_score?: number | null
           seo_score?: number | null
           seo_structural_score?: number | null
+          seo_title_score?: number | null
           seo_updated_at?: string | null
           shipping_mode?: string | null
           tenant_id?: string | null
@@ -7453,16 +7468,22 @@ export type Database = {
       listing_seo_analysis: {
         Row: {
           analysis_details: Json | null
+          attributes_score: number | null
           created_at: string
+          description_length: number | null
+          description_score: number | null
           id: string
           irrelevant_keywords: Json | null
           issues: Json | null
           item_id: string
           keyword_coverage_ratio: number | null
+          keyword_density: number | null
           keywords_faltantes: Json | null
           keywords_presentes: Json | null
           keywords_relevantes: Json | null
+          missing_attributes: Json | null
           missing_keywords: Json | null
+          model_score: number | null
           seller_id: string
           seo_grade: string
           seo_keyword_score: number
@@ -7470,20 +7491,28 @@ export type Database = {
           seo_structural_score: number
           suggestions: Json | null
           tenant_id: string | null
+          title_score: number | null
           updated_at: string
+          weak_attributes: Json | null
         }
         Insert: {
           analysis_details?: Json | null
+          attributes_score?: number | null
           created_at?: string
+          description_length?: number | null
+          description_score?: number | null
           id?: string
           irrelevant_keywords?: Json | null
           issues?: Json | null
           item_id: string
           keyword_coverage_ratio?: number | null
+          keyword_density?: number | null
           keywords_faltantes?: Json | null
           keywords_presentes?: Json | null
           keywords_relevantes?: Json | null
+          missing_attributes?: Json | null
           missing_keywords?: Json | null
+          model_score?: number | null
           seller_id: string
           seo_grade?: string
           seo_keyword_score?: number
@@ -7491,20 +7520,28 @@ export type Database = {
           seo_structural_score?: number
           suggestions?: Json | null
           tenant_id?: string | null
+          title_score?: number | null
           updated_at?: string
+          weak_attributes?: Json | null
         }
         Update: {
           analysis_details?: Json | null
+          attributes_score?: number | null
           created_at?: string
+          description_length?: number | null
+          description_score?: number | null
           id?: string
           irrelevant_keywords?: Json | null
           issues?: Json | null
           item_id?: string
           keyword_coverage_ratio?: number | null
+          keyword_density?: number | null
           keywords_faltantes?: Json | null
           keywords_presentes?: Json | null
           keywords_relevantes?: Json | null
+          missing_attributes?: Json | null
           missing_keywords?: Json | null
+          model_score?: number | null
           seller_id?: string
           seo_grade?: string
           seo_keyword_score?: number
@@ -7512,7 +7549,9 @@ export type Database = {
           seo_structural_score?: number
           suggestions?: Json | null
           tenant_id?: string | null
+          title_score?: number | null
           updated_at?: string
+          weak_attributes?: Json | null
         }
         Relationships: []
       }
