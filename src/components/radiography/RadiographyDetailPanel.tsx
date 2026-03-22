@@ -119,6 +119,12 @@ function buildSmartRecommendations(item: HealthCurrentItem): Recommendation[] {
     recs.push({ action: "Considerar participar de promoções", reason: "Boa conversão — promoções podem escalar vendas", priority: "low", icon: <BarChart3 className="h-4 w-4" /> });
   }
 
+  // Wholesale suggestion — only for eligible CNPJ accounts without active wholesale
+  const wa = item.wholesale_analysis_json;
+  if (wa && wa.is_eligible && wa.status !== 'active') {
+    recs.push({ action: "Configurar preço de atacado", reason: "Sua conta CNPJ permite preço por quantidade — aumente vendas em volume", priority: hasTraffic ? "medium" : "low", icon: <Package className="h-4 w-4" /> });
+  }
+
   // Price change monitoring
   const changes = item.change_flags || [];
   if (changes.some(c => c.type === "price_increased")) {
