@@ -502,6 +502,9 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               )}
             </SectionCard>
 
+            {/* SECTION 2.7 — Wholesale (Atacado) */}
+            <WholesaleCard item={item} />
+
             {/* SECTION 3 — Media (expanded with per-image resolution) */}
             <MediaCard item={item} />
 
