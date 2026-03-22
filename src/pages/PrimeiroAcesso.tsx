@@ -312,6 +312,63 @@ const PrimeiroAcesso = () => {
               Continuar <ArrowRight className="w-4 h-4" />
             </Button>
           </div>
+         );
+
+      case "plan":
+        return (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-xl font-bold text-foreground mb-1">Como você vai usar o sistema?</h3>
+              <p className="text-sm text-muted-foreground">
+                Escolha o modo de uso para configurarmos os módulos ideais para você.
+              </p>
+            </div>
+            <div className="grid gap-4">
+              <Card 
+                className="cursor-pointer hover:border-primary/50 transition-all hover:shadow-md border-2"
+                onClick={() => !selectingPlan && handleSelectPlanChoice('full')}
+              >
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <BarChart3 className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-foreground mb-1">Gerenciar vendas no Mercado Livre</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Dashboard completo, análises de vendas, radiografia de anúncios, publicidade, promoções e muito mais.
+                      </p>
+                      <p className="text-xs text-primary mt-2 font-medium">Requer conexão com Mercado Livre</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card 
+                className="cursor-pointer hover:border-primary/50 transition-all hover:shadow-md border-2"
+                onClick={() => !selectingPlan && handleSelectPlanChoice('zpl')}
+              >
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 bg-muted rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Printer className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-foreground mb-1">Usar apenas etiquetas e ferramentas (ZPL)</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Impressão de etiquetas, calculadora de precificação, comissões e outras ferramentas — sem necessidade de integração.
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-2">Sem integração com marketplace</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            {selectingPlan && (
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" /> Configurando...
+              </div>
+            )}
+          </div>
         );
 
       case "company":
