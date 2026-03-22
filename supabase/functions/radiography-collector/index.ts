@@ -2372,10 +2372,11 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
   });
 
   try {
-    const { data: listing } = await supabase.from('meli_listings_cache')
-      .select('item_id, title, category_id, variation_attributes')
+    const { data: listing, error: listingErr } = await supabase.from('meli_listings_cache')
+      .select('item_id, title, category_id')
       .eq('item_id', itemId).eq('seller_id', sellerId).maybeSingle();
-    if (!listing?.title) return { success: false, error: 'Item not found' };
+    if (listingErr) console.error('[rad-collector] GENERATE_TITLE listing fetch error:', listingErr);
+    if (!listing?.title) return { success: false, error: 'Item not found in listings cache' };
 
     const currentTitle = listing.title;
     const categoryId = listing.category_id;
