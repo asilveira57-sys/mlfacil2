@@ -3869,7 +3869,7 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
     // Variation 5: Original + top missing
     const topMissing = wordPool.filter(w => w.source === 'category' && !currentTokensClean.includes(w.word)).slice(0, 3);
     const v5 = compressTitle([...new Set([...currentTokensClean, ...topMissing.map(m => m.word)])].map(capitalize), MAX_TITLE_LENGTH);
-    if (v5.length >= 10) { const r = scoreTitleSuggestion(v5, validKeywords, variationAttrs); suggestions.push({ title: v5, ...r, length: v5.length }); }
+    if (v5.length >= 10) { const r = scoreTitleSuggestion(v5, validKeywords, variationValues); suggestions.push({ title: v5, ...r, length: v5.length }); }
 
     const uniqueSuggestions = [...new Map(suggestions.map(s => [normalizeText(s.title), s])).values()]
       .sort((a, b) => b.score - a.score).slice(0, 5);
