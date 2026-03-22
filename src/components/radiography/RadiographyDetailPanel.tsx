@@ -773,10 +773,29 @@ function EvolutionPill({ label, delta, isCurrency }: { label: string; delta: num
   );
 }
 
-function SeoAnalysisCard({ seo, score, found, missing, structuralScore, keywordScore, grade }: {
+// --- Interactive SEO Card with keyword toggles + title generator ---
+interface TitleSuggestion {
+  title: string;
+  score: number;
+  length: number;
+  breakdown: Record<string, number>;
+}
+
+function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore, keywordScore, grade }: {
+  item: HealthCurrentItem;
   seo: SeoAnalysis; score: number | null; found: string[] | null; missing: string[] | null;
   structuralScore?: number | null; keywordScore?: number | null; grade?: string | null;
 }) {
+  const { toast } = useToast();
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, boolean>>({});
+  const [titleLoading, setTitleLoading] = useState(false);
+  const [titleData, setTitleData] = useState<{
+    current_title: string; current_length: number;
+    best: TitleSuggestion | null; suggestions: TitleSuggestion[];
+    issues: string[];
+  } | null>(null);
+  const [copiedTitle, setCopiedTitle] = useState<string | null>(null);
+
   const scoreVal = score ?? seo.score ?? 0;
   const gradeVal = grade ?? seo.grade ?? (scoreVal >= 85 ? 'A' : scoreVal >= 70 ? 'B' : scoreVal >= 50 ? 'C' : 'D');
   const structVal = structuralScore ?? seo.structural_score ?? null;
@@ -785,149 +804,288 @@ function SeoAnalysisCard({ seo, score, found, missing, structuralScore, keywordS
   const gradeColor = gradeVal === 'A' ? "text-emerald-400 border-emerald-500/30" : gradeVal === 'B' ? "text-cyan-400 border-cyan-500/30" : gradeVal === 'C' ? "text-amber-400 border-amber-500/30" : "text-red-400 border-red-500/30";
   const foundKws = found || [];
   const missingKws = missing || [];
-  const relevantDetails = seo.details?.filter(d => d.relevance !== "low") || [];
   const totalKws = seo.total_keywords ?? seo.total_trending_keywords ?? 0;
   const coverageRatio = seo.coverage_ratio != null ? Math.round(seo.coverage_ratio * 100) : null;
   const irrelevantKws = seo.irrelevant_keywords || [];
   const issues = seo.issues || [];
   const suggestions = seo.suggestions || [];
 
-  return (
-    <SectionCard
-      title="SEO do Anúncio"
-      icon={<Search className="h-4 w-4 text-cyan-400" />}
-      action={
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className={`text-sm font-bold ${gradeColor}`}>{gradeVal}</Badge>
-          <span className={`text-xl font-bold font-mono ${scoreColor}`}>{scoreVal}</span>
-          <span className="text-xs text-slate-500">/100</span>
-        </div>
+  const handleKeywordFeedback = async (keyword: string, isRelevant: boolean) => {
+    setFeedbackMap(prev => ({ ...prev, [keyword]: isRelevant }));
+    try {
+      await supabase.functions.invoke("radiography-collector", {
+        body: { action: "save_keyword_feedback", seller_id: item.seller_id, item_id: item.item_id, keyword, is_relevant: isRelevant },
+      });
+    } catch { /* silent */ }
+  };
+
+  const handleGenerateTitle = async () => {
+    setTitleLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("radiography-collector", {
+        body: { action: "generate_title", seller_id: item.seller_id, item_id: item.item_id },
+      });
+      if (error) throw error;
+      if (data?.success) {
+        setTitleData(data);
+        toast({ title: "Títulos gerados", description: `${data.suggestions?.length || 0} sugestões criadas.` });
+      } else {
+        toast({ title: "Erro", description: data?.error || "Falha ao gerar títulos", variant: "destructive" });
       }
-      subtitle={totalKws > 0 ? `Baseado em ${totalKws} palavras-chave da categoria` : undefined}
-    >
-      <div className="space-y-3">
-        {/* Score breakdown */}
-        {(structVal != null || kwVal != null) && (
-          <div className="grid grid-cols-2 gap-2">
-            {structVal != null && (
-              <div className="p-2 rounded-md bg-slate-800/50 border border-slate-700/50">
-                <div className="text-[10px] text-slate-500 mb-0.5">Estrutural</div>
-                <div className="flex items-center gap-1.5">
-                  <div className="flex-1 h-1.5 rounded-full bg-slate-700">
-                    <div className={`h-full rounded-full ${structVal >= 70 ? 'bg-emerald-500' : structVal >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${structVal}%` }} />
+    } catch (err: any) {
+      toast({ title: "Erro ao gerar título", description: err.message, variant: "destructive" });
+    } finally {
+      setTitleLoading(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedTitle(text);
+    toast({ title: "Copiado!", description: "Título copiado para a área de transferência." });
+    setTimeout(() => setCopiedTitle(null), 2000);
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* SEO Score Card */}
+      <SectionCard
+        title="SEO do Anúncio"
+        icon={<Search className="h-4 w-4 text-cyan-400" />}
+        action={
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className={`text-sm font-bold ${gradeColor}`}>{gradeVal}</Badge>
+            <span className={`text-xl font-bold font-mono ${scoreColor}`}>{scoreVal}</span>
+            <span className="text-xs text-slate-500">/100</span>
+          </div>
+        }
+        subtitle={totalKws > 0 ? `Baseado em ${totalKws} palavras-chave da categoria` : undefined}
+      >
+        <div className="space-y-3">
+          {/* Score breakdown */}
+          {(structVal != null || kwVal != null) && (
+            <div className="grid grid-cols-2 gap-2">
+              {structVal != null && (
+                <div className="p-2 rounded-md bg-slate-800/50 border border-slate-700/50">
+                  <div className="text-[10px] text-slate-500 mb-0.5">Estrutural</div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex-1 h-1.5 rounded-full bg-slate-700">
+                      <div className={`h-full rounded-full ${structVal >= 70 ? 'bg-emerald-500' : structVal >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${structVal}%` }} />
+                    </div>
+                    <span className="text-xs font-mono text-slate-300">{structVal}</span>
                   </div>
-                  <span className="text-xs font-mono text-slate-300">{structVal}</span>
                 </div>
+              )}
+              {kwVal != null && (
+                <div className="p-2 rounded-md bg-slate-800/50 border border-slate-700/50">
+                  <div className="text-[10px] text-slate-500 mb-0.5">Aderência (Keywords)</div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex-1 h-1.5 rounded-full bg-slate-700">
+                      <div className={`h-full rounded-full ${kwVal >= 70 ? 'bg-emerald-500' : kwVal >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${kwVal}%` }} />
+                    </div>
+                    <span className="text-xs font-mono text-slate-300">{kwVal}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Coverage ratio */}
+          {coverageRatio != null && totalKws > 0 && (
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <Target className="h-3 w-3" />
+              <span>Cobertura: <strong className={coverageRatio >= 60 ? "text-emerald-400" : coverageRatio >= 30 ? "text-amber-400" : "text-red-400"}>{coverageRatio}%</strong></span>
+            </div>
+          )}
+
+          {/* Interactive keywords: Found */}
+          {foundKws.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-emerald-400 mb-1.5 flex items-center gap-1">
+                <Check className="h-3 w-3" /> Presentes ({foundKws.length})
               </div>
-            )}
-            {kwVal != null && (
-              <div className="p-2 rounded-md bg-slate-800/50 border border-slate-700/50">
-                <div className="text-[10px] text-slate-500 mb-0.5">Aderência (Keywords)</div>
-                <div className="flex items-center gap-1.5">
-                  <div className="flex-1 h-1.5 rounded-full bg-slate-700">
-                    <div className={`h-full rounded-full ${kwVal >= 70 ? 'bg-emerald-500' : kwVal >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${kwVal}%` }} />
+              <div className="flex flex-wrap gap-1">
+                {foundKws.map((kw) => (
+                  <div key={kw} className="flex items-center gap-0.5">
+                    <Badge variant="outline" className={`text-xs ${feedbackMap[kw] === false ? 'border-red-500/30 text-red-300 bg-red-500/5 line-through' : 'border-emerald-500/30 text-emerald-300 bg-emerald-500/5'}`}>{kw}</Badge>
+                    <button onClick={() => handleKeywordFeedback(kw, !(feedbackMap[kw] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
+                      {feedbackMap[kw] === false ? <ThumbsDown className="h-3 w-3 text-red-400" /> : <ThumbsUp className="h-3 w-3 text-emerald-400 opacity-30 hover:opacity-100" />}
+                    </button>
                   </div>
-                  <span className="text-xs font-mono text-slate-300">{kwVal}</span>
-                </div>
+                ))}
               </div>
+            </div>
+          )}
+
+          {/* Interactive keywords: Missing */}
+          {missingKws.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-amber-400 mb-1.5 flex items-center gap-1">
+                <Target className="h-3 w-3" /> Ausentes ({missingKws.length})
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {missingKws.map((kw) => (
+                  <div key={kw} className="flex items-center gap-0.5">
+                    <Badge variant="outline" className={`text-xs ${feedbackMap[kw] === false ? 'border-slate-600 text-slate-500 line-through' : 'border-amber-500/30 text-amber-300 bg-amber-500/5'}`}>{kw}</Badge>
+                    <button onClick={() => handleKeywordFeedback(kw, !(feedbackMap[kw] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
+                      {feedbackMap[kw] === false ? <ThumbsDown className="h-3 w-3 text-red-400" /> : <ThumbsUp className="h-3 w-3 text-slate-400 opacity-30 hover:opacity-100" />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Irrelevant */}
+          {irrelevantKws.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-red-400 mb-1.5 flex items-center gap-1">
+                <X className="h-3 w-3" /> Termos irrelevantes ({irrelevantKws.length})
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {irrelevantKws.map((kw) => (
+                  <Badge key={kw} variant="outline" className="text-xs border-red-500/30 text-red-300 bg-red-500/5">{kw}</Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Validation prompt */}
+          {(foundKws.length > 0 || missingKws.length > 0) && (
+            <div className="p-2 rounded-md bg-cyan-500/5 border border-cyan-500/15 text-xs text-cyan-300">
+              <Sparkles className="h-3 w-3 inline mr-1" />
+              Selecione as palavras que representam seu produto. Use 👍/👎 para refinar a análise e gerar títulos mais precisos.
+            </div>
+          )}
+
+          {/* Issues & Suggestions */}
+          {issues.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-slate-400 mb-1">Problemas detectados</div>
+              <ul className="space-y-0.5 text-xs text-slate-400">
+                {issues.map((issue, i) => <li key={i} className="flex items-start gap-1"><span className="text-red-400 mt-0.5">•</span>{issue}</li>)}
+              </ul>
+            </div>
+          )}
+          {suggestions.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-cyan-400 mb-1 flex items-center gap-1">
+                <Lightbulb className="h-3 w-3" /> Ações recomendadas
+              </div>
+              <ul className="space-y-0.5 text-xs text-slate-400">
+                {suggestions.map((s, i) => <li key={i} className="flex items-start gap-1"><span className="text-cyan-400 mt-0.5">→</span>{s}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {foundKws.length === 0 && missingKws.length === 0 && issues.length === 0 && (
+            <p className="text-xs text-slate-500 text-center py-2">Execute "Atualizar Dados" para gerar a análise SEO.</p>
+          )}
+        </div>
+      </SectionCard>
+
+      {/* Title Generator Card */}
+      <SectionCard
+        title="Título Otimizado"
+        icon={<Type className="h-4 w-4 text-violet-400" />}
+        subtitle="Gerador de título com limite de 60 caracteres (Mercado Livre)"
+        action={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleGenerateTitle}
+            disabled={titleLoading}
+            className="h-7 text-xs gap-1 border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
+          >
+            {titleLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            {titleLoading ? "Gerando..." : titleData ? "Gerar Novamente" : "Gerar Títulos"}
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          {/* Current title */}
+          <div className="p-2.5 rounded-md bg-slate-800/50 border border-slate-700/50">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-slate-500">Título atual</span>
+              <span className={`text-[10px] font-mono ${(item.title?.length || 0) > 60 ? 'text-red-400' : 'text-slate-500'}`}>
+                {item.title?.length || 0}/60 chars
+              </span>
+            </div>
+            <p className="text-sm text-slate-300">{item.title || "—"}</p>
+            {(item.title?.length || 0) > 60 && (
+              <p className="text-[10px] text-red-400 mt-1">⚠️ Excede o limite de 60 caracteres</p>
             )}
           </div>
-        )}
 
-        {/* Coverage ratio */}
-        {coverageRatio != null && totalKws > 0 && (
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <Target className="h-3 w-3" />
-            <span>Cobertura de palavras-chave: <strong className={coverageRatio >= 60 ? "text-emerald-400" : coverageRatio >= 30 ? "text-amber-400" : "text-red-400"}>{coverageRatio}%</strong></span>
-          </div>
-        )}
-
-        {/* Found keywords */}
-        {foundKws.length > 0 && (
-          <div>
-            <div className="text-xs font-medium text-emerald-400 mb-1.5 flex items-center gap-1">
-              <Check className="h-3 w-3" /> Encontradas ({foundKws.length})
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {foundKws.map((kw) => (
-                <Badge key={kw} variant="outline" className="text-xs border-emerald-500/30 text-emerald-300 bg-emerald-500/5">{kw}</Badge>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Missing keywords */}
-        {missingKws.length > 0 && (
-          <div>
-            <div className="text-xs font-medium text-amber-400 mb-1.5 flex items-center gap-1">
-              <Target className="h-3 w-3" /> Ausentes importantes ({missingKws.length})
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {missingKws.map((kw) => (
-                <Badge key={kw} variant="outline" className="text-xs border-amber-500/30 text-amber-300 bg-amber-500/5">{kw}</Badge>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Irrelevant keywords */}
-        {irrelevantKws.length > 0 && (
-          <div>
-            <div className="text-xs font-medium text-red-400 mb-1.5 flex items-center gap-1">
-              <X className="h-3 w-3" /> Termos irrelevantes ({irrelevantKws.length})
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {irrelevantKws.map((kw) => (
-                <Badge key={kw} variant="outline" className="text-xs border-red-500/30 text-red-300 bg-red-500/5">{kw}</Badge>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Issues & Suggestions */}
-        {issues.length > 0 && (
-          <div>
-            <div className="text-xs font-medium text-slate-400 mb-1">Problemas detectados</div>
-            <ul className="space-y-0.5 text-xs text-slate-400">
-              {issues.map((issue, i) => <li key={i} className="flex items-start gap-1"><span className="text-red-400 mt-0.5">•</span>{issue}</li>)}
-            </ul>
-          </div>
-        )}
-        {suggestions.length > 0 && (
-          <div>
-            <div className="text-xs font-medium text-cyan-400 mb-1 flex items-center gap-1">
-              <Lightbulb className="h-3 w-3" /> Ações recomendadas
-            </div>
-            <ul className="space-y-0.5 text-xs text-slate-400">
-              {suggestions.map((s, i) => <li key={i} className="flex items-start gap-1"><span className="text-cyan-400 mt-0.5">→</span>{s}</li>)}
-            </ul>
-          </div>
-        )}
-
-        {/* Keyword details */}
-        {relevantDetails.length > 0 && (
-          <div>
-            <div className="text-xs font-medium text-slate-400 mb-1.5">Palavras-chave analisadas ({relevantDetails.length})</div>
-            <div className="space-y-0.5 max-h-[160px] overflow-y-auto">
-              {relevantDetails.map((d, i) => (
-                <div key={i} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-slate-800/50">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    {d.found_in_title ? <Check className="h-3 w-3 text-emerald-400 flex-shrink-0" /> : <X className="h-3 w-3 text-slate-500 flex-shrink-0" />}
-                    <span className={d.found_in_title ? "text-slate-200" : "text-slate-400"}>{d.keyword}</span>
+          {titleData && (
+            <>
+              {/* Best suggestion */}
+              {titleData.best && (
+                <div className="p-2.5 rounded-md bg-violet-500/5 border border-violet-500/20">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-violet-400 font-medium">🔥 Melhor sugestão</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-slate-400">{titleData.best.length}/60</span>
+                      <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-400">
+                        Score {titleData.best.score}
+                      </Badge>
+                    </div>
                   </div>
-                  <Badge variant="outline" className={`text-[10px] ${d.relevance === "high" ? "border-cyan-500/30 text-cyan-400" : "border-slate-600 text-slate-500"}`}>
-                    {d.relevance === "high" ? "alta" : "média"}
-                  </Badge>
+                  <p className="text-sm text-violet-200 font-medium">{titleData.best.title}</p>
+                  <button
+                    onClick={() => copyToClipboard(titleData.best!.title)}
+                    className="mt-1.5 flex items-center gap-1 text-[10px] text-violet-400 hover:text-violet-300"
+                  >
+                    {copiedTitle === titleData.best.title ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                    {copiedTitle === titleData.best.title ? "Copiado!" : "Copiar título"}
+                  </button>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+              )}
 
-        {foundKws.length === 0 && missingKws.length === 0 && issues.length === 0 && (
-          <p className="text-xs text-slate-500 text-center py-2">Nenhuma palavra relevante encontrada para análise. Execute "Atualizar Dados" para gerar a análise SEO.</p>
-        )}
-      </div>
-    </SectionCard>
+              {/* Other suggestions */}
+              {titleData.suggestions.length > 1 && (
+                <div>
+                  <div className="text-xs font-medium text-slate-400 mb-1.5">Outras variações</div>
+                  <div className="space-y-1.5">
+                    {titleData.suggestions.slice(1).map((sug, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 rounded-md bg-slate-800/40 border border-slate-700/40">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-slate-300 truncate">{sug.title}</p>
+                          <span className="text-[10px] text-slate-500">{sug.length}/60 · Score {sug.score}</span>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(sug.title)}
+                          className="ml-2 p-1 rounded hover:bg-slate-700/50 flex-shrink-0"
+                        >
+                          {copiedTitle === sug.title ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3 text-slate-400" />}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Title issues */}
+              {titleData.issues.length > 0 && (
+                <div>
+                  <div className="text-xs font-medium text-amber-400 mb-1">Problemas do título atual</div>
+                  <ul className="space-y-0.5 text-xs text-slate-400">
+                    {titleData.issues.map((issue, i) => (
+                      <li key={i} className="flex items-start gap-1"><span className="text-amber-400 mt-0.5">•</span>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+
+          {!titleData && !titleLoading && (
+            <p className="text-xs text-slate-500 text-center py-2">
+              Clique em "Gerar Títulos" para criar sugestões otimizadas baseadas nas palavras-chave da categoria.
+            </p>
+          )}
+        </div>
+      </SectionCard>
+    </div>
   );
 }
