@@ -2813,6 +2813,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
     // Photos from API — capture per-image resolution
     const token = await getValidToken(supabase, sellerId);
     const photosMap = new Map<string, { count: number; hasVideo: boolean; images: Array<{ url: string; width: number; height: number }> }>();
+    const variationMap = new Map<string, Set<string>>();
     if (token) {
       for (let i = 0; i < allIds.length; i += 20) {
         try {
@@ -2841,8 +2842,6 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
                   }
                   if (varAttrs.size > 0) variationMap.set(e.body.id, varAttrs);
                 }
-              }
-            }
               }
             }
           }
