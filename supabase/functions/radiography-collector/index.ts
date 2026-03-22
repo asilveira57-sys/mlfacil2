@@ -3860,7 +3860,7 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
     // Variation 3: Mixed
     const v3Words = [...currentTokensClean.slice(0, 5), ...wordPool.filter(w => w.source === 'category').slice(0, 5).map(m => m.word)];
     const v3 = compressTitle([...new Set(v3Words)].map(capitalize), MAX_TITLE_LENGTH);
-    if (v3.length >= 10) { const r = scoreTitleSuggestion(v3, validKeywords, variationAttrs); suggestions.push({ title: v3, ...r, length: v3.length }); }
+    if (v3.length >= 10) { const r = scoreTitleSuggestion(v3, validKeywords, variationValues); suggestions.push({ title: v3, ...r, length: v3.length }); }
 
     // Variation 4: Compact
     const v4 = compressTitle(wordPool.slice(0, 8).map(w => capitalize(w.word)), MAX_TITLE_LENGTH);
