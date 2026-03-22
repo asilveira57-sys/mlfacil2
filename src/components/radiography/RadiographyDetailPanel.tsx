@@ -1,16 +1,20 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CopyMlbId } from "@/components/ui/CopyMlbId";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Eye, TrendingUp, TrendingDown, Package, ExternalLink, HeartPulse,
   Activity, AlertTriangle, Stethoscope, Siren, ShoppingCart, Clock,
   BarChart3, ArrowUpDown, AlertOctagon, Lightbulb, Search, Check,
   X, Target, Scan, Zap, Image, Video, Tag, Camera, Truck, Megaphone,
+  Copy, RefreshCw, Loader2, ThumbsUp, ThumbsDown, Sparkles, Type,
 } from "lucide-react";
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
