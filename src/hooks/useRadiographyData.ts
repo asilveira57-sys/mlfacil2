@@ -165,6 +165,9 @@ export interface HealthCurrentItem {
   ads_status: string | null;
   is_promotion_active: boolean | null;
   promotion_status: string | null;
+  // Wholesale
+  wholesale_score: number | null;
+  wholesale_analysis_json: WholesaleAnalysis | null;
   // Diagnostic
   diagnostic_text: string | null;
   // Period-based metrics (from RPC)
