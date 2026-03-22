@@ -2357,8 +2357,18 @@ Deno.serve(async (req) => {
         result = await handleRefreshMarketKeywords(supabase, body.category_id);
         break;
 
+      case "generate_title":
+        if (!seller_id || !body.item_id) return new Response(JSON.stringify({ error: "seller_id and item_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await handleGenerateTitle(supabase, seller_id, body.item_id, body.tenant_id);
+        break;
+
+      case "save_keyword_feedback":
+        if (!seller_id || !body.item_id || !body.keyword) return new Response(JSON.stringify({ error: "seller_id, item_id, keyword required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await handleSaveKeywordFeedback(supabase, seller_id, body.item_id, body.keyword, body.is_relevant ?? true, body.tenant_id);
+        break;
+
       default:
-        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full, enrich_sales, analyze, refresh_keywords` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full, enrich_sales, analyze, refresh_keywords, generate_title, save_keyword_feedback` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
