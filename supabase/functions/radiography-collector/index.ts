@@ -2262,7 +2262,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
                   description: null,
                   attributes: r.body.attributes || [],
                 });
-                // Extract variation attribute values for title cleaning
+                // Extract variation attribute values AND names for title cleaning
                 const vars = Array.isArray(r.body.variations) ? r.body.variations : [];
                 if (vars.length > 0) {
                   const varAttrs = new Set<string>();
@@ -2270,6 +2270,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
                     const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
                     for (const c of combos) {
                       if (c.value_name) varAttrs.add(c.value_name);
+                      if (c.name) varAttrs.add(c.name); // Also capture "Cor", "Tamanho" etc.
                     }
                   }
                   if (varAttrs.size > 0) seoVariationMap.set(r.body.id, varAttrs);
