@@ -354,7 +354,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
             <div className="flex-1 min-w-0">
               <SheetTitle className="text-base leading-tight mb-1 text-slate-100">{item.title || item.item_id}</SheetTitle>
               <div className="flex items-center gap-2 text-xs text-slate-400">
-                <span className="font-mono">{item.item_id}</span>
+                <CopyMlbId itemId={item.item_id} />
                 {item.permalink && (
                   <a href={item.permalink} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
                     Ver <ExternalLink className="h-3 w-3" />
