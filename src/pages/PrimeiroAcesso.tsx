@@ -205,6 +205,44 @@ const PrimeiroAcesso = () => {
     registerEvent("company_logo_skipped", {}, progress.companyId);
   };
 
+  // ── Plan choice ──
+  const handleSelectPlanChoice = async (choice: 'full' | 'zpl') => {
+    setSelectingPlan(true);
+    try {
+      if (choice === 'zpl') {
+        // Set the ZPL plan
+        const ok = await selectPlan(ZPL_PLAN_ID);
+        if (!ok) throw new Error('Failed to select ZPL plan');
+        
+        // Also create user_plan_assignments record
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('user_plan_assignments' as any).insert({
+            user_id: user.id,
+            plan_tier_id: ZPL_PLAN_ID,
+            status: 'active',
+            notes: 'Selected during onboarding',
+            created_by: user.id,
+          });
+        }
+
+        registerEvent("plan_selected", { plan: 'zpl', plan_id: ZPL_PLAN_ID }, progress.companyId);
+      } else {
+        // Full plan will be selected later via billing flow
+        registerEvent("plan_selected", { plan: 'full' }, progress.companyId);
+      }
+      
+      setProgress(prev => ({ ...prev, planChoice: choice } as any));
+      completeStep("plan");
+      toast.success(choice === 'zpl' ? "Modo ZPL selecionado!" : "Modo completo selecionado!");
+    } catch (err) {
+      console.error("[Onboarding] Plan selection error:", err);
+      toast.error("Erro ao selecionar modo de uso.");
+    } finally {
+      setSelectingPlan(false);
+    }
+  };
+
   // ── Preferences ──
   const handleSavePrefs = () => {
     registerEvent("preferences_configured", {}, progress.companyId);
