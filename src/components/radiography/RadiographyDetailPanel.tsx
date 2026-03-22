@@ -836,6 +836,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   const [titleLoading, setTitleLoading] = useState(false);
   const [copiedTitle, setCopiedTitle] = useState<string | null>(null);
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
+  const [showDescription, setShowDescription] = useState(false);
 
   const scoreVal = score ?? seo.score ?? 0;
   const gradeVal = grade ?? seo.grade ?? (scoreVal >= 85 ? 'A' : scoreVal >= 70 ? 'B' : scoreVal >= 50 ? 'C' : 'D');
@@ -853,11 +854,12 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   const totalKws = seo.total_keywords ?? seo.total_trending_keywords ?? 0;
   const coverageRatio = seo.coverage_ratio != null ? Math.round(seo.coverage_ratio * 100) : null;
   const irrelevantKws = seo.irrelevant_keywords || [];
-  const issues = seo.issues || [];
-  const suggestions = seo.suggestions || [];
-  const modelValue = seo.model_value || null;
-  const missingAttrs = seo.missing_attributes || [];
-  const weakAttrs = seo.weak_attributes || [];
+
+  // Enriched layer data
+  const titleAnalysis = seo.title_analysis || null;
+  const descAnalysis = seo.description_analysis || null;
+  const attrAnalysis = seo.attributes_analysis || null;
+  const modelAnalysis = seo.model_analysis || null;
 
   const handleKeywordFeedback = async (keyword: string, isRelevant: boolean) => {
     setFeedbackMap(prev => ({ ...prev, [keyword]: isRelevant }));
@@ -894,19 +896,181 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
     setTimeout(() => setCopiedTitle(null), 2000);
   };
 
-  const LayerBar = ({ label, value, weight, icon }: { label: string; value: number | null; weight: string; icon: React.ReactNode }) => {
+  const toggleLayer = (layer: string) => setExpandedLayer(expandedLayer === layer ? null : layer);
+
+  // Layer summary lines
+  const getLayerSummary = (layer: string, layerScore: number | null): string => {
+    if (layerScore == null) return '';
+    const analysis = layer === 'title' ? titleAnalysis : layer === 'description' ? descAnalysis : layer === 'attributes' ? attrAnalysis : modelAnalysis;
+    if (analysis?.summary) return analysis.summary;
+    if (layerScore >= 70) return 'Boa performance nesta camada.';
+    if (layerScore >= 40) return 'Pode melhorar com ajustes pontuais.';
+    return 'Precisa de atenção para melhorar o SEO.';
+  };
+
+  const DetailSection = ({ items, icon, title: secTitle, colorClass }: { items: string[]; icon: React.ReactNode; title: string; colorClass: string }) => {
+    if (!items || items.length === 0) return null;
+    return (
+      <div className="mt-1.5">
+        <div className={`text-[10px] font-medium ${colorClass} mb-1 flex items-center gap-1`}>{icon} {secTitle}</div>
+        <ul className="space-y-0.5">
+          {items.map((item, i) => (
+            <li key={i} className="text-[11px] text-slate-400 flex items-start gap-1">
+              <span className={`mt-0.5 ${colorClass}`}>•</span>{item}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
+
+  const ExpandableLayerCard = ({ layerKey, label, value, weight, icon, iconColor }: {
+    layerKey: string; label: string; value: number | null; weight: string; icon: React.ReactNode; iconColor: string;
+  }) => {
     if (value == null) return null;
     const color = value >= 70 ? 'bg-emerald-500' : value >= 40 ? 'bg-amber-500' : 'bg-red-500';
     const textColor = value >= 70 ? 'text-emerald-400' : value >= 40 ? 'text-amber-400' : 'text-red-400';
+    const isExpanded = expandedLayer === layerKey;
+    const analysis = layerKey === 'title' ? titleAnalysis : layerKey === 'description' ? descAnalysis : layerKey === 'attributes' ? attrAnalysis : modelAnalysis;
+    const summary = getLayerSummary(layerKey, value);
+
     return (
-      <div className="flex items-center gap-2">
-        <div className="w-5 flex justify-center">{icon}</div>
-        <span className="text-xs text-slate-400 w-24 truncate">{label}</span>
-        <span className="text-[9px] text-slate-600 w-8">{weight}</span>
-        <div className="flex-1 h-2 rounded-full bg-slate-700/50">
-          <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${value}%` }} />
-        </div>
-        <span className={`text-xs font-mono w-8 text-right ${textColor}`}>{value}</span>
+      <div className="rounded-md bg-slate-800/30 border border-slate-700/30 overflow-hidden transition-all">
+        <button onClick={() => toggleLayer(layerKey)} className="w-full text-left p-2.5 hover:bg-slate-800/50 transition-colors">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`w-5 flex justify-center ${iconColor}`}>{icon}</div>
+              <span className="text-xs text-slate-300 font-medium">{label}</span>
+              <span className="text-[9px] text-slate-600">{weight}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-mono font-bold ${textColor}`}>{value}</span>
+              {isExpanded ? <ChevronUp className="h-3 w-3 text-slate-500" /> : <ChevronDown className="h-3 w-3 text-slate-500" />}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mt-1.5">
+            <div className="flex-1 h-1.5 rounded-full bg-slate-700/50">
+              <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${value}%` }} />
+            </div>
+          </div>
+          {!isExpanded && summary && (
+            <p className="text-[10px] text-slate-500 mt-1 line-clamp-1">{summary}</p>
+          )}
+        </button>
+
+        {isExpanded && analysis && (
+          <div className="px-2.5 pb-2.5 space-y-2 border-t border-slate-700/20 pt-2">
+            {/* Summary */}
+            {analysis.summary && (
+              <p className="text-xs text-slate-300 bg-slate-800/50 p-2 rounded">{analysis.summary}</p>
+            )}
+
+            {/* Layer-specific extras */}
+            {layerKey === 'title' && titleAnalysis && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Título atual</span>
+                  <span className={`font-mono ${(titleAnalysis.length || 0) > 60 ? 'text-red-400' : 'text-slate-400'}`}>
+                    {titleAnalysis.length || item.title?.length || 0}/60 chars
+                    {titleAnalysis.limit_status === 'above_limit' && ' ⚠️'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 bg-slate-900/50 p-1.5 rounded font-mono">{item.title || '—'}</p>
+                {titleAnalysis.matched_keywords?.length > 0 && (
+                  <div>
+                    <span className="text-[10px] text-emerald-400">Keywords no título: </span>
+                    <span className="text-[10px] text-slate-400">{titleAnalysis.matched_keywords.join(', ')}</span>
+                  </div>
+                )}
+                {titleAnalysis.missing_keywords?.length > 0 && (
+                  <div>
+                    <span className="text-[10px] text-amber-400">Keywords ausentes: </span>
+                    <span className="text-[10px] text-slate-400">{titleAnalysis.missing_keywords.slice(0, 5).join(', ')}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {layerKey === 'description' && descAnalysis && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-3 text-[10px]">
+                  <span className={`${descAnalysis.length_status === 'strong' ? 'text-emerald-400' : descAnalysis.length_status === 'acceptable' ? 'text-amber-400' : 'text-red-400'}`}>
+                    {descAnalysis.length || 0} caracteres
+                    {descAnalysis.length_status === 'strong' ? ' ✓ ideal' : descAnalysis.length_status === 'acceptable' ? ' (ideal: 500+)' : descAnalysis.length_status === 'empty' ? ' (vazia)' : ' (curta)'}
+                  </span>
+                  {descAnalysis.density != null && (
+                    <span className="text-slate-500">Densidade: {(descAnalysis.density * 100).toFixed(1)}%</span>
+                  )}
+                </div>
+                {descAnalysis.description_preview && (
+                  <div>
+                    <button onClick={(e) => { e.stopPropagation(); setShowDescription(!showDescription); }} className="text-[10px] text-cyan-400 hover:underline">
+                      {showDescription ? 'Recolher descrição' : 'Ver descrição atual'}
+                    </button>
+                    {showDescription && (
+                      <p className="text-[10px] text-slate-500 bg-slate-900/50 p-2 rounded mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap">{descAnalysis.description_preview}</p>
+                    )}
+                  </div>
+                )}
+                {descAnalysis.matched_keywords?.length > 0 && (
+                  <div><span className="text-[10px] text-emerald-400">Keywords presentes: </span><span className="text-[10px] text-slate-400">{descAnalysis.matched_keywords.join(', ')}</span></div>
+                )}
+                {descAnalysis.missing_keywords?.length > 0 && (
+                  <div><span className="text-[10px] text-amber-400">Keywords ausentes: </span><span className="text-[10px] text-slate-400">{descAnalysis.missing_keywords.slice(0, 5).join(', ')}</span></div>
+                )}
+              </div>
+            )}
+
+            {layerKey === 'attributes' && attrAnalysis && (
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-slate-400">
+                  Preenchimento: <strong className={attrAnalysis.filled_ratio >= 0.8 ? 'text-emerald-400' : attrAnalysis.filled_ratio >= 0.5 ? 'text-amber-400' : 'text-red-400'}>
+                    {Math.round((attrAnalysis.filled_ratio || 0) * 100)}%
+                  </strong> ({attrAnalysis.filled || 0}/{attrAnalysis.total || 0})
+                </div>
+                {attrAnalysis.strong_attributes?.length > 0 && (
+                  <div>
+                    <span className="text-[10px] text-emerald-400">Atributos fortes: </span>
+                    <span className="text-[10px] text-slate-400">{attrAnalysis.strong_attributes.join(' · ')}</span>
+                  </div>
+                )}
+                {attrAnalysis.weak_attributes_detail?.length > 0 && (
+                  <div>
+                    <span className="text-[10px] text-amber-400">Atributos fracos: </span>
+                    <span className="text-[10px] text-slate-400">{attrAnalysis.weak_attributes_detail.join(' · ')}</span>
+                  </div>
+                )}
+                {attrAnalysis.missing?.length > 0 && (
+                  <div>
+                    <span className="text-[10px] text-red-400">Faltantes: </span>
+                    <span className="text-[10px] text-slate-400">{attrAnalysis.missing.join(', ')}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {layerKey === 'model' && modelAnalysis && (
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-slate-400">
+                  Valor atual: <strong className={modelAnalysis.current_value && modelAnalysis.is_search_friendly ? 'text-emerald-400' : 'text-amber-400'}>
+                    {modelAnalysis.current_value || 'não informado'}
+                  </strong>
+                  {modelAnalysis.brand_value && <span className="text-slate-500"> · Marca: {modelAnalysis.brand_value}</span>}
+                </div>
+                {modelAnalysis.is_search_friendly && (
+                  <div className="text-[10px] text-emerald-400 flex items-center gap-1"><Check className="h-2.5 w-2.5" /> Modelo pesquisável</div>
+                )}
+              </div>
+            )}
+
+            {/* Positives */}
+            <DetailSection items={analysis.positives} icon={<Check className="h-2.5 w-2.5" />} title="O que está bom" colorClass="text-emerald-400" />
+            {/* Negatives */}
+            <DetailSection items={analysis.negatives} icon={<AlertTriangle className="h-2.5 w-2.5" />} title="O que prejudica" colorClass="text-red-400" />
+            {/* Improvement actions */}
+            <DetailSection items={analysis.improvement_actions} icon={<Lightbulb className="h-2.5 w-2.5" />} title="Como melhorar" colorClass="text-cyan-400" />
+          </div>
+        )}
       </div>
     );
   };
@@ -924,96 +1088,18 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             <span className="text-xs text-slate-500">/100</span>
           </div>
         }
-        subtitle={`Análise em 4 camadas${totalKws > 0 ? ` · ${totalKws} palavras-chave` : ''}`}
+        subtitle={`Análise em 4 camadas${totalKws > 0 ? ` · ${totalKws} palavras-chave` : ''} · Clique em cada camada para detalhes`}
       >
-        <div className="space-y-3">
-          {/* 4-layer breakdown */}
-          <div className="space-y-1.5 p-2.5 rounded-md bg-slate-800/40 border border-slate-700/40">
-            <div className="text-[10px] text-slate-500 mb-1 font-medium">COMPOSIÇÃO DO SCORE</div>
-            <LayerBar label="Título" value={titleScore} weight="40%" icon={<Type className="h-3 w-3 text-violet-400" />} />
-            <LayerBar label="Descrição" value={descScore} weight="25%" icon={<FileText className="h-3 w-3 text-cyan-400" />} />
-            <LayerBar label="Ficha Técnica" value={attrScore} weight="20%" icon={<ClipboardList className="h-3 w-3 text-amber-400" />} />
-            <LayerBar label="Modelo" value={modelScore} weight="15%" icon={<Tag className="h-3 w-3 text-emerald-400" />} />
-          </div>
-
-          {/* Title Detail */}
-          {titleScore != null && (
-            <button onClick={() => setExpandedLayer(expandedLayer === 'title' ? null : 'title')} className="w-full text-left">
-              <div className="flex items-center justify-between p-2 rounded-md bg-slate-800/30 border border-slate-700/30 hover:bg-slate-800/50 transition-colors">
-                <div className="flex items-center gap-2">
-                  <Type className="h-3.5 w-3.5 text-violet-400" />
-                  <span className="text-xs text-slate-300">Título</span>
-                  <span className={`text-xs font-mono ${titleScore >= 70 ? 'text-emerald-400' : titleScore >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{titleScore}</span>
-                </div>
-                <span className="text-[10px] text-slate-500">{item.title?.length || 0}/60 chars</span>
-              </div>
-            </button>
-          )}
-
-          {/* Description Detail */}
-          {descScore != null && (
-            <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/30">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-3.5 w-3.5 text-cyan-400" />
-                  <span className="text-xs text-slate-300">Descrição</span>
-                  <span className={`text-xs font-mono ${descScore >= 70 ? 'text-emerald-400' : descScore >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{descScore}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {descLength != null && (
-                    <span className={`text-[10px] ${descLength >= 500 ? 'text-emerald-400' : descLength >= 300 ? 'text-amber-400' : 'text-red-400'}`}>
-                      {descLength} chars {descLength >= 500 ? '✓' : descLength > 0 ? `(ideal: 500+)` : '(vazia)'}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Attributes Detail */}
-          {attrScore != null && (
-            <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/30">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <ClipboardList className="h-3.5 w-3.5 text-amber-400" />
-                  <span className="text-xs text-slate-300">Ficha Técnica</span>
-                  <span className={`text-xs font-mono ${attrScore >= 70 ? 'text-emerald-400' : attrScore >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{attrScore}</span>
-                </div>
-              </div>
-              {(missingAttrs.length > 0 || weakAttrs.length > 0) && (
-                <div className="mt-1 space-y-1">
-                  {missingAttrs.length > 0 && (
-                    <div className="text-[10px] text-red-400">
-                      Faltantes: {missingAttrs.slice(0, 5).join(', ')}{missingAttrs.length > 5 ? ` +${missingAttrs.length - 5}` : ''}
-                    </div>
-                  )}
-                  {weakAttrs.length > 0 && (
-                    <div className="text-[10px] text-amber-400">
-                      Genéricos: {weakAttrs.slice(0, 3).join(', ')}{weakAttrs.length > 3 ? ` +${weakAttrs.length - 3}` : ''}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Model Detail */}
-          {modelScore != null && (
-            <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/30">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Tag className="h-3.5 w-3.5 text-emerald-400" />
-                  <span className="text-xs text-slate-300">Modelo</span>
-                  <span className={`text-xs font-mono ${modelScore >= 70 ? 'text-emerald-400' : modelScore >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{modelScore}</span>
-                </div>
-                <span className="text-[10px] text-slate-500">{modelValue || 'não informado'}</span>
-              </div>
-            </div>
-          )}
+        <div className="space-y-2">
+          {/* 4-layer expandable cards */}
+          <ExpandableLayerCard layerKey="title" label="Título" value={titleScore} weight="40%" icon={<Type className="h-3.5 w-3.5" />} iconColor="text-violet-400" />
+          <ExpandableLayerCard layerKey="description" label="Descrição" value={descScore} weight="25%" icon={<FileText className="h-3.5 w-3.5" />} iconColor="text-cyan-400" />
+          <ExpandableLayerCard layerKey="attributes" label="Ficha Técnica" value={attrScore} weight="20%" icon={<ClipboardList className="h-3.5 w-3.5" />} iconColor="text-amber-400" />
+          <ExpandableLayerCard layerKey="model" label="Modelo" value={modelScore} weight="15%" icon={<Tag className="h-3.5 w-3.5" />} iconColor="text-emerald-400" />
 
           {/* Coverage ratio */}
           {coverageRatio != null && totalKws > 0 && (
-            <div className="flex items-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center gap-2 text-xs text-slate-400 pt-1">
               <Target className="h-3 w-3" />
               <span>Cobertura de keywords: <strong className={coverageRatio >= 60 ? "text-emerald-400" : coverageRatio >= 30 ? "text-amber-400" : "text-red-400"}>{coverageRatio}%</strong></span>
             </div>
@@ -1055,7 +1141,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             </div>
           )}
 
-          {/* Interactive keywords: Found */}
+          {/* Fallback keyword lists when no details */}
           {foundKws.length > 0 && !seo.details?.length && (
             <div>
               <div className="text-xs font-medium text-emerald-400 mb-1.5 flex items-center gap-1">
@@ -1073,8 +1159,6 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
               </div>
             </div>
           )}
-
-          {/* Interactive keywords: Missing */}
           {missingKws.length > 0 && !seo.details?.length && (
             <div>
               <div className="text-xs font-medium text-amber-400 mb-1.5 flex items-center gap-1">
@@ -1108,34 +1192,14 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           )}
 
           {/* Validation prompt */}
-          {(foundKws.length > 0 || missingKws.length > 0) && (
+          {(foundKws.length > 0 || missingKws.length > 0 || (seo.details && seo.details.length > 0)) && (
             <div className="p-2 rounded-md bg-cyan-500/5 border border-cyan-500/15 text-xs text-cyan-300">
               <Sparkles className="h-3 w-3 inline mr-1" />
               Selecione as palavras que representam seu produto. Use 👍/👎 para refinar a análise e gerar títulos mais precisos.
             </div>
           )}
 
-          {/* Issues & Suggestions */}
-          {issues.length > 0 && (
-            <div>
-              <div className="text-xs font-medium text-slate-400 mb-1">Problemas detectados</div>
-              <ul className="space-y-0.5 text-xs text-slate-400">
-                {issues.map((issue, i) => <li key={i} className="flex items-start gap-1"><span className="text-red-400 mt-0.5">•</span>{issue}</li>)}
-              </ul>
-            </div>
-          )}
-          {suggestions.length > 0 && (
-            <div>
-              <div className="text-xs font-medium text-cyan-400 mb-1 flex items-center gap-1">
-                <Lightbulb className="h-3 w-3" /> Ações recomendadas
-              </div>
-              <ul className="space-y-0.5 text-xs text-slate-400">
-                {suggestions.map((s, i) => <li key={i} className="flex items-start gap-1"><span className="text-cyan-400 mt-0.5">→</span>{s}</li>)}
-              </ul>
-            </div>
-          )}
-
-          {foundKws.length === 0 && missingKws.length === 0 && issues.length === 0 && (
+          {foundKws.length === 0 && missingKws.length === 0 && !seo.details?.length && (seo.issues || []).length === 0 && (
             <p className="text-xs text-slate-500 text-center py-2">Execute "Atualizar Dados" para gerar a análise SEO.</p>
           )}
         </div>
@@ -1176,7 +1240,6 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
 
           {titleData && (
             <>
-              {/* Best suggestion */}
               {titleData.best && (
                 <div className="p-2.5 rounded-md bg-violet-500/5 border border-violet-500/20">
                   <div className="flex items-center justify-between mb-1">
@@ -1189,17 +1252,13 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                     </div>
                   </div>
                   <p className="text-sm text-violet-200 font-medium">{titleData.best.title}</p>
-                  <button
-                    onClick={() => copyToClipboard(titleData.best!.title)}
-                    className="mt-1.5 flex items-center gap-1 text-[10px] text-violet-400 hover:text-violet-300"
-                  >
+                  <button onClick={() => copyToClipboard(titleData.best!.title)} className="mt-1.5 flex items-center gap-1 text-[10px] text-violet-400 hover:text-violet-300">
                     {copiedTitle === titleData.best.title ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                     {copiedTitle === titleData.best.title ? "Copiado!" : "Copiar título"}
                   </button>
                 </div>
               )}
 
-              {/* Other suggestions */}
               {titleData.suggestions.length > 1 && (
                 <div>
                   <div className="text-xs font-medium text-slate-400 mb-1.5">Outras variações</div>
@@ -1210,10 +1269,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                           <p className="text-xs text-slate-300 truncate">{sug.title}</p>
                           <span className="text-[10px] text-slate-500">{sug.length}/60 · Score {sug.score}</span>
                         </div>
-                        <button
-                          onClick={() => copyToClipboard(sug.title)}
-                          className="ml-2 p-1 rounded hover:bg-slate-700/50 flex-shrink-0"
-                        >
+                        <button onClick={() => copyToClipboard(sug.title)} className="ml-2 p-1 rounded hover:bg-slate-700/50 flex-shrink-0">
                           {copiedTitle === sug.title ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3 text-slate-400" />}
                         </button>
                       </div>
@@ -1222,7 +1278,6 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                 </div>
               )}
 
-              {/* Title issues */}
               {titleData.issues.length > 0 && (
                 <div>
                   <div className="text-xs font-medium text-amber-400 mb-1">Problemas do título atual</div>
