@@ -1372,16 +1372,23 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           {/* Discarded keywords (not relevant to this product) */}
           {discardedCount > 0 && (
             <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/20">
-              <div className="text-[10px] text-slate-500 flex items-center gap-1">
+              <div className="text-[10px] text-slate-500 flex items-center gap-1 mb-1">
                 <Filter className="h-2.5 w-2.5" />
-                {discardedCount} palavras da categoria foram ignoradas por não terem relação com este produto.
+                {discardedCount} palavras da categoria foram descartadas por irrelevância ao produto
               </div>
               {discardedKws.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  {discardedKws.slice(0, 8).map((kw) => (
-                    <span key={kw} className="text-[10px] text-slate-600 bg-slate-800/50 px-1.5 py-0.5 rounded">{kw}</span>
-                  ))}
-                  {discardedKws.length > 8 && <span className="text-[10px] text-slate-600">+{discardedKws.length - 8} mais</span>}
+                <div className="space-y-0.5 max-h-24 overflow-y-auto">
+                  {discardedKws.slice(0, 12).map((kw: any, i: number) => {
+                    const kwText = typeof kw === 'string' ? kw : kw.keyword;
+                    const reason = typeof kw === 'object' ? kw.reason_label : null;
+                    return (
+                      <div key={i} className="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-slate-800/50">
+                        <span className="text-slate-600 truncate">{kwText}</span>
+                        {reason && <span className="text-red-400/60 text-[9px] flex-shrink-0 ml-2">{reason}</span>}
+                      </div>
+                    );
+                  })}
+                  {discardedKws.length > 12 && <span className="text-[10px] text-slate-600 px-1.5">+{discardedKws.length - 12} mais</span>}
                 </div>
               )}
             </div>
