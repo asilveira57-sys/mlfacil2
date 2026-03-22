@@ -1754,7 +1754,7 @@ async function handleEnrichSales(supabase: any, sellerId: string) {
 // ============================================================================
 
 const HEALTH_WEIGHTS: Record<string, number> = {
-  traffic: 20, conversion: 25, content: 15, stock: 15, logistics: 10, catalog: 5, coverage: 10,
+  traffic: 15, conversion: 20, content: 10, stock: 15, logistics: 10, catalog: 5, coverage: 5, seo: 20,
 };
 
 function classifyLogisticType(item: any): { isFull: boolean; confirmed: boolean; logisticLabel: string } {
