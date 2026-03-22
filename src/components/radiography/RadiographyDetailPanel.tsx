@@ -350,6 +350,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
     });
   }
 
+  return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl p-0 bg-slate-900 border-slate-700">
         {/* HEADER */}
