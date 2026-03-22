@@ -1,64 +1,49 @@
 
-Plano corretivo imediato — Radiografia (Atacado + Rota + Título + Modelo + Mídia)
+Plano corretivo definitivo — Título sem variação no Radiografia
 
-Diagnóstico (confirmado)
-- Do I know what the issue is? Sim.
-- Atacado falso-negativo: o item MLB4076266967 está com `wholesale_analysis_json.status = not_configured`, mas a detecção atual usa critérios errados para PxQ.
-- Causa raiz técnica: `analyzeWholesaleForItem` procura `sale_terms` com `WHOLESALE/QUANTITY_DISCOUNTS` e `prices.type='bulk'`; a doc oficial de PxQ indica detecção por:
-  - tag `standard_price_by_quantity` no item
-  - preços `type: "standard"` com `conditions.min_purchase_unit` + `context_restrictions` contendo `user_type_business`.
-- 404 do botão: `RadiographyDetailPanel` abre `/ferramentas/preco-atacado`, rota inexistente (rota real é `/atacado`).
-- Título ainda inflado: `generate_title` e parte do SEO dependem de variação via `variations.attribute_combinations`; no item em questão a limpeza não remove “Branco Nenhum” (retorno atual: `variation_attrs_excluded: []`).
-- Modelo “100” com pouco conteúdo: regra atual considera “ok” com `length >= 3`, sem avaliar profundidade semântica mínima.
-- Mídia: backend já avalia todas imagens, mas a UI ainda não deixa isso óbvio no estado fechado.
+Do I know what the issue is? Sim.
 
-Implementação (cirúrgica)
-1) Corrigir detecção de atacado (prioridade máxima)
+Diagnóstico confirmado (com evidência)
+- O item MLB4076266967 continua salvo com 81 caracteres em `listing_health_current.title` e `seo_analysis_json.title_analysis.length=81`.
+- A limpeza atual depende de `variations.attribute_combinations`; quando o ML “concatena” sufixo no título (ex.: “Branco Nenhum”) sem variação útil para extração, a limpeza não acontece.
+- O frontend ainda usa `item.title` bruto em pontos críticos do card (“67/60”), então o erro visual reaparece mesmo após tentativas parciais.
+- No gerador de títulos há inconsistência de variável no código atual (`variationAttrs`), que precisa ser corrigida para evitar regressão.
+
+Correção (cirúrgica e única fonte de verdade)
+1) Criar normalizador único de título canônico no backend
 - Arquivo: `supabase/functions/radiography-collector/index.ts`
-- Em `analyzeWholesaleForItem`:
-  - detectar atacado por `item.tags` contendo `standard_price_by_quantity`;
-  - detectar faixas por `/items/{id}/prices` lendo nós `type="standard"` com `conditions.min_purchase_unit` e `context_restrictions` com `user_type_business`;
-  - manter fallback interno (tabelas) apenas se API não responder.
-- Ajustar status/mensagens:
-  - `active`: “Ativo no Mercado Livre”
-  - `not_configured`: “Preço de atacado não configurado”
-  - nunca mostrar texto ambíguo “não configurado (CNPJ)”.
-- Adicionar logs obrigatórios por item: fonte da detecção, quantidade de faixas, motivo do status.
+- Nova função utilitária (ex.: `getCanonicalMlTitle`) com regra fixa:
+  - Se `rawTitle.length <= 60`: manter.
+  - Se `> 60`: remover sufixos de variação no final (nome + valor), em múltiplas passagens.
+  - Se ainda `> 60`: tentar remover sufixos de atributos finais comuns concatenados pelo ML (somente no fim do título).
+  - Fallback confiável: usar título de `meli_order_items_cache.title` quando houver match do mesmo item/seller e tamanho válido.
+  - Guarda final obrigatória: garantir `canonical.length <= 60` (corte por palavra, não no meio).
+- Retornar metadados de normalização: estratégia aplicada, tokens removidos, tamanho antes/depois.
 
-2) Corrigir rota quebrada (404)
+2) Aplicar o título canônico em TODOS os fluxos
+- `handleAnalyze`: persistir `listing_health_current.title` com título canônico (não bruto).
+- `analyzeSeoForItems`: usar título canônico para `computeTitleSeo` e também para aderência (hoje há uso de título bruto em parte do cálculo).
+- `handleGenerateTitle`: partir do título canônico e corrigir a inconsistência de variável (`variationAttrs`) para estabilizar geração.
+
+3) Ajustar frontend para nunca reintroduzir título bruto
 - Arquivo: `src/components/radiography/RadiographyDetailPanel.tsx`
-  - trocar CTA para `/atacado` (com query de contexto do item).
-- Arquivo: `src/App.tsx`
-  - criar alias de compatibilidade `/ferramentas/preco-atacado` → redirect para `/atacado` (evita regressão de links antigos).
+- Em “Título atual” e no gerador:
+  - Priorizar tamanho/texto canônico vindo da análise (`title_analysis.length` + título canônico persistido).
+  - Não disparar alerta vermelho se canônico <= 60.
+  - Exibir observação didática quando houve limpeza de variação (“Variação removida do cálculo”).
 
-3) Corrigir título real (sem variação) para SEO e geração
-- Arquivo: `supabase/functions/radiography-collector/index.ts`
-- Criar função única `sanitizeListingTitle(...)` reutilizada em:
-  - `handleAnalyze` (persistência em `listing_health_current.title`)
-  - `analyzeSeoForItems` (cálculo de `title_score`)
-  - `handleGenerateTitle` (current_title/current_length)
-- Estratégia de limpeza:
-  - remover sufixos de variação por combinações + atributos típicos de variação no final do título (cor, padrão, voltagem, etc.), sem remover termos centrais.
-- Resultado esperado: item não penalizado por “Branco Nenhum” quando isso for variação.
+4) Logging obrigatório para auditoria
+- Registrar por item: `raw_length`, `canonical_length`, `normalization_strategy`, `removed_suffix_tokens`, `applied_fallback`.
+- Assim, se voltar a ocorrer, fica rastreável sem tentativa cega.
 
-4) Modelo mais exigente (didático/acionável)
-- Arquivo: `supabase/functions/radiography-collector/index.ts` (`computeModelSeo`)
-- Nova régua:
-  - curto demais (ex.: 3–12) = score baixo/médio;
-  - só recebe score alto quando for específico + pesquisável + comprimento útil.
-- Incluir em `model_analysis`:
-  - `length`, `length_status`, `space_usage_hint` com recomendação clara para aproveitar melhor o campo.
+Validação de aceite (obrigatória)
+- MLB4076266967 deve aparecer <= 60 no card e sem alerta de excesso.
+- “Branco Nenhum” não pode entrar no cálculo de caracteres.
+- Gerar Títulos deve funcionar e retornar `current_length <= 60`.
+- Um item sem concatenação indevida deve permanecer sem alteração de conteúdo útil.
+- Reprocessamento completo deve atualizar banco + UI de forma consistente (sem depender de refresh manual múltiplo).
 
-5) Mídia mais clara no frontend
-- Arquivo: `src/components/radiography/RadiographyDetailPanel.tsx`
-- Manter regra atual, mas exibir mais claramente:
-  - resumo “X/Y em 1200x1200”;
-  - lista por imagem visível com status (não só escondida em expansão).
-- Evitar ambiguidade entre “1ª imagem” e “resolução total”.
-
-Validação de aceite (com o item informado)
-- MLB4076266967 deve aparecer com atacado ativo (ou com motivo técnico explícito e logado se API negar).
-- Botão “Configurar preço de atacado” não pode abrir 404.
-- Título no SEO e no gerador deve usar título sem sufixo de variação.
-- Modelo curto não pode permanecer “100” automaticamente.
-- Card de mídia deve mostrar claramente a checagem de todas as imagens.
+Arquivos impactados
+- `supabase/functions/radiography-collector/index.ts`
+- `src/components/radiography/RadiographyDetailPanel.tsx`
+- (se necessário para tipagem/consumo) `src/hooks/useRadiographyData.ts`
