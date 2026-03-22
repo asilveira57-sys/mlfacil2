@@ -2353,8 +2353,12 @@ Deno.serve(async (req) => {
         result = await handleAnalyze(supabase, seller_id, body.item_id);
         break;
 
+      case "refresh_keywords":
+        result = await handleRefreshMarketKeywords(supabase, body.category_id);
+        break;
+
       default:
-        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full, enrich_sales, analyze` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full, enrich_sales, analyze, refresh_keywords` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
