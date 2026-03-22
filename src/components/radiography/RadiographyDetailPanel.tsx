@@ -747,6 +747,76 @@ function EvolutionPill({ label, delta, isCurrency }: { label: string; delta: num
   );
 }
 
+// --- Media Card with per-image resolution analysis ---
+function MediaCard({ item }: { item: HealthCurrentItem }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Try to get per-image data from seo_analysis_json or media analysis
+  const mediaJson = (item as any).media_analysis_json;
+  const perImage: Array<{ image_index: number; width: number; height: number; is_1200x1200: boolean; is_primary: boolean; resolution_status: string; recommendation: string | null }> = mediaJson?.per_image || [];
+  const imagesAt1200 = mediaJson?.images_at_1200 ?? perImage.filter(i => i.is_1200x1200).length;
+  const totalImages = mediaJson?.total_images ?? (item.photos_count ?? 0);
+  const resLabel = totalImages > 0 ? `${imagesAt1200}/${totalImages} em 1200x1200` : "Sem dados";
+  const resColor = totalImages === 0 ? "neutral" : imagesAt1200 === totalImages ? "good" : imagesAt1200 > 0 ? "warning" : "bad";
+
+  return (
+    <SectionCard title="Mídia" icon={<Camera className="h-4 w-4 text-violet-400" />}>
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${
+          (item.photos_count ?? 0) >= 5 ? factorStatusStyles.good :
+          (item.photos_count ?? 0) >= 3 ? factorStatusStyles.warning : factorStatusStyles.bad
+        }`}>
+          <Image className="h-3.5 w-3.5" />
+          <div><span className="font-medium">Fotos</span><span className="ml-1.5 opacity-80">{item.photos_count ?? "?"}</span></div>
+        </div>
+        <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${item.has_video ? factorStatusStyles.good : factorStatusStyles.warning}`}>
+          <Video className="h-3.5 w-3.5" />
+          <div><span className="font-medium">Vídeo</span><span className="ml-1.5 opacity-80">{item.has_video ? "Sim" : "Não"}</span></div>
+        </div>
+        <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${factorStatusStyles.neutral}`}>
+          <Image className="h-3.5 w-3.5" />
+          <div><span className="font-medium">1ª imagem</span><span className="ml-1.5 opacity-80">{item.thumbnail ? "OK" : "Sem"}</span></div>
+        </div>
+        <div className={`flex items-center gap-2 px-2.5 py-2 rounded-md border text-xs ${factorStatusStyles[resColor as keyof typeof factorStatusStyles]}`}>
+          <Scan className="h-3.5 w-3.5" />
+          <div><span className="font-medium">Resolução</span><span className="ml-1.5 opacity-80">{resLabel}</span></div>
+        </div>
+      </div>
+
+      {/* Per-image detail (expandable) */}
+      {perImage.length > 0 && (
+        <div className="mt-2">
+          <button onClick={() => setExpanded(!expanded)} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-300">
+            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {expanded ? "Ocultar detalhes" : "Ver detalhes por imagem"}
+          </button>
+          {expanded && (
+            <div className="mt-1.5 space-y-1">
+              {perImage.map((img) => (
+                <div key={img.image_index} className={`flex items-center justify-between px-2 py-1 rounded text-[11px] border ${
+                  img.resolution_status === 'ok' ? 'border-emerald-500/20 text-emerald-400' :
+                  img.resolution_status === 'unknown' ? 'border-slate-600 text-slate-500' :
+                  'border-amber-500/20 text-amber-400'
+                }`}>
+                  <span>Imagem {img.image_index}{img.is_primary ? " (principal)" : ""}</span>
+                  <span className="font-mono">{img.width > 0 ? `${img.width}x${img.height}` : "?"} — {img.resolution_status === 'ok' ? 'OK' : img.resolution_status === 'unknown' ? 'Indisponível' : 'Revisar'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recommendations */}
+      {totalImages > 0 && imagesAt1200 < totalImages && (
+        <p className="text-[10px] text-amber-300 mt-2">
+          Algumas imagens estão fora do padrão 1200x1200 px. Imagens secundárias podem ser ambientadas, mas a resolução ideal continua sendo 1200x1200 px.
+        </p>
+      )}
+    </SectionCard>
+  );
+}
+
 // --- Interactive SEO Card with keyword toggles + title generator ---
 interface TitleSuggestion {
   title: string;
