@@ -10998,13 +10998,6 @@ export type Database = {
             referencedRelation: "system_modules"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "plan_modules_plan_id_fkey"
-            columns: ["plan_id"]
-            isOneToOne: false
-            referencedRelation: "plan_tiers"
-            referencedColumns: ["id"]
-          },
         ]
       }
       plan_offers: {
