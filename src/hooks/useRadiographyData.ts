@@ -184,6 +184,8 @@ export interface HealthCurrentItem {
   // Wholesale
   wholesale_score: number | null;
   wholesale_analysis_json: WholesaleAnalysis | null;
+  // Media analysis
+  media_analysis_json: any | null;
   // Diagnostic
   diagnostic_text: string | null;
   // Period-based metrics (from RPC)
