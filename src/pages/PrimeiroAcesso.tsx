@@ -7,8 +7,10 @@ import { useCompanyLogoUpload } from "@/hooks/useCompanyLogoUpload";
 import {
   BarChart3, Loader2, CheckCircle2, Circle, ArrowRight, ArrowLeft,
   Rocket, Building2, Upload, ImageIcon, Settings2, Link2, Database, Shield,
+  Layers, Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +27,7 @@ interface OnboardingStepDef {
 
 const STEPS: OnboardingStepDef[] = [
   { id: "validate",  title: "Validar conta",               description: "Verificação de sessão e dados básicos",       icon: Shield },
+  { id: "plan",      title: "Como vai usar o sistema",     description: "Escolha o tipo de uso do sistema",            icon: Layers },
   { id: "company",   title: "Dados da empresa",            description: "Criar ou confirmar sua empresa no sistema",   icon: Building2 },
   { id: "logo",      title: "Logomarca da empresa",        description: "Personalize relatórios e documentos",         icon: ImageIcon, optional: true },
   { id: "prefs",     title: "Preferências iniciais",       description: "Configurações base do seu ambiente",          icon: Settings2 },
@@ -32,6 +35,9 @@ const STEPS: OnboardingStepDef[] = [
   { id: "import",    title: "Importação inicial",          description: "Importar últimos 30 dias de operação",        icon: Database },
   { id: "activate",  title: "Ativar ambiente",             description: "Liberar acesso ao painel principal",          icon: Rocket },
 ];
+
+// ZPL plan tier ID — must match DB
+const ZPL_PLAN_ID = 'a0000000-0000-0000-0000-000000000001';
 
 // ── Persisted state ───────────────────────────────────────────────
 interface OnboardingProgress {
@@ -59,7 +65,7 @@ function saveProgress(p: OnboardingProgress) {
 // ── Main Component ────────────────────────────────────────────────
 const PrimeiroAcesso = () => {
   const navigate = useNavigate();
-  const { loading: accessLoading, isAuthenticated, requiresOnboarding, updateOnboarding, refetch } = useUserAccess();
+  const { loading: accessLoading, isAuthenticated, requiresOnboarding, updateOnboarding, selectPlan, refetch } = useUserAccess();
   const { registerEvent } = useOnboardingEvents();
   const { uploadLogo, uploading: logoUploading, error: logoError } = useCompanyLogoUpload();
 
@@ -69,6 +75,7 @@ const PrimeiroAcesso = () => {
   const [companyNameInput, setCompanyNameInput] = useState(progress.companyName);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(progress.logoUrl);
+  const [selectingPlan, setSelectingPlan] = useState(false);
 
   const currentStep = progress.currentStep;
   const completedSteps = progress.completedSteps;
@@ -198,6 +205,44 @@ const PrimeiroAcesso = () => {
     registerEvent("company_logo_skipped", {}, progress.companyId);
   };
 
+  // ── Plan choice ──
+  const handleSelectPlanChoice = async (choice: 'full' | 'zpl') => {
+    setSelectingPlan(true);
+    try {
+      if (choice === 'zpl') {
+        // Set the ZPL plan
+        const ok = await selectPlan(ZPL_PLAN_ID);
+        if (!ok) throw new Error('Failed to select ZPL plan');
+        
+        // Also create user_plan_assignments record
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await (supabase as any).from('user_plan_assignments').insert({
+            user_id: user.id,
+            plan_tier_id: ZPL_PLAN_ID,
+            status: 'active',
+            notes: 'Selected during onboarding',
+            created_by: user.id,
+          });
+        }
+
+        registerEvent("plan_selected", { plan: 'zpl', plan_id: ZPL_PLAN_ID }, progress.companyId);
+      } else {
+        // Full plan will be selected later via billing flow
+        registerEvent("plan_selected", { plan: 'full' }, progress.companyId);
+      }
+      
+      setProgress(prev => ({ ...prev, planChoice: choice } as any));
+      completeStep("plan");
+      toast.success(choice === 'zpl' ? "Modo ZPL selecionado!" : "Modo completo selecionado!");
+    } catch (err) {
+      console.error("[Onboarding] Plan selection error:", err);
+      toast.error("Erro ao selecionar modo de uso.");
+    } finally {
+      setSelectingPlan(false);
+    }
+  };
+
   // ── Preferences ──
   const handleSavePrefs = () => {
     registerEvent("preferences_configured", {}, progress.companyId);
@@ -266,6 +311,63 @@ const PrimeiroAcesso = () => {
             <Button onClick={() => goToStep(1)} className="gap-2">
               Continuar <ArrowRight className="w-4 h-4" />
             </Button>
+          </div>
+         );
+
+      case "plan":
+        return (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-xl font-bold text-foreground mb-1">Como você vai usar o sistema?</h3>
+              <p className="text-sm text-muted-foreground">
+                Escolha o modo de uso para configurarmos os módulos ideais para você.
+              </p>
+            </div>
+            <div className="grid gap-4">
+              <Card 
+                className="cursor-pointer hover:border-primary/50 transition-all hover:shadow-md border-2"
+                onClick={() => !selectingPlan && handleSelectPlanChoice('full')}
+              >
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <BarChart3 className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-foreground mb-1">Gerenciar vendas no Mercado Livre</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Dashboard completo, análises de vendas, radiografia de anúncios, publicidade, promoções e muito mais.
+                      </p>
+                      <p className="text-xs text-primary mt-2 font-medium">Requer conexão com Mercado Livre</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card 
+                className="cursor-pointer hover:border-primary/50 transition-all hover:shadow-md border-2"
+                onClick={() => !selectingPlan && handleSelectPlanChoice('zpl')}
+              >
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 bg-muted rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Printer className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-foreground mb-1">Usar apenas etiquetas e ferramentas (ZPL)</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Impressão de etiquetas, calculadora de precificação, comissões e outras ferramentas — sem necessidade de integração.
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-2">Sem integração com marketplace</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            {selectingPlan && (
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" /> Configurando...
+              </div>
+            )}
           </div>
         );
 

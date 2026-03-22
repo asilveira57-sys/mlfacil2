@@ -19177,6 +19177,62 @@ export type Database = {
         }
         Relationships: []
       }
+      user_plan_assignments: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          expires_at: string | null
+          id: string
+          is_trial: boolean
+          notes: string | null
+          plan_tier_id: string
+          starts_at: string
+          status: string
+          tenant_id: string | null
+          updated_at: string
+          updated_by: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          is_trial?: boolean
+          notes?: string | null
+          plan_tier_id: string
+          starts_at?: string
+          status?: string
+          tenant_id?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string | null
+          id?: string
+          is_trial?: boolean
+          notes?: string | null
+          plan_tier_id?: string
+          starts_at?: string
+          status?: string
+          tenant_id?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_plan_assignments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_preferences: {
         Row: {
           active_workspace_id: string | null
