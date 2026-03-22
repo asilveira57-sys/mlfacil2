@@ -1284,10 +1284,10 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           {seo.details && seo.details.length > 0 && (
             <div>
               <div className="text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1">
-                <Target className="h-3 w-3 text-cyan-400" /> Palavras da categoria ({seo.details.length})
+                <Target className="h-3 w-3 text-cyan-400" /> Palavras relevantes filtradas ({seo.details.length})
               </div>
               <div className="space-y-0.5 max-h-40 overflow-y-auto">
-                {seo.details.map((d, i) => {
+                {seo.details.map((d: any, i: number) => {
                   const matched = d.matched_overall ?? d.found_in_title ?? false;
                   const inTitle = d.matched_in_title ?? d.found_in_title ?? false;
                   const inDesc = d.matched_in_description ?? false;
@@ -1297,12 +1297,15 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                   if (inDesc) locationParts.push("descrição");
                   if (inAttrs) locationParts.push("atributos");
                   const locationText = matched ? locationParts.join(", ") : "ausente";
+                  const relLevel = d.relevance_level;
+                  const relBadge = relLevel === 'high' ? 'text-emerald-400' : relLevel === 'medium' ? 'text-cyan-400' : 'text-slate-500';
                   return (
                     <div key={i} className={`flex items-center justify-between px-2 py-1 rounded text-[11px] ${
                       matched ? 'bg-emerald-500/5 text-emerald-300' : 'bg-slate-800/30 text-slate-500'
                     }`}>
                       <span className="truncate">{d.keyword}</span>
                       <div className="flex items-center gap-2 flex-shrink-0">
+                        {relLevel && <span className={`text-[9px] font-medium ${relBadge}`}>{relLevel === 'high' ? 'alta' : 'média'}</span>}
                         <span className={`text-[10px] ${matched ? 'text-emerald-400' : 'text-red-400'}`}>{locationText}</span>
                         {d.weight != null && <span className="text-[9px] text-slate-600">{(d.weight * 100).toFixed(0)}%</span>}
                         <button onClick={() => handleKeywordFeedback(d.keyword, !(feedbackMap[d.keyword] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
@@ -1369,16 +1372,23 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           {/* Discarded keywords (not relevant to this product) */}
           {discardedCount > 0 && (
             <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/20">
-              <div className="text-[10px] text-slate-500 flex items-center gap-1">
+              <div className="text-[10px] text-slate-500 flex items-center gap-1 mb-1">
                 <Filter className="h-2.5 w-2.5" />
-                {discardedCount} palavras da categoria foram ignoradas por não terem relação com este produto.
+                {discardedCount} palavras da categoria foram descartadas por irrelevância ao produto
               </div>
               {discardedKws.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  {discardedKws.slice(0, 8).map((kw) => (
-                    <span key={kw} className="text-[10px] text-slate-600 bg-slate-800/50 px-1.5 py-0.5 rounded">{kw}</span>
-                  ))}
-                  {discardedKws.length > 8 && <span className="text-[10px] text-slate-600">+{discardedKws.length - 8} mais</span>}
+                <div className="space-y-0.5 max-h-24 overflow-y-auto">
+                  {discardedKws.slice(0, 12).map((kw: any, i: number) => {
+                    const kwText = typeof kw === 'string' ? kw : kw.keyword;
+                    const reason = typeof kw === 'object' ? kw.reason_label : null;
+                    return (
+                      <div key={i} className="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-slate-800/50">
+                        <span className="text-slate-600 truncate">{kwText}</span>
+                        {reason && <span className="text-red-400/60 text-[9px] flex-shrink-0 ml-2">{reason}</span>}
+                      </div>
+                    );
+                  })}
+                  {discardedKws.length > 12 && <span className="text-[10px] text-slate-600 px-1.5">+{discardedKws.length - 12} mais</span>}
                 </div>
               )}
             </div>

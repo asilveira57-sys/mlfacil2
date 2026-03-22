@@ -1281,13 +1281,48 @@ function assessKeywordRelevance(keyword: string, title: string, categoryName: st
   return "low";
 }
 
+// --- CATEGORY BLOCKLIST: cross-category pollution terms ---
+// These terms frequently leak from unrelated categories and must be auto-discarded
+const CATEGORY_BLOCKLIST = new Set([
+  // tech/computing
+  'notebook', 'ryzen', 'intel', 'computador', 'macbook', 'teclado', 'mouse', 'windows',
+  'gamer', 'monitor', 'processador', 'placa', 'video', 'ssd', 'hd', 'ram', 'wifi',
+  'bluetooth', 'smartphone', 'celular', 'tablet', 'iphone', 'samsung', 'xiaomi',
+  // automotive
+  'automotivo', 'carro', 'moto', 'pneu', 'oleo', 'freio', 'motor',
+  // food/kitchen
+  'salgados', 'alimento', 'comida', 'cozinha', 'panela', 'fogao',
+  // furniture/bathroom
+  'banheiro', 'quimico', 'sofa', 'colchao', 'cama', 'guarda roupa',
+  // industrial heavy
+  'container', 'pallet', 'empilhadeira', 'caminhao', 'trator',
+  // fashion
+  'vestido', 'sapato', 'tenis', 'bermuda', 'camiseta', 'calcado',
+  // appliances
+  'geladeira', 'microondas', 'lavadora', 'secadora', 'exaustor', 'vitrine',
+]);
+
+interface DiscardedKeyword {
+  keyword: string;
+  reason: string; // 'blocklist' | 'no_overlap' | 'empty_tokens' | 'low_relevance'
+}
+
+interface FilteredKeyword {
+  keyword: string;
+  normalized: string;
+  weight: number;
+  relevance_score: number; // 0-1
+  relevance_level: 'high' | 'medium'; // low is discarded
+}
+
 // --- CONTEXTUAL KEYWORD FILTER: only keep keywords relevant to the product ---
 function filterKeywordsByProductContext(
   catKeywords: Array<{ keyword: string; normalized: string; weight: number }>,
   productTokens: Set<string>,
-): { filtered: Array<{ keyword: string; normalized: string; weight: number }>; discarded: string[] } {
-  const filtered: Array<{ keyword: string; normalized: string; weight: number }> = [];
-  const discarded: string[] = [];
+): { filtered: FilteredKeyword[]; discarded: DiscardedKeyword[] } {
+  const filtered: FilteredKeyword[] = [];
+  const discarded: DiscardedKeyword[] = [];
+  const ptArray = [...productTokens];
 
   for (const kw of catKeywords) {
     const kwTokens = kw.normalized.split(" ").filter(w => {
@@ -1295,20 +1330,43 @@ function filterKeywordsByProductContext(
       if (MEASUREMENT_RE.test(w)) return true;
       return w.length > 2;
     });
-    if (kwTokens.length === 0) { discarded.push(kw.keyword); continue; }
+    if (kwTokens.length === 0) { discarded.push({ keyword: kw.keyword, reason: 'empty_tokens' }); continue; }
 
-    // A keyword is relevant if at least 1 of its tokens overlaps with any product token
-    const hasOverlap = kwTokens.some(kt =>
-      [...productTokens].some(pt => pt === kt || pt.includes(kt) || kt.includes(pt))
-    );
-
-    if (hasOverlap) {
-      filtered.push(kw);
-    } else {
-      discarded.push(kw.keyword);
+    // Check blocklist — any token in blocklist → auto-discard
+    const blockedToken = kwTokens.find(kt => CATEGORY_BLOCKLIST.has(kt));
+    if (blockedToken) {
+      discarded.push({ keyword: kw.keyword, reason: 'blocklist' });
+      continue;
     }
+
+    // Calculate relevance score: how many keyword tokens overlap with product tokens
+    let matchedTokens = 0;
+    for (const kt of kwTokens) {
+      const hasMatch = ptArray.some(pt => pt === kt || pt.includes(kt) || kt.includes(pt));
+      if (hasMatch) matchedTokens++;
+    }
+
+    const overlapRatio = matchedTokens / kwTokens.length;
+
+    // Threshold: at least 35% token overlap (stricter than before)
+    if (overlapRatio < 0.35) {
+      discarded.push({ keyword: kw.keyword, reason: 'no_overlap' });
+      continue;
+    }
+
+    // Calculate final relevance score combining overlap + weight
+    const relevanceScore = (overlapRatio * 0.5) + (Math.min(kw.weight, 1) * 0.3) + (matchedTokens > 0 ? 0.2 : 0);
+    const relevanceLevel = relevanceScore >= 0.55 ? 'high' : 'medium';
+
+    filtered.push({
+      ...kw,
+      relevance_score: Number(relevanceScore.toFixed(3)),
+      relevance_level: relevanceLevel,
+    });
   }
 
+  // Sort by relevance score descending, take top 20
+  filtered.sort((a, b) => b.relevance_score - a.relevance_score);
   return { filtered: filtered.slice(0, 20), discarded };
 }
 
@@ -2109,13 +2167,28 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
 
       // Category keyword details with match locations
-      const categoryKeywordDetails = adherence.details.map(d => ({
-        keyword: d.keyword,
-        weight: d.weight,
-        matched_in_title: d.matched_in_title,
-        matched_in_description: d.matched_in_description,
-        matched_in_attributes: d.matched_in_attributes,
-        matched_overall: d.matched_overall,
+      const categoryKeywordDetails = adherence.details.map(d => {
+        const filteredKw = catKeywords.find(k => k.keyword === d.keyword);
+        return {
+          keyword: d.keyword,
+          weight: d.weight,
+          relevance_score: filteredKw?.relevance_score ?? null,
+          relevance_level: filteredKw?.relevance_level ?? null,
+          matched_in_title: d.matched_in_title,
+          matched_in_description: d.matched_in_description,
+          matched_in_attributes: d.matched_in_attributes,
+          matched_overall: d.matched_overall,
+        };
+      });
+
+      // Discarded keywords with reasons
+      const discardedWithReasons = discardedKeywords.slice(0, 20).map(dk => ({
+        keyword: dk.keyword,
+        reason: dk.reason,
+        reason_label: dk.reason === 'blocklist' ? 'Fora do nicho' :
+                      dk.reason === 'no_overlap' ? 'Sem relação com o produto' :
+                      dk.reason === 'empty_tokens' ? 'Sem termos válidos' :
+                      'Relevância baixa',
       }));
 
       seoRows.push({ seller_id: sellerId, item_id: itemId, tenant_id: tenantId,
@@ -2183,9 +2256,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           attributes_score: attrResult.score, model_score: modelResult.score,
           keyword_score: adherence.score,
           description_length: descResult.length, keyword_density: descResult.density,
-           total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
+          total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
           total_raw_keywords: rawCatKeywords.length, discarded_count: discardedKeywords.length,
-          discarded_keywords: discardedKeywords.slice(0, 15),
+          discarded_keywords: discardedWithReasons,
           missing_attributes: attrResult.missing.slice(0, 5), weak_attributes: attrResult.weak.slice(0, 5),
           model_value: modelResult.modelValue,
           irrelevant_keywords: adherence.irrelevant.slice(0, 10),
