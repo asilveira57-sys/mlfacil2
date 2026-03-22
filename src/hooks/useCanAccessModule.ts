@@ -7,13 +7,18 @@ import { useCallback, useMemo } from 'react';
  * Complementary access layer: checks if the user's active plan includes a given module.
  * Works alongside existing trial/billing/RBAC — never replaces them.
  *
+ * Sources (in priority order):
+ * 1. user_plan_assignments (status = 'active')
+ * 2. user_access_state.selected_plan_id (fallback)
+ *
  * If no plan_modules are configured for the user's plan, access is granted (fail-open).
  */
 
 interface UserPlanModules {
   planCode: string | null;
+  planGroup: string | null;
   allowedModuleKeys: Set<string>;
-  hasPlanModuleConfig: boolean; // true if plan_modules rows exist for this plan
+  hasPlanModuleConfig: boolean;
 }
 
 export function useCanAccessModule() {
@@ -23,27 +28,45 @@ export function useCanAccessModule() {
   const { data, isLoading } = useQuery({
     queryKey: ['user-plan-modules', userId],
     queryFn: async (): Promise<UserPlanModules> => {
-      if (!userId) return { planCode: null, allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
+      if (!userId) return { planCode: null, planGroup: null, allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
 
-      // 1. Get user's active plan via user_access_state -> selected_plan
-      // Or fallback: check tenant_subscriptions for active subscription
-      const { data: accessState } = await supabase
-        .from('user_access_state')
-        .select('selected_plan_id')
+      // 1. Try user_plan_assignments first (active assignment)
+      let planId: string | null = null;
+
+      const { data: assignment } = await supabase
+        .from('user_plan_assignments' as any)
+        .select('plan_tier_id')
         .eq('user_id', userId)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      const planId = accessState?.selected_plan_id;
-      if (!planId) return { planCode: null, allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
+      if (assignment?.plan_tier_id) {
+        planId = assignment.plan_tier_id;
+      }
 
-      // 2. Get plan code
+      // 2. Fallback to user_access_state.selected_plan_id
+      if (!planId) {
+        const { data: accessState } = await supabase
+          .from('user_access_state')
+          .select('selected_plan_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        planId = accessState?.selected_plan_id || null;
+      }
+
+      if (!planId) return { planCode: null, planGroup: null, allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
+
+      // 3. Get plan info
       const { data: tier } = await supabase
         .from('plan_tiers')
-        .select('code')
+        .select('code, plan_group')
         .eq('id', planId)
         .maybeSingle();
 
-      // 3. Get enabled modules for this plan
+      // 4. Get enabled modules for this plan
       const { data: planModules } = await supabase
         .from('plan_modules')
         .select('module_id, is_enabled')
@@ -51,10 +74,10 @@ export function useCanAccessModule() {
         .eq('is_enabled', true);
 
       if (!planModules || planModules.length === 0) {
-        return { planCode: tier?.code || null, allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
+        return { planCode: tier?.code || null, planGroup: tier?.plan_group || null, allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
       }
 
-      // 4. Resolve module keys
+      // 5. Resolve module keys
       const moduleIds = planModules.map(pm => pm.module_id);
       const { data: modules } = await supabase
         .from('system_modules')
@@ -62,7 +85,7 @@ export function useCanAccessModule() {
         .in('id', moduleIds);
 
       const keys = new Set((modules || []).map(m => m.key));
-      return { planCode: tier?.code || null, allowedModuleKeys: keys, hasPlanModuleConfig: true };
+      return { planCode: tier?.code || null, planGroup: tier?.plan_group || null, allowedModuleKeys: keys, hasPlanModuleConfig: true };
     },
     enabled: !!userId,
     staleTime: 5 * 60 * 1000,
@@ -78,6 +101,7 @@ export function useCanAccessModule() {
   return {
     canAccessModule,
     planCode: data?.planCode || null,
+    planGroup: data?.planGroup || null,
     hasPlanConfig: data?.hasPlanModuleConfig || false,
     allowedModules: data?.allowedModuleKeys || new Set<string>(),
     isLoading,
