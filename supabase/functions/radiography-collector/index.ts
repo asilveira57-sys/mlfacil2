@@ -2302,17 +2302,17 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
     }
     console.log(`[rad-collector] SEO: Fetched extras for ${itemExtras.size}/${itemDetails.size} items`);
 
-    // 4. Get keywords from market_keywords_cache
+    // 4. Get keywords from market_keywords_cache (with ML enrichment data)
     const categories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
-    const keywordsByCategory = new Map<string, Array<{ keyword: string; normalized: string; weight: number }>>();
+    const keywordsByCategory = new Map<string, Array<{ keyword: string; normalized: string; weight: number; source?: string; in_autocomplete?: boolean; in_top_listings?: boolean }>>();
     for (let i = 0; i < categories.length; i += 50) {
       const { data } = await supabase.from('market_keywords_cache')
-        .select('category_id, keyword, normalized_keyword, weight')
+        .select('category_id, keyword, normalized_keyword, weight, source, in_autocomplete, in_top_listings')
         .in('category_id', categories.slice(i, i + 50))
         .order('weight', { ascending: false });
       if (data) for (const r of data) {
         const arr = keywordsByCategory.get(r.category_id) || [];
-        arr.push({ keyword: r.keyword, normalized: r.normalized_keyword, weight: r.weight });
+        arr.push({ keyword: r.keyword, normalized: r.normalized_keyword, weight: r.weight, source: r.source || 'sales', in_autocomplete: r.in_autocomplete || false, in_top_listings: r.in_top_listings || false });
         keywordsByCategory.set(r.category_id, arr);
       }
     }
