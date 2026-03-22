@@ -3880,7 +3880,7 @@ async function handleGenerateTitle(supabase: any, sellerId: string, itemId: stri
     if (currentTitle.length < 30) issues.push('Título muito curto — subutiliza o espaço disponível');
     const currentNormalized = normalizeText(currentTitle);
     for (const word of GENERIC_IRRELEVANT_WORDS) { if (currentNormalized.includes(normalizeText(word))) issues.push(`Termo genérico: "${word}"`); }
-    for (const va of variationAttrs) { if (currentNormalized.includes(va) && va.length > 2) issues.push(`Variação no título: "${va}"`); }
+    for (const va of variationValues) { if (currentNormalized.includes(normalizeText(va)) && va.length > 2) issues.push(`Variação no título: "${va}"`); }
     const missingImportant = validKeywords.filter(kw => !currentNormalized.includes(kw.normalized)).slice(0, 5);
     if (missingImportant.length > 0) issues.push(`Falta keyword: ${missingImportant.map(k => k.keyword).join(', ')}`);
 
