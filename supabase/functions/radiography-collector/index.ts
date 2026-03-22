@@ -2064,8 +2064,16 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
     const seoRows: any[] = [];
 
     for (const [itemId, detail] of itemDetails) {
-      const catKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 30);
+      const rawCatKeywords = (keywordsByCategory.get(detail.category_id) || []).slice(0, 50);
       const extras = itemExtras.get(itemId) || { description: null, attributes: [] };
+
+      // Build product context tokens from all available fields
+      const modelAttr = (extras.attributes || []).find((a: any) => a.id === 'MODEL' || a.id === 'ALPHANUMERIC_MODEL');
+      const productTokens = buildProductTokens(detail.title, extras.description, extras.attributes || [], modelAttr?.value_name || '');
+
+      // Filter keywords by product context — only keep relevant ones
+      const { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
+      console.log(`[rad-collector] SEO item ${itemId}: ${rawCatKeywords.length} raw kws → ${catKeywords.length} relevant, ${discardedKeywords.length} discarded`);
 
       // Layer 1: Title (40%)
       const titleResult = computeTitleSeo(detail.title, catKeywords);
