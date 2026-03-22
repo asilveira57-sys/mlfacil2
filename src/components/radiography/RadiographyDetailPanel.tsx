@@ -1049,14 +1049,35 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
 
   const toggleLayer = (layer: string) => setExpandedLayer(expandedLayer === layer ? null : layer);
 
-  // Layer summary lines
+  // Layer summary lines — never generic
   const getLayerSummary = (layer: string, layerScore: number | null): string => {
     if (layerScore == null) return '';
     const analysis = layer === 'title' ? titleAnalysis : layer === 'description' ? descAnalysis : layer === 'attributes' ? attrAnalysis : modelAnalysis;
     if (analysis?.summary) return analysis.summary;
-    if (layerScore >= 70) return 'Boa performance nesta camada.';
-    if (layerScore >= 40) return 'Pode melhorar com ajustes pontuais.';
-    return 'Precisa de atenção para melhorar o SEO.';
+    // Specific fallbacks per layer
+    if (layer === 'title') {
+      if (layerScore >= 70) return `Título bem estruturado com ${titleAnalysis?.length || item.title?.length || 0} caracteres.`;
+      if (layerScore >= 40) return `Título com oportunidades de melhoria — ${titleAnalysis?.missing_keywords?.length || 0} palavras-chave ausentes.`;
+      return `Título precisa de revisão — cobertura baixa de palavras-chave relevantes.`;
+    }
+    if (layer === 'description') {
+      const len = descAnalysis?.length || descLength || 0;
+      if (layerScore >= 70) return `Descrição com ${len} caracteres e boa cobertura de keywords.`;
+      if (layerScore >= 40) return `Descrição com ${len} caracteres — faltam palavras-chave importantes.`;
+      return `Descrição ${len < 300 ? 'muito curta' : 'com baixa densidade'} de palavras-chave.`;
+    }
+    if (layer === 'attributes') {
+      if (layerScore >= 70) return `Ficha técnica bem preenchida (${attrAnalysis?.filled || 0}/${attrAnalysis?.total || 0} atributos).`;
+      if (layerScore >= 40) return `Ficha técnica incompleta — ${attrAnalysis?.missing?.length || 0} atributos faltantes.`;
+      return `Ficha técnica precisa de preenchimento urgente.`;
+    }
+    if (layer === 'model') {
+      const val = modelAnalysis?.current_value;
+      if (!val || val === 'não informado') return 'Campo modelo vazio — oportunidade de incluir termos pesquisáveis.';
+      if (layerScore >= 70) return `Modelo "${val}" — pesquisável e útil para indexação.`;
+      return `Modelo "${val}" — pode ser mais descritivo para melhorar buscas.`;
+    }
+    return '';
   };
 
   const DetailSection = ({ items, icon, title: secTitle, colorClass }: { items: string[]; icon: React.ReactNode; title: string; colorClass: string }) => {
