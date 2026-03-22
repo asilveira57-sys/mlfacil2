@@ -2026,15 +2026,16 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
     // 3. Fetch item descriptions + attributes from ML API (batched)
     const itemExtras = new Map<string, { description: string | null; attributes: any[]; }>();
+    const seoVariationMap = new Map<string, Set<string>>(); // variation attrs per item for title cleaning
     if (accessToken) {
       const allItemIds = [...itemDetails.keys()];
-      // Batch multiget for attributes
+      // Batch multiget for attributes + variations
       for (let i = 0; i < allItemIds.length; i += 20) {
         if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 15000) break;
         const batch = allItemIds.slice(i, i + 20);
         const idsParam = batch.join(',');
         try {
-          const res = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,attributes`, {
+          const res = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,attributes,variations`, {
             headers: { Authorization: `Bearer ${accessToken}` },
           });
           if (res.ok) {
@@ -2045,6 +2046,18 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
                   description: null,
                   attributes: r.body.attributes || [],
                 });
+                // Extract variation attribute values for title cleaning
+                const vars = Array.isArray(r.body.variations) ? r.body.variations : [];
+                if (vars.length > 0) {
+                  const varAttrs = new Set<string>();
+                  for (const v of vars) {
+                    const combos = Array.isArray(v.attribute_combinations) ? v.attribute_combinations : [];
+                    for (const c of combos) {
+                      if (c.value_name) varAttrs.add(c.value_name);
+                    }
+                  }
+                  if (varAttrs.size > 0) seoVariationMap.set(r.body.id, varAttrs);
+                }
               }
             }
           }
