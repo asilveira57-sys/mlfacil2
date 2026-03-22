@@ -956,7 +956,7 @@ function WholesaleCard({ item }: { item: HealthCurrentItem }) {
             variant="outline"
             className="text-xs border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 gap-1.5"
             onClick={() => {
-              window.open('/ferramentas/preco-atacado', '_blank');
+              window.open(`/atacado?item_id=${item?.item_id || ''}`, '_blank');
             }}
           >
             <Package className="h-3.5 w-3.5" />
