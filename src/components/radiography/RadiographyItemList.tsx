@@ -456,6 +456,7 @@ function ItemCard({ item, onSelectItem, selectedPeriod }: { item: HealthCurrentI
             </a>
           )}
         </div>
+        <CopyMlbId itemId={item.item_id} className="mb-0.5" />
         {/* Metrics row */}
         <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
           <span className="flex items-center gap-1">
