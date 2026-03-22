@@ -55,9 +55,13 @@ export interface SeoAnalysis {
   suggestions?: string[];
   details: Array<{
     keyword: string;
-    found_in_title: boolean;
-    relevance: "high" | "medium" | "low";
     weight?: number;
+    found_in_title?: boolean;
+    matched_in_title?: boolean;
+    matched_in_description?: boolean;
+    matched_in_attributes?: boolean;
+    matched_overall?: boolean;
+    relevance?: "high" | "medium" | "low";
   }>;
   analyzed_at: string;
 }
