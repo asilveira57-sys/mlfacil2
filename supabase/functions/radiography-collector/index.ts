@@ -1244,13 +1244,20 @@ const GENERIC_IRRELEVANT_WORDS = new Set([
 function normalizeText(text: string): string {
   return text.toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^a-z0-9x\s]/g, " ")  // keep 'x' for measurements like 30x15
     .replace(/\s+/g, " ")
     .trim();
 }
 
+// Measurement pattern: digits+x+digits (e.g. 30x15, 110x74, 2x1)
+const MEASUREMENT_RE = /^\d+x\d+$/;
+
 function tokenize(text: string): string[] {
-  return normalizeText(text).split(" ").filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+  return normalizeText(text).split(" ").filter(w => {
+    if (SEO_STOPWORDS.has(w)) return false;
+    if (MEASUREMENT_RE.test(w)) return true;  // keep measurements regardless of length
+    return w.length > 2;
+  });
 }
 
 function checkKeywordInText(keyword: string, normalizedTitle: string): boolean {
