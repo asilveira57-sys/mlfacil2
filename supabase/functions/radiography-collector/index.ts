@@ -2167,13 +2167,28 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
 
       // Category keyword details with match locations
-      const categoryKeywordDetails = adherence.details.map(d => ({
-        keyword: d.keyword,
-        weight: d.weight,
-        matched_in_title: d.matched_in_title,
-        matched_in_description: d.matched_in_description,
-        matched_in_attributes: d.matched_in_attributes,
-        matched_overall: d.matched_overall,
+      const categoryKeywordDetails = adherence.details.map(d => {
+        const filteredKw = catKeywords.find(k => k.keyword === d.keyword);
+        return {
+          keyword: d.keyword,
+          weight: d.weight,
+          relevance_score: filteredKw?.relevance_score ?? null,
+          relevance_level: filteredKw?.relevance_level ?? null,
+          matched_in_title: d.matched_in_title,
+          matched_in_description: d.matched_in_description,
+          matched_in_attributes: d.matched_in_attributes,
+          matched_overall: d.matched_overall,
+        };
+      });
+
+      // Discarded keywords with reasons
+      const discardedWithReasons = discardedKeywords.slice(0, 20).map(dk => ({
+        keyword: dk.keyword,
+        reason: dk.reason,
+        reason_label: dk.reason === 'blocklist' ? 'Fora do nicho' :
+                      dk.reason === 'no_overlap' ? 'Sem relação com o produto' :
+                      dk.reason === 'empty_tokens' ? 'Sem termos válidos' :
+                      'Relevância baixa',
       }));
 
       seoRows.push({ seller_id: sellerId, item_id: itemId, tenant_id: tenantId,
@@ -2241,9 +2256,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           attributes_score: attrResult.score, model_score: modelResult.score,
           keyword_score: adherence.score,
           description_length: descResult.length, keyword_density: descResult.density,
-           total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
+          total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
           total_raw_keywords: rawCatKeywords.length, discarded_count: discardedKeywords.length,
-          discarded_keywords: discardedKeywords.slice(0, 15),
+          discarded_keywords: discardedWithReasons,
           missing_attributes: attrResult.missing.slice(0, 5), weak_attributes: attrResult.weak.slice(0, 5),
           model_value: modelResult.modelValue,
           irrelevant_keywords: adherence.irrelevant.slice(0, 10),
