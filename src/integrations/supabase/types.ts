@@ -7670,30 +7670,39 @@ export type Database = {
         Row: {
           category_id: string
           id: string
+          in_autocomplete: boolean | null
+          in_top_listings: boolean | null
           keyword: string
           last_updated_at: string
           normalized_keyword: string
           occurrence_count: number
+          relevance_score: number | null
           source: string
           weight: number
         }
         Insert: {
           category_id: string
           id?: string
+          in_autocomplete?: boolean | null
+          in_top_listings?: boolean | null
           keyword: string
           last_updated_at?: string
           normalized_keyword: string
           occurrence_count?: number
+          relevance_score?: number | null
           source?: string
           weight?: number
         }
         Update: {
           category_id?: string
           id?: string
+          in_autocomplete?: boolean | null
+          in_top_listings?: boolean | null
           keyword?: string
           last_updated_at?: string
           normalized_keyword?: string
           occurrence_count?: number
+          relevance_score?: number | null
           source?: string
           weight?: number
         }
@@ -9281,6 +9290,39 @@ export type Database = {
           },
         ]
       }
+      ml_autocomplete_cache: {
+        Row: {
+          base_term: string
+          category_id: string
+          id: string
+          keyword: string
+          last_updated_at: string
+          normalized_keyword: string
+          source: string
+          weight: number
+        }
+        Insert: {
+          base_term: string
+          category_id: string
+          id?: string
+          keyword: string
+          last_updated_at?: string
+          normalized_keyword: string
+          source?: string
+          weight?: number
+        }
+        Update: {
+          base_term?: string
+          category_id?: string
+          id?: string
+          keyword?: string
+          last_updated_at?: string
+          normalized_keyword?: string
+          source?: string
+          weight?: number
+        }
+        Relationships: []
+      }
       ml_integrations: {
         Row: {
           application_id: string | null
@@ -9436,6 +9478,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ml_top_listings_cache: {
+        Row: {
+          category_id: string
+          id: string
+          keyword: string
+          last_updated_at: string
+          normalized_keyword: string
+          occurrence_count: number
+          search_term: string
+          source: string
+          weight: number
+        }
+        Insert: {
+          category_id: string
+          id?: string
+          keyword: string
+          last_updated_at?: string
+          normalized_keyword: string
+          occurrence_count?: number
+          search_term: string
+          source?: string
+          weight?: number
+        }
+        Update: {
+          category_id?: string
+          id?: string
+          keyword?: string
+          last_updated_at?: string
+          normalized_keyword?: string
+          occurrence_count?: number
+          search_term?: string
+          source?: string
+          weight?: number
+        }
+        Relationships: []
       }
       module_explanatory_cards: {
         Row: {

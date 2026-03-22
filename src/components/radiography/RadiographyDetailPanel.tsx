@@ -1280,13 +1280,13 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             </div>
           )}
 
-          {/* Category keyword details with match locations */}
+          {/* Category keyword details with match locations + source */}
           {seo.details && seo.details.length > 0 && (
             <div>
               <div className="text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1">
                 <Target className="h-3 w-3 text-cyan-400" /> Palavras relevantes filtradas ({seo.details.length})
               </div>
-              <div className="space-y-0.5 max-h-40 overflow-y-auto">
+              <div className="space-y-0.5 max-h-48 overflow-y-auto">
                 {seo.details.map((d: any, i: number) => {
                   const matched = d.matched_overall ?? d.found_in_title ?? false;
                   const inTitle = d.matched_in_title ?? d.found_in_title ?? false;
@@ -1299,11 +1299,29 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                   const locationText = matched ? locationParts.join(", ") : "ausente";
                   const relLevel = d.relevance_level;
                   const relBadge = relLevel === 'high' ? 'text-emerald-400' : relLevel === 'medium' ? 'text-cyan-400' : 'text-slate-500';
+                  
+                  // Source badge
+                  const source = d.source || 'sales';
+                  const inAc = d.in_autocomplete || false;
+                  const inTl = d.in_top_listings || false;
+                  const sourceParts: string[] = [];
+                  if (inAc) sourceParts.push('🔍');
+                  if (inTl) sourceParts.push('🏆');
+                  if (!inAc && !inTl) sourceParts.push('📊');
+                  const sourceTooltip = [
+                    inAc ? 'Autocomplete ML' : '',
+                    inTl ? 'Top anúncios' : '',
+                    source.includes('sales') ? 'Vendas' : '',
+                  ].filter(Boolean).join(' + ');
+                  
                   return (
                     <div key={i} className={`flex items-center justify-between px-2 py-1 rounded text-[11px] ${
                       matched ? 'bg-emerald-500/5 text-emerald-300' : 'bg-slate-800/30 text-slate-500'
                     }`}>
-                      <span className="truncate">{d.keyword}</span>
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span title={sourceTooltip} className="text-[10px] flex-shrink-0">{sourceParts.join('')}</span>
+                        <span className="truncate">{d.keyword}</span>
+                      </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {relLevel && <span className={`text-[9px] font-medium ${relBadge}`}>{relLevel === 'high' ? 'alta' : 'média'}</span>}
                         <span className={`text-[10px] ${matched ? 'text-emerald-400' : 'text-red-400'}`}>{locationText}</span>
@@ -1315,6 +1333,12 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                     </div>
                   );
                 })}
+              </div>
+              {/* Source legend */}
+              <div className="flex items-center gap-3 mt-1.5 text-[9px] text-slate-600">
+                <span>🔍 Autocomplete ML</span>
+                <span>🏆 Top anúncios</span>
+                <span>📊 Vendas internas</span>
               </div>
             </div>
           )}

@@ -1905,7 +1905,184 @@ function computeKeywordAdherenceMultiField(
   return { score: Math.min(score, 100), coverage_ratio, found, missing, irrelevant, details };
 }
 
-// --- REFRESH MARKET KEYWORDS FROM SALES DATA ---
+// --- ML AUTOCOMPLETE: fetch real search suggestions from Mercado Livre ---
+async function fetchMlAutocompleteSuggestions(baseTerm: string): Promise<string[]> {
+  try {
+    // ML autosuggest endpoint (public, no auth required)
+    const url = `https://http2.mlstatic.com/resources/sites/MLB/autosuggest?showFilters=true&limit=10&api_version=2&q=${encodeURIComponent(baseTerm)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.warn(`[rad-collector] ML autocomplete failed for "${baseTerm}": ${resp.status}`);
+      return [];
+    }
+    const data = await resp.json();
+    const suggestions: string[] = [];
+    if (data.suggested_queries && Array.isArray(data.suggested_queries)) {
+      for (const sq of data.suggested_queries) {
+        if (sq.q && typeof sq.q === 'string') suggestions.push(sq.q.toLowerCase().trim());
+      }
+    }
+    console.log(`[rad-collector] ML autocomplete for "${baseTerm}": ${suggestions.length} suggestions`);
+    return suggestions;
+  } catch (err) {
+    console.warn(`[rad-collector] ML autocomplete error for "${baseTerm}":`, err);
+    return [];
+  }
+}
+
+// --- ML TOP LISTINGS: extract keywords from top search results ---
+async function fetchMlTopListingTerms(searchTerm: string, categoryId?: string): Promise<Array<{ keyword: string; count: number }>> {
+  try {
+    let url = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(searchTerm)}&limit=50&sort=relevance`;
+    if (categoryId) url += `&category=${encodeURIComponent(categoryId)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.warn(`[rad-collector] ML search failed for "${searchTerm}": ${resp.status}`);
+      return [];
+    }
+    const data = await resp.json();
+    const results = data.results || [];
+    if (results.length === 0) return [];
+
+    // Extract and tokenize titles from top listings
+    const wordFreq = new Map<string, number>();
+    for (const item of results) {
+      if (!item.title) continue;
+      const tokens = tokenize(item.title);
+      const unique = new Set(tokens);
+      for (const w of unique) {
+        wordFreq.set(w, (wordFreq.get(w) || 0) + 1);
+      }
+    }
+
+    // Sort by frequency and return
+    const sorted = [...wordFreq.entries()]
+      .filter(([_, count]) => count >= 2) // at least 2 occurrences
+      .map(([word, count]) => ({ keyword: word, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 50);
+
+    console.log(`[rad-collector] ML top listings for "${searchTerm}": ${results.length} results, ${sorted.length} terms`);
+    return sorted;
+  } catch (err) {
+    console.warn(`[rad-collector] ML top listings error for "${searchTerm}":`, err);
+    return [];
+  }
+}
+
+// --- ENRICH KEYWORDS WITH ML DATA: autocomplete + top listings cross-reference ---
+async function enrichKeywordsWithMlData(
+  supabase: any,
+  categoryId: string,
+  baseTerms: string[],
+  existingKeywords: Array<{ word: string; count: number; weight: number }>,
+): Promise<Array<{ word: string; count: number; weight: number; source: string; in_autocomplete: boolean; in_top_listings: boolean; relevance_score: number }>> {
+  const startTime = Date.now();
+  
+  // Gather autocomplete suggestions for each base term
+  const autocompleteTerms = new Set<string>();
+  const topListingTerms = new Map<string, number>();
+
+  for (const term of baseTerms.slice(0, 3)) { // limit to 3 base terms to avoid rate limits
+    if (Date.now() - startTime > 10000) break; // 10s safety
+    
+    // Fetch autocomplete
+    const suggestions = await fetchMlAutocompleteSuggestions(term);
+    for (const s of suggestions) {
+      const tokens = tokenize(s);
+      for (const t of tokens) autocompleteTerms.add(t);
+    }
+    
+    // Save autocomplete to cache
+    if (suggestions.length > 0) {
+      const acRows = suggestions.map(s => ({
+        category_id: categoryId, base_term: term, keyword: s,
+        normalized_keyword: normalizeText(s), source: 'autocomplete',
+        weight: 0.7, last_updated_at: new Date().toISOString(),
+      }));
+      await supabase.from('ml_autocomplete_cache')
+        .upsert(acRows, { onConflict: 'category_id,base_term,normalized_keyword' });
+    }
+    
+    await sleep(200); // small delay between API calls
+    
+    // Fetch top listings
+    const topTerms = await fetchMlTopListingTerms(term, categoryId);
+    for (const t of topTerms) {
+      topListingTerms.set(t.keyword, (topListingTerms.get(t.keyword) || 0) + t.count);
+    }
+    
+    // Save top listings to cache
+    if (topTerms.length > 0) {
+      const tlRows = topTerms.map(t => ({
+        category_id: categoryId, search_term: term, keyword: t.keyword,
+        normalized_keyword: t.keyword, occurrence_count: t.count,
+        source: 'top_listings', weight: 0.6,
+        last_updated_at: new Date().toISOString(),
+      }));
+      await supabase.from('ml_top_listings_cache')
+        .upsert(tlRows, { onConflict: 'category_id,search_term,normalized_keyword' });
+    }
+    
+    await sleep(200);
+  }
+
+  console.log(`[rad-collector] ML enrichment: ${autocompleteTerms.size} autocomplete tokens, ${topListingTerms.size} top listing terms`);
+
+  // Cross-reference and score all keywords
+  const enriched = existingKeywords.map(kw => {
+    const inAutocomplete = autocompleteTerms.has(kw.word);
+    const inTopListings = topListingTerms.has(kw.word);
+    const topCount = topListingTerms.get(kw.word) || 0;
+    
+    // Score: 40% semantic (weight from sales), 30% autocomplete, 20% top listings, 10% seller match
+    const semanticScore = Math.min(kw.weight * 2, 1); // normalize
+    const acScore = inAutocomplete ? 1 : 0;
+    const tlScore = inTopListings ? Math.min(topCount / 10, 1) : 0;
+    const relevanceScore = (0.4 * semanticScore) + (0.3 * acScore) + (0.2 * tlScore) + (0.1 * (kw.count > 5 ? 1 : 0));
+
+    return {
+      ...kw,
+      source: inAutocomplete && inTopListings ? 'ml+sales' : inAutocomplete ? 'ml_autocomplete' : inTopListings ? 'ml_listings' : 'sales',
+      in_autocomplete: inAutocomplete,
+      in_top_listings: inTopListings,
+      relevance_score: Number(relevanceScore.toFixed(3)),
+    };
+  });
+
+  // Add terms found in ML that are NOT in sales data (new demand signals)
+  const existingNormalized = new Set(existingKeywords.map(k => k.word));
+  
+  for (const [term, count] of topListingTerms) {
+    if (!existingNormalized.has(term) && !CATEGORY_BLOCKLIST.has(term) && !SEO_STOPWORDS.has(term) && term.length > 2) {
+      const inAc = autocompleteTerms.has(term);
+      const relevanceScore = (0.3 * (inAc ? 1 : 0)) + (0.2 * Math.min(count / 10, 1)) + 0.1;
+      if (relevanceScore >= 0.3) { // only add if minimally relevant
+        enriched.push({
+          word: term, count, weight: Number((count / 50).toFixed(4)),
+          source: inAc ? 'ml+new' : 'ml_listings_new',
+          in_autocomplete: inAc, in_top_listings: true,
+          relevance_score: Number(relevanceScore.toFixed(3)),
+        });
+      }
+    }
+  }
+
+  // Sort by relevance score
+  enriched.sort((a, b) => b.relevance_score - a.relevance_score);
+  
+  // Log
+  await supabase.from('seo_analysis_logs').insert({
+    status: 'completed', action: 'ML_ENRICHMENT',
+    score: enriched.length,
+    execution_time_ms: Date.now() - startTime,
+    message: `Category ${categoryId}: ${autocompleteTerms.size} autocomplete, ${topListingTerms.size} top listings, ${enriched.length} enriched`,
+  });
+
+  return enriched;
+}
+
+// --- REFRESH MARKET KEYWORDS FROM SALES DATA + ML ENRICHMENT ---
 async function handleRefreshMarketKeywords(supabase: any, categoryId?: string) {
   const startTime = Date.now();
   console.log(`[rad-collector] REFRESH_KEYWORDS started${categoryId ? ` for category ${categoryId}` : ' (all active)'}`);
@@ -1932,9 +2109,10 @@ async function handleRefreshMarketKeywords(supabase: any, categoryId?: string) {
 
     console.log(`[rad-collector] KEYWORDS: ${categoryIds.length} categories to process`);
     let totalKeywords = 0;
+    let totalEnriched = 0;
 
     for (const catId of categoryIds) {
-      if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 5000) break;
+      if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 10000) break;
 
       let allTitles: string[] = [];
       let from = 0;
@@ -1969,10 +2147,48 @@ async function handleRefreshMarketKeywords(supabase: any, categoryId?: string) {
 
       if (sorted.length === 0) continue;
 
-      const rows = sorted.map(s => ({
+      // Extract base terms for ML enrichment (top 3 most frequent multi-word terms from titles)
+      const baseTerms: string[] = [];
+      const titleFreq = new Map<string, number>();
+      for (const title of allTitles.slice(0, 100)) {
+        const normalized = normalizeText(title);
+        // Extract 2-3 word phrases
+        const words = normalized.split(/\s+/).filter(w => w.length > 2 && !SEO_STOPWORDS.has(w));
+        if (words.length >= 2) {
+          const phrase = words.slice(0, 3).join(' ');
+          titleFreq.set(phrase, (titleFreq.get(phrase) || 0) + 1);
+        }
+      }
+      const topPhrases = [...titleFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p]) => p);
+      baseTerms.push(...topPhrases);
+      // Also add the single most frequent word
+      if (sorted.length > 0 && sorted[0].word.length > 3) {
+        baseTerms.push(sorted[0].word);
+      }
+
+      // Enrich with ML data if we have time
+      let enrichedData: Array<{ word: string; count: number; weight: number; source: string; in_autocomplete: boolean; in_top_listings: boolean; relevance_score: number }> | null = null;
+      if (baseTerms.length > 0 && Date.now() - startTime < SAFETY_TIMEOUT_MS - 15000) {
+        try {
+          enrichedData = await enrichKeywordsWithMlData(supabase, catId, baseTerms, sorted);
+          totalEnriched += enrichedData.length;
+        } catch (enrichErr) {
+          console.warn(`[rad-collector] ML enrichment failed for ${catId}:`, enrichErr);
+        }
+      }
+
+      // Prepare rows for upsert — use enriched data if available
+      const keywordsToSave = enrichedData || sorted.map(s => ({
+        ...s, source: 'sales', in_autocomplete: false, in_top_listings: false, relevance_score: 0,
+      }));
+
+      const rows = keywordsToSave.map(s => ({
         category_id: catId, keyword: s.word, normalized_keyword: s.word,
-        weight: Number(s.weight.toFixed(6)), source: 'sales',
+        weight: Number(s.weight.toFixed(6)), source: s.source,
         occurrence_count: s.count, last_updated_at: new Date().toISOString(),
+        in_autocomplete: s.in_autocomplete,
+        in_top_listings: s.in_top_listings,
+        relevance_score: Number(s.relevance_score.toFixed(4)),
       }));
 
       const { error } = await supabase.from('market_keywords_cache')
@@ -1985,10 +2201,10 @@ async function handleRefreshMarketKeywords(supabase: any, categoryId?: string) {
     await supabase.from('seo_analysis_logs').insert({
       status: 'completed', action: 'REFRESH_KEYWORDS_COMPLETED',
       score: totalKeywords, execution_time_ms: dur,
-      message: `${categoryIds.length} categories, ${totalKeywords} keywords`,
+      message: `${categoryIds.length} categories, ${totalKeywords} keywords, ${totalEnriched} enriched with ML data`,
     });
 
-    return { success: true, categories: categoryIds.length, keywords: totalKeywords, duration_ms: dur };
+    return { success: true, categories: categoryIds.length, keywords: totalKeywords, enriched: totalEnriched, duration_ms: dur };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown';
     await supabase.from('seo_analysis_logs').insert({ status: 'error', action: 'REFRESH_KEYWORDS_FAILED', message: msg, execution_time_ms: Date.now() - startTime });
@@ -2086,17 +2302,17 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
     }
     console.log(`[rad-collector] SEO: Fetched extras for ${itemExtras.size}/${itemDetails.size} items`);
 
-    // 4. Get keywords from market_keywords_cache
+    // 4. Get keywords from market_keywords_cache (with ML enrichment data)
     const categories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
-    const keywordsByCategory = new Map<string, Array<{ keyword: string; normalized: string; weight: number }>>();
+    const keywordsByCategory = new Map<string, Array<{ keyword: string; normalized: string; weight: number; source?: string; in_autocomplete?: boolean; in_top_listings?: boolean }>>();
     for (let i = 0; i < categories.length; i += 50) {
       const { data } = await supabase.from('market_keywords_cache')
-        .select('category_id, keyword, normalized_keyword, weight')
+        .select('category_id, keyword, normalized_keyword, weight, source, in_autocomplete, in_top_listings')
         .in('category_id', categories.slice(i, i + 50))
         .order('weight', { ascending: false });
       if (data) for (const r of data) {
         const arr = keywordsByCategory.get(r.category_id) || [];
-        arr.push({ keyword: r.keyword, normalized: r.normalized_keyword, weight: r.weight });
+        arr.push({ keyword: r.keyword, normalized: r.normalized_keyword, weight: r.weight, source: r.source || 'sales', in_autocomplete: r.in_autocomplete || false, in_top_listings: r.in_top_listings || false });
         keywordsByCategory.set(r.category_id, arr);
       }
     }
@@ -2198,14 +2414,18 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       const allSuggestions = [...titleResult.suggestions, ...descResult.suggestions, ...attrResult.suggestions, ...modelResult.suggestions];
       if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
 
-      // Category keyword details with match locations
+      // Category keyword details with match locations + source
       const categoryKeywordDetails = adherence.details.map(d => {
         const filteredKw = catKeywords.find(k => k.keyword === d.keyword);
+        const rawKw = rawCatKeywords.find(k => k.keyword === d.keyword);
         return {
           keyword: d.keyword,
           weight: d.weight,
           relevance_score: filteredKw?.relevance_score ?? null,
           relevance_level: filteredKw?.relevance_level ?? null,
+          source: rawKw?.source || 'sales',
+          in_autocomplete: rawKw?.in_autocomplete || false,
+          in_top_listings: rawKw?.in_top_listings || false,
           matched_in_title: d.matched_in_title,
           matched_in_description: d.matched_in_description,
           matched_in_attributes: d.matched_in_attributes,
