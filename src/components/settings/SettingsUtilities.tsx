@@ -235,10 +235,11 @@ export function SettingsUtilities() {
               <Label htmlFor="weather-country">
                 {t('utilities:settings.country', { defaultValue: 'País (código)' })}
               </Label>
-              <Input
+               <Input
                 id="weather-country"
-                value={preferences.weatherCountry}
-                onChange={(e) => updatePreferences({ weatherCountry: e.target.value.toUpperCase() })}
+                value={localCountry}
+                onChange={(e) => setLocalCountry(e.target.value.toUpperCase())}
+                onBlur={handleCountryBlur}
                 placeholder="BR"
                 maxLength={2}
               />
