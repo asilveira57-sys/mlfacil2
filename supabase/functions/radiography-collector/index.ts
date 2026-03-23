@@ -161,11 +161,28 @@ function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | strin
   // Final cleanup: remove trailing dashes, hyphens, or connectors
   title = title.replace(/[\s\-–]+$/, '').trim();
 
+  // Build variation_details from removed tokens
+  const variationDetails: Array<{ attribute: string; value: string }> = [];
+  const removedNorm = removed.map(r => ({ original: r, norm: normalizeLooseToken(r) }));
+  for (let i = 0; i < removedNorm.length; i++) {
+    const item = removedNorm[i];
+    if (VARIATION_ATTR_NAMES.has(item.norm)) {
+      // Look for the next token as the value
+      const nextValue = removedNorm[i + 1] && !VARIATION_ATTR_NAMES.has(removedNorm[i + 1].norm) ? removedNorm[i + 1].original : null;
+      variationDetails.push({ attribute: item.original, value: nextValue || '' });
+      if (nextValue) i++; // skip value token
+    } else {
+      // Standalone value — try to infer attribute from varSet
+      variationDetails.push({ attribute: '', value: item.original });
+    }
+  }
+
   return {
     canonical: title,
     raw_length,
     canonical_length: title.length,
     removed_tokens: removed,
+    variation_details: variationDetails,
     strategy,
   };
 }
@@ -2461,13 +2478,13 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
     }
 
     // AUTO-REFRESH: Check if market_keywords_cache has data, populate if empty
-    const categories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
-    if (categories.length > 0) {
+    const allCategories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
+    if (allCategories.length > 0) {
       const { count: kwCount } = await supabase.from('market_keywords_cache')
         .select('*', { count: 'exact', head: true })
-        .in('category_id', categories.slice(0, 50));
+        .in('category_id', allCategories.slice(0, 50));
       if (!kwCount || kwCount === 0) {
-        console.log(`[rad-collector] SEO: market_keywords_cache EMPTY for ${categories.length} categories — auto-refreshing`);
+        console.log(`[rad-collector] SEO: market_keywords_cache EMPTY for ${allCategories.length} categories — auto-refreshing`);
         await handleRefreshMarketKeywords(supabase);
         console.log(`[rad-collector] SEO: keyword auto-refresh completed`);
       }
@@ -2644,7 +2661,6 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       }
 
       let keywordFallbackUsed = false;
-      let keywordFallbackUsed = false;
 
       if (catKeywords.length === 0) {
         const contextualFallback = buildContextualFallbackKeywords(seoTitle, extras.description, extras.attributes || []);
@@ -2737,7 +2753,12 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
         issues: allIssues, suggestions: allSuggestions,
         analysis_details: {
           title: {
-            score: titleResult.score, length: titleResult.length, limit_status: titleResult.limit_status,
+            score: titleResult.score, length: canonResult.canonical_length, raw_length: canonResult.raw_length,
+            canonical_length: canonResult.canonical_length, limit_status: titleResult.limit_status,
+            variation_removed: canonResult.removed_tokens.length > 0,
+            variation_details: canonResult.variation_details,
+            removed_tokens: canonResult.removed_tokens,
+            title_base: canonResult.canonical,
             matched_keywords: titleResult.matched_keywords, missing_keywords: titleResult.missing_keywords,
             positives: titleResult.positives, negatives: titleResult.negatives,
             improvement_actions: titleResult.improvement_actions, summary: titleResult.summary,

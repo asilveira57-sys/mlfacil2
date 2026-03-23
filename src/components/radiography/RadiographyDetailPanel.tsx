@@ -1184,15 +1184,28 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             {layerKey === 'title' && titleAnalysis && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
-                  <span>Título atual</span>
+                  <span>Título principal</span>
                   <span className={`font-mono ${(titleAnalysis.canonical_length || titleAnalysis.length || 0) > 60 ? 'text-red-400' : 'text-slate-400'}`}>
                     {titleAnalysis.canonical_length || titleAnalysis.length || 0}/60 chars
-                    {titleAnalysis.limit_status === 'above_limit' && ' ⚠️'}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-300 bg-slate-900/50 p-1.5 rounded font-mono">{item.title || '—'}</p>
-                {titleAnalysis.variation_removed && (
-                  <p className="text-[10px] text-cyan-400/70 italic">✂️ Variação removida do cálculo de caracteres</p>
+                <p className="text-[11px] text-slate-300 bg-slate-900/50 p-1.5 rounded font-mono">
+                  {titleAnalysis.title_base || item.title || '—'}
+                </p>
+                {titleAnalysis.variation_removed && titleAnalysis.variation_details?.length > 0 && (
+                  <div className="bg-cyan-500/5 border border-cyan-500/20 rounded p-1.5 space-y-0.5">
+                    <p className="text-[10px] text-cyan-400 font-medium">📋 Detalhes da variação (não contam nos caracteres)</p>
+                    <p className="text-[10px] text-slate-400">
+                      {titleAnalysis.variation_details
+                        .map((v: { attribute: string; value: string }) =>
+                          v.attribute ? `${v.attribute}: ${v.value}` : v.value
+                        )
+                        .join(' | ')}
+                    </p>
+                  </div>
+                )}
+                {titleAnalysis.variation_removed && (!titleAnalysis.variation_details || titleAnalysis.variation_details.length === 0) && (
+                  <p className="text-[10px] text-cyan-400/70 italic">✂️ Variação removida do cálculo: {titleAnalysis.removed_tokens?.join(', ')}</p>
                 )}
                 {titleAnalysis.matched_keywords?.length > 0 && (
                   <div>
@@ -1506,14 +1519,27 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           {/* Current title */}
           <div className="p-2.5 rounded-md bg-slate-800/50 border border-slate-700/50">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-slate-500">Título atual</span>
+              <span className="text-[10px] text-slate-500">Título principal</span>
               <span className={`text-[10px] font-mono ${(titleAnalysis?.canonical_length ?? titleData?.current_length ?? 0) > 60 ? 'text-red-400' : 'text-slate-500'}`}>
                 {titleAnalysis?.canonical_length ?? titleData?.current_length ?? 0}/60 chars
               </span>
             </div>
-            <p className="text-sm text-slate-300">{titleData?.current_title || item.title || "—"}</p>
-            {(titleAnalysis?.variation_removed) && (
-              <p className="text-[10px] text-cyan-400/70 italic mt-1">✂️ Variação removida do cálculo de caracteres</p>
+            <p className="text-sm text-slate-300">{titleAnalysis?.title_base || titleData?.current_title || item.title || "—"}</p>
+            {titleAnalysis?.variation_removed && titleAnalysis?.variation_details?.length > 0 && (
+              <div className="mt-1.5 bg-cyan-500/5 border border-cyan-500/20 rounded p-1.5">
+                <p className="text-[10px] text-cyan-400 font-medium">📋 Detalhes da variação</p>
+                <p className="text-[10px] text-slate-400">
+                  {titleAnalysis.variation_details
+                    .map((v: { attribute: string; value: string }) =>
+                      v.attribute ? `${v.attribute}: ${v.value}` : v.value
+                    )
+                    .join(' | ')}
+                </p>
+                <p className="text-[9px] text-slate-600 mt-0.5">Esses detalhes não entram na contagem do título</p>
+              </div>
+            )}
+            {titleAnalysis?.variation_removed && (!titleAnalysis?.variation_details || titleAnalysis.variation_details.length === 0) && (
+              <p className="text-[10px] text-cyan-400/70 italic mt-1">✂️ Variação removida: {titleAnalysis?.removed_tokens?.join(', ')}</p>
             )}
           </div>
 
