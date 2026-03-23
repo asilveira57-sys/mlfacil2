@@ -2661,7 +2661,6 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       }
 
       let keywordFallbackUsed = false;
-      let keywordFallbackUsed = false;
 
       if (catKeywords.length === 0) {
         const contextualFallback = buildContextualFallbackKeywords(seoTitle, extras.description, extras.attributes || []);
