@@ -1399,8 +1399,11 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                 {foundKws.map((kw) => (
                   <div key={kw} className="flex items-center gap-0.5">
                     <Badge variant="outline" className={`text-xs ${feedbackMap[kw] === false ? 'border-red-500/30 text-red-300 bg-red-500/5 line-through' : 'border-emerald-500/30 text-emerald-300 bg-emerald-500/5'}`}>{kw}</Badge>
-                    <button onClick={() => handleKeywordFeedback(kw, !(feedbackMap[kw] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
-                      {feedbackMap[kw] === false ? <ThumbsDown className="h-3 w-3 text-red-400" /> : <ThumbsUp className="h-3 w-3 text-emerald-400 opacity-30 hover:opacity-100" />}
+                    <button onClick={() => handleKeywordFeedback(kw, true)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[kw] === true ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Relevante">
+                      <ThumbsUp className={`h-3 w-3 ${feedbackMap[kw] === true ? 'text-emerald-400' : 'text-slate-500'}`} />
+                    </button>
+                    <button onClick={() => handleKeywordFeedback(kw, false)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[kw] === false ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Irrelevante">
+                      <ThumbsDown className={`h-3 w-3 ${feedbackMap[kw] === false ? 'text-red-400' : 'text-slate-500'}`} />
                     </button>
                   </div>
                 ))}
