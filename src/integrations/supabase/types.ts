@@ -19153,6 +19153,45 @@ export type Database = {
         }
         Relationships: []
       }
+      user_label_preferences: {
+        Row: {
+          created_at: string
+          default_columns: number
+          default_height_mm: number
+          default_width_mm: number
+          dpi: number
+          id: string
+          label_type: string | null
+          print_method: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          default_columns?: number
+          default_height_mm?: number
+          default_width_mm?: number
+          dpi?: number
+          id?: string
+          label_type?: string | null
+          print_method?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          default_columns?: number
+          default_height_mm?: number
+          default_width_mm?: number
+          dpi?: number
+          id?: string
+          label_type?: string | null
+          print_method?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_message_preferences: {
         Row: {
           created_at: string
@@ -20276,6 +20315,95 @@ export type Database = {
           time_per_label?: number | null
           user_id?: string
           width_mm?: number
+        }
+        Relationships: []
+      }
+      zpl_generated_files: {
+        Row: {
+          created_at: string
+          height_mm: number
+          id: string
+          pdf_url: string | null
+          total_labels: number
+          user_id: string
+          width_mm: number
+          zpl_import_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          height_mm: number
+          id?: string
+          pdf_url?: string | null
+          total_labels?: number
+          user_id: string
+          width_mm: number
+          zpl_import_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          height_mm?: number
+          id?: string
+          pdf_url?: string | null
+          total_labels?: number
+          user_id?: string
+          width_mm?: number
+          zpl_import_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "zpl_generated_files_zpl_import_id_fkey"
+            columns: ["zpl_import_id"]
+            isOneToOne: false
+            referencedRelation: "zpl_imports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      zpl_imports: {
+        Row: {
+          company_id: string | null
+          confidence_level: string
+          created_at: string
+          detected_type: string
+          file_name: string | null
+          id: string
+          preset_applied_height: number | null
+          preset_applied_width: number | null
+          preset_source: string | null
+          source: string
+          user_id: string
+          zpl_content: string
+          zpl_hash: string
+        }
+        Insert: {
+          company_id?: string | null
+          confidence_level?: string
+          created_at?: string
+          detected_type?: string
+          file_name?: string | null
+          id?: string
+          preset_applied_height?: number | null
+          preset_applied_width?: number | null
+          preset_source?: string | null
+          source?: string
+          user_id: string
+          zpl_content: string
+          zpl_hash: string
+        }
+        Update: {
+          company_id?: string | null
+          confidence_level?: string
+          created_at?: string
+          detected_type?: string
+          file_name?: string | null
+          id?: string
+          preset_applied_height?: number | null
+          preset_applied_width?: number | null
+          preset_source?: string | null
+          source?: string
+          user_id?: string
+          zpl_content?: string
+          zpl_hash?: string
         }
         Relationships: []
       }
