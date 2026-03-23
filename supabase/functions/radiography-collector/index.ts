@@ -2753,7 +2753,12 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
         issues: allIssues, suggestions: allSuggestions,
         analysis_details: {
           title: {
-            score: titleResult.score, length: titleResult.length, limit_status: titleResult.limit_status,
+            score: titleResult.score, length: canonResult.canonical_length, raw_length: canonResult.raw_length,
+            canonical_length: canonResult.canonical_length, limit_status: titleResult.limit_status,
+            variation_removed: canonResult.removed_tokens.length > 0,
+            variation_details: canonResult.variation_details,
+            removed_tokens: canonResult.removed_tokens,
+            title_base: canonResult.canonical,
             matched_keywords: titleResult.matched_keywords, missing_keywords: titleResult.missing_keywords,
             positives: titleResult.positives, negatives: titleResult.negatives,
             improvement_actions: titleResult.improvement_actions, summary: titleResult.summary,
