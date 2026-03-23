@@ -2484,7 +2484,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
         .select('*', { count: 'exact', head: true })
         .in('category_id', allCategories.slice(0, 50));
       if (!kwCount || kwCount === 0) {
-        console.log(`[rad-collector] SEO: market_keywords_cache EMPTY for ${categories.length} categories — auto-refreshing`);
+        console.log(`[rad-collector] SEO: market_keywords_cache EMPTY for ${allCategories.length} categories — auto-refreshing`);
         await handleRefreshMarketKeywords(supabase);
         console.log(`[rad-collector] SEO: keyword auto-refresh completed`);
       }
