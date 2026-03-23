@@ -2237,31 +2237,43 @@ async function handleRefreshMarketKeywords(supabase: any, categoryId?: string) {
     if (categoryId) {
       categoryIds = [categoryId];
     } else {
-      const { data: cats } = await supabase
-        .from('meli_order_items_cache')
+      // FIX: Use meli_listings_cache (has category_id) instead of meli_order_items_cache (does NOT have category_id)
+      const { data: cats, error: catsErr } = await supabase
+        .from('meli_listings_cache')
         .select('category_id')
-        .gte('created_at', cutoff)
         .not('category_id', 'is', null);
+      if (catsErr) {
+        console.error(`[rad-collector] KEYWORDS: failed to fetch categories:`, catsErr.message);
+      }
       if (cats) categoryIds = [...new Set(cats.map((c: any) => c.category_id).filter(Boolean))];
     }
 
     console.log(`[rad-collector] KEYWORDS: ${categoryIds.length} categories to process`);
+    if (categoryIds.length === 0) {
+      await supabase.from('seo_analysis_logs').insert({
+        status: 'completed', action: 'REFRESH_KEYWORDS_COMPLETED',
+        score: 0, execution_time_ms: Date.now() - startTime,
+        message: 'No categories found — check meli_listings_cache data',
+      });
+      return { success: true, categories: 0, keywords: 0, enriched: 0, duration_ms: Date.now() - startTime };
+    }
     let totalKeywords = 0;
     let totalEnriched = 0;
 
     for (const catId of categoryIds) {
       if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 10000) break;
 
+      // FIX: Use meli_listings_cache (has title + category_id) instead of meli_order_items_cache
       let allTitles: string[] = [];
       let from = 0;
       while (true) {
-        const { data: items } = await supabase
-          .from('meli_order_items_cache')
+        const { data: items, error: itemsErr } = await supabase
+          .from('meli_listings_cache')
           .select('title')
           .eq('category_id', catId)
-          .gte('created_at', cutoff)
           .not('title', 'is', null)
           .range(from, from + 999);
+        if (itemsErr) { console.warn(`[rad-collector] KEYWORDS: fetch titles error for ${catId}:`, itemsErr.message); break; }
         if (!items || items.length === 0) break;
         allTitles.push(...items.map((i: any) => i.title));
         if (items.length < 1000) break;
