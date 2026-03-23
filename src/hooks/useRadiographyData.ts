@@ -46,6 +46,8 @@ export interface SeoLayerAnalysis {
   raw_length?: number;
   variation_removed?: boolean;
   removed_tokens?: string[];
+  title_base?: string;
+  variation_details?: Array<{ attribute: string; value: string }>;
   limit_status?: string;
   length_status?: string;
   density?: number;
