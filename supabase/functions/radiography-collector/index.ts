@@ -161,11 +161,28 @@ function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | strin
   // Final cleanup: remove trailing dashes, hyphens, or connectors
   title = title.replace(/[\s\-–]+$/, '').trim();
 
+  // Build variation_details from removed tokens
+  const variationDetails: Array<{ attribute: string; value: string }> = [];
+  const removedNorm = removed.map(r => ({ original: r, norm: normalizeLooseToken(r) }));
+  for (let i = 0; i < removedNorm.length; i++) {
+    const item = removedNorm[i];
+    if (VARIATION_ATTR_NAMES.has(item.norm)) {
+      // Look for the next token as the value
+      const nextValue = removedNorm[i + 1] && !VARIATION_ATTR_NAMES.has(removedNorm[i + 1].norm) ? removedNorm[i + 1].original : null;
+      variationDetails.push({ attribute: item.original, value: nextValue || '' });
+      if (nextValue) i++; // skip value token
+    } else {
+      // Standalone value — try to infer attribute from varSet
+      variationDetails.push({ attribute: '', value: item.original });
+    }
+  }
+
   return {
     canonical: title,
     raw_length,
     canonical_length: title.length,
     removed_tokens: removed,
+    variation_details: variationDetails,
     strategy,
   };
 }
