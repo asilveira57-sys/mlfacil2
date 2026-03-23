@@ -163,7 +163,7 @@ const SettingsPlan = () => {
 
   const formatOrderRange = (tier: PlanTier): string => {
     if (tier.is_enterprise) return "Acima de 3.000 vendas/mês";
-    if (tier.code.startsWith('zpl')) return "Etiquetas e ferramentas — sem integração com marketplace";
+    if (tier.code.startsWith('zpl')) return "Sem limite de vendas";
     if (tier.max_orders_30d === null) return `A partir de ${tier.min_orders_30d} vendas/mês`;
     if (tier.min_orders_30d === 0) return `Até ${tier.max_orders_30d} vendas/mês`;
     return `${tier.min_orders_30d} a ${tier.max_orders_30d} vendas/mês`;
