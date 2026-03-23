@@ -2587,6 +2587,22 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
     console.log(`[rad-collector] SEO: ${itemDetails.size} items, ${keywordsByCategory.size} categories with keywords`);
 
+    // 4b. Load keyword feedback for all items to filter negative keywords from scoring
+    const allItemIds2 = [...itemDetails.keys()];
+    const feedbackByItem = new Map<string, Map<string, boolean>>();
+    for (let i = 0; i < allItemIds2.length; i += 500) {
+      const { data: fb } = await supabase.from('listing_keyword_feedback')
+        .select('listing_id, keyword, is_relevant')
+        .eq('seller_id', sellerId)
+        .in('listing_id', allItemIds2.slice(i, i + 500));
+      if (fb) for (const f of fb) {
+        const map = feedbackByItem.get(f.listing_id) || new Map();
+        map.set(f.keyword, f.is_relevant);
+        feedbackByItem.set(f.listing_id, map);
+      }
+    }
+    console.log(`[rad-collector] SEO: Loaded feedback for ${feedbackByItem.size} items`);
+
     // 5. Analyze each item with 4 layers
     let analyzed = 0;
     let itemsUsingKeywordFallback = 0;
@@ -2610,6 +2626,24 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
       // Filter keywords by product context — only keep relevant ones
       let { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
+
+      // CRITICAL: Filter out user-marked negative keywords from scoring
+      const itemFeedback = feedbackByItem.get(itemId);
+      if (itemFeedback && itemFeedback.size > 0) {
+        const beforeCount = catKeywords.length;
+        catKeywords = catKeywords.filter(kw => itemFeedback.get(kw.normalized) !== false && itemFeedback.get(normalizeText(kw.keyword)) !== false);
+        const removedByFeedback = beforeCount - catKeywords.length;
+        if (removedByFeedback > 0) {
+          console.log(`[rad-collector] SEO item ${itemId}: ${removedByFeedback} keywords removed by negative feedback`);
+        }
+        // Boost positive keywords weight
+        catKeywords = catKeywords.map(kw => {
+          const isPositive = itemFeedback.get(kw.normalized) === true || itemFeedback.get(normalizeText(kw.keyword)) === true;
+          return isPositive ? { ...kw, weight: Math.min(kw.weight * 1.5, 1.0) } : kw;
+        });
+      }
+
+      let keywordFallbackUsed = false;
       let keywordFallbackUsed = false;
 
       if (catKeywords.length === 0) {
