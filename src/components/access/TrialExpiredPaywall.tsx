@@ -20,11 +20,13 @@ export function TrialExpiredPaywall() {
   
   const { trialExpired, flags, selectedPlan, loading, isAuthenticated } = contextValue;
 
-  // Don't show on /planos page (user needs to browse plans freely)
-  const isOnPlanosPage = location.pathname === '/planos';
+  // Don't show on pages where user needs to browse/pay freely
+  const isOnExcludedPage = ['/planos', '/settings', '/auth', '/contato'].some(
+    p => location.pathname.startsWith(p)
+  );
 
-  // Don't show if not authenticated, trial not expired, or on plans page
-  if (!isAuthenticated || !trialExpired || loading || isOnPlanosPage) {
+  // Don't show if not authenticated, trial not expired, or on excluded pages
+  if (!isAuthenticated || !trialExpired || loading || isOnExcludedPage) {
     return null;
   }
 
