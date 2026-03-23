@@ -3638,12 +3638,14 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       for (let i = 0; i < mediaRows.length; i += 200) { const { error: me } = await supabase.from('listing_media_analysis').insert(mediaRows.slice(i,i+200)); if (me) console.warn('[rad-collector] media insert err:', me.message); }
     }
 
-    // Run SEO analysis after main analysis
+    // Run SEO analysis after main analysis — NEVER skip, chain if needed
     const allItemIds = items.map((i: any) => i.item_id);
     if (Date.now() - startTime < SAFETY_TIMEOUT_MS - 15000) {
       await analyzeSeoForItems(supabase, sellerId, allItemIds, tenantId);
     } else {
-      console.log(`[rad-collector] ANALYZE: skipping SEO (timeout approaching)`);
+      // Instead of skipping, self-chain a dedicated SEO pass
+      console.log(`[rad-collector] ANALYZE: timeout approaching, chaining SEO as separate pass`);
+      selfChain(sellerId, "analyze_seo_only", { item_ids: allItemIds, tenant_id: tenantId });
     }
 
     const dur = Date.now() - startTime;
