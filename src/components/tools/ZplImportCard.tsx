@@ -105,9 +105,9 @@ export function ZplImportCard({
 
         {/* Warnings */}
         {confidence === "low" && (
-          <Alert variant="default" className="bg-yellow-50 dark:bg-yellow-950 border-yellow-200 dark:border-yellow-800">
-            <AlertTriangle className="h-4 w-4 text-yellow-600" />
-            <AlertDescription className="text-xs text-yellow-700 dark:text-yellow-300">
+          <Alert variant="default" className="border-destructive/30 bg-destructive/5">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+            <AlertDescription className="text-xs text-destructive/80">
               Não foi possível identificar o tipo com certeza. Verifique as dimensões antes de imprimir.
             </AlertDescription>
           </Alert>
