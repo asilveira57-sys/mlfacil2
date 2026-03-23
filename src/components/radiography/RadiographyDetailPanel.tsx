@@ -1369,8 +1369,11 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                         {relLevel && <span className={`text-[9px] font-medium ${relBadge}`}>{relLevel === 'high' ? 'alta' : 'média'}</span>}
                         <span className={`text-[10px] ${matched ? 'text-emerald-400' : 'text-red-400'}`}>{locationText}</span>
                         {d.weight != null && <span className="text-[9px] text-slate-600">{(d.weight * 100).toFixed(0)}%</span>}
-                        <button onClick={() => handleKeywordFeedback(d.keyword, !(feedbackMap[d.keyword] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
-                          {feedbackMap[d.keyword] === false ? <ThumbsDown className="h-2.5 w-2.5 text-red-400" /> : <ThumbsUp className="h-2.5 w-2.5 text-slate-500 opacity-30 hover:opacity-100" />}
+                        <button onClick={() => handleKeywordFeedback(d.keyword, true)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[d.keyword] === true ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Relevante">
+                          <ThumbsUp className={`h-2.5 w-2.5 ${feedbackMap[d.keyword] === true ? 'text-emerald-400' : 'text-slate-500'}`} />
+                        </button>
+                        <button onClick={() => handleKeywordFeedback(d.keyword, false)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[d.keyword] === false ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Irrelevante">
+                          <ThumbsDown className={`h-2.5 w-2.5 ${feedbackMap[d.keyword] === false ? 'text-red-400' : 'text-slate-500'}`} />
                         </button>
                       </div>
                     </div>
