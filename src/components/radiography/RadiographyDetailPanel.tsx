@@ -1145,14 +1145,14 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>Título atual</span>
-                  <span className={`font-mono ${(titleAnalysis.length || 0) > 60 ? 'text-red-400' : 'text-slate-400'}`}>
-                    {titleAnalysis.length || 0}/60 chars
+                  <span className={`font-mono ${(titleAnalysis.canonical_length || titleAnalysis.length || 0) > 60 ? 'text-red-400' : 'text-slate-400'}`}>
+                    {titleAnalysis.canonical_length || titleAnalysis.length || 0}/60 chars
                     {titleAnalysis.limit_status === 'above_limit' && ' ⚠️'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 bg-slate-900/50 p-1.5 rounded font-mono">{item.title || '—'}</p>
-                {(item.title?.length || 0) > (titleAnalysis.length || 0) && (
-                  <p className="text-[10px] text-slate-500 italic">Variação removida do cálculo de caracteres</p>
+                {titleAnalysis.variation_removed && (
+                  <p className="text-[10px] text-cyan-400/70 italic">✂️ Variação removida do cálculo de caracteres</p>
                 )}
                 {titleAnalysis.matched_keywords?.length > 0 && (
                   <div>
