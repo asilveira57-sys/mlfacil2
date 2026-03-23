@@ -59,6 +59,7 @@ const SettingsSubscription = () => {
 
   const isTooSmall = (tier: PlanTier): boolean => {
     if (tier.is_enterprise) return false;
+    if (tier.code.startsWith('zpl')) return false; // ZPL plans have no volume limit
     if (totalSales30d <= 0) return false;
     if (tier.max_orders_30d === null) return false;
     return totalSales30d > tier.max_orders_30d;
@@ -88,6 +89,7 @@ const SettingsSubscription = () => {
 
   const formatOrderRange = (tier: PlanTier): string => {
     if (tier.is_enterprise) return "Acima de 3.000 vendas/mês";
+    if (tier.code.startsWith('zpl')) return "Etiquetas e ferramentas — sem integração com marketplace";
     if (tier.max_orders_30d === null) return `A partir de ${tier.min_orders_30d} vendas/mês`;
     if (tier.min_orders_30d === 0) return `Até ${tier.max_orders_30d} vendas/mês`;
     return `${tier.min_orders_30d} a ${tier.max_orders_30d} vendas/mês`;
