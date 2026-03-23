@@ -983,6 +983,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
 }) {
   const { toast } = useToast();
   const [feedbackMap, setFeedbackMap] = useState<Record<string, boolean>>({});
+  const [feedbackLoaded, setFeedbackLoaded] = useState(false);
   const [titleData, setTitleData] = useState<{ best: TitleSuggestion | null; suggestions: TitleSuggestion[]; issues: string[]; current_title?: string; current_length?: number } | null>(null);
   const [titleLoading, setTitleLoading] = useState(false);
   const [copiedTitle, setCopiedTitle] = useState<string | null>(null);
@@ -1015,12 +1016,51 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   const attrAnalysis = seo.attributes_analysis || null;
   const modelAnalysis = seo.model_analysis || null;
 
+  // Load existing feedback on mount
+  useEffect(() => {
+    if (!item?.seller_id || !item?.item_id || feedbackLoaded) return;
+    (async () => {
+      try {
+        const { data } = await supabase.from('listing_keyword_feedback')
+          .select('keyword, is_relevant')
+          .eq('seller_id', item.seller_id)
+          .eq('listing_id', item.item_id);
+        if (data) {
+          const map: Record<string, boolean> = {};
+          for (const f of data) map[f.keyword] = f.is_relevant;
+          setFeedbackMap(map);
+        }
+      } catch { /* silent */ }
+      setFeedbackLoaded(true);
+    })();
+  }, [item?.seller_id, item?.item_id, feedbackLoaded]);
+
   const handleKeywordFeedback = async (keyword: string, isRelevant: boolean) => {
+    // If already set to this value, toggle off (reset)
+    const currentValue = feedbackMap[keyword];
+    if (currentValue === isRelevant) {
+      // Reset: remove feedback (set to neutral)
+      setFeedbackMap(prev => {
+        const copy = { ...prev };
+        delete copy[keyword];
+        return copy;
+      });
+      return;
+    }
+
     setFeedbackMap(prev => ({ ...prev, [keyword]: isRelevant }));
     try {
-      await supabase.functions.invoke("radiography-collector", {
+      const { data } = await supabase.functions.invoke("radiography-collector", {
         body: { action: "save_keyword_feedback", seller_id: item.seller_id, item_id: item.item_id, keyword, is_relevant: isRelevant },
       });
+      if (data?.success) {
+        toast({
+          title: isRelevant ? "👍 Palavra priorizada" : "👎 Palavra ignorada",
+          description: data.impact || (isRelevant
+            ? "Essa palavra será priorizada nas sugestões"
+            : "Essa palavra será ignorada nas próximas análises"),
+        });
+      }
     } catch { /* silent */ }
   };
 
@@ -1329,8 +1369,11 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                         {relLevel && <span className={`text-[9px] font-medium ${relBadge}`}>{relLevel === 'high' ? 'alta' : 'média'}</span>}
                         <span className={`text-[10px] ${matched ? 'text-emerald-400' : 'text-red-400'}`}>{locationText}</span>
                         {d.weight != null && <span className="text-[9px] text-slate-600">{(d.weight * 100).toFixed(0)}%</span>}
-                        <button onClick={() => handleKeywordFeedback(d.keyword, !(feedbackMap[d.keyword] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
-                          {feedbackMap[d.keyword] === false ? <ThumbsDown className="h-2.5 w-2.5 text-red-400" /> : <ThumbsUp className="h-2.5 w-2.5 text-slate-500 opacity-30 hover:opacity-100" />}
+                        <button onClick={() => handleKeywordFeedback(d.keyword, true)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[d.keyword] === true ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Relevante">
+                          <ThumbsUp className={`h-2.5 w-2.5 ${feedbackMap[d.keyword] === true ? 'text-emerald-400' : 'text-slate-500'}`} />
+                        </button>
+                        <button onClick={() => handleKeywordFeedback(d.keyword, false)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[d.keyword] === false ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Irrelevante">
+                          <ThumbsDown className={`h-2.5 w-2.5 ${feedbackMap[d.keyword] === false ? 'text-red-400' : 'text-slate-500'}`} />
                         </button>
                       </div>
                     </div>
@@ -1356,8 +1399,11 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                 {foundKws.map((kw) => (
                   <div key={kw} className="flex items-center gap-0.5">
                     <Badge variant="outline" className={`text-xs ${feedbackMap[kw] === false ? 'border-red-500/30 text-red-300 bg-red-500/5 line-through' : 'border-emerald-500/30 text-emerald-300 bg-emerald-500/5'}`}>{kw}</Badge>
-                    <button onClick={() => handleKeywordFeedback(kw, !(feedbackMap[kw] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
-                      {feedbackMap[kw] === false ? <ThumbsDown className="h-3 w-3 text-red-400" /> : <ThumbsUp className="h-3 w-3 text-emerald-400 opacity-30 hover:opacity-100" />}
+                    <button onClick={() => handleKeywordFeedback(kw, true)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[kw] === true ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Relevante">
+                      <ThumbsUp className={`h-3 w-3 ${feedbackMap[kw] === true ? 'text-emerald-400' : 'text-slate-500'}`} />
+                    </button>
+                    <button onClick={() => handleKeywordFeedback(kw, false)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[kw] === false ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Irrelevante">
+                      <ThumbsDown className={`h-3 w-3 ${feedbackMap[kw] === false ? 'text-red-400' : 'text-slate-500'}`} />
                     </button>
                   </div>
                 ))}
@@ -1373,8 +1419,11 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                 {missingKws.map((kw) => (
                   <div key={kw} className="flex items-center gap-0.5">
                     <Badge variant="outline" className={`text-xs ${feedbackMap[kw] === false ? 'border-slate-600 text-slate-500 line-through' : 'border-amber-500/30 text-amber-300 bg-amber-500/5'}`}>{kw}</Badge>
-                    <button onClick={() => handleKeywordFeedback(kw, !(feedbackMap[kw] ?? true))} className="p-0.5 rounded hover:bg-slate-700/50">
-                      {feedbackMap[kw] === false ? <ThumbsDown className="h-3 w-3 text-red-400" /> : <ThumbsUp className="h-3 w-3 text-slate-400 opacity-30 hover:opacity-100" />}
+                    <button onClick={() => handleKeywordFeedback(kw, true)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[kw] === true ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Relevante">
+                      <ThumbsUp className={`h-3 w-3 ${feedbackMap[kw] === true ? 'text-emerald-400' : 'text-slate-500'}`} />
+                    </button>
+                    <button onClick={() => handleKeywordFeedback(kw, false)} className={`p-0.5 rounded hover:bg-slate-700/50 ${feedbackMap[kw] === false ? 'opacity-100' : 'opacity-30 hover:opacity-80'}`} title="Irrelevante">
+                      <ThumbsDown className={`h-3 w-3 ${feedbackMap[kw] === false ? 'text-red-400' : 'text-slate-500'}`} />
                     </button>
                   </div>
                 ))}

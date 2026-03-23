@@ -25,6 +25,12 @@ const VARIATION_SUFFIX_TOKENS = new Set([
   'nenhum', 'unico', 'único', 'sortido', 'padrao', 'padrão', 'sem', 'neutro',
 ]);
 
+// Attribute NAME tokens that precede a variation value — must be removed as a block
+const VARIATION_ATTR_NAMES = new Set([
+  'cor', 'cores', 'tamanho', 'voltagem', 'modelo', 'sabor', 'estampa', 'acabamento',
+  'material', 'formato', 'capacidade', 'potencia', 'potência', 'tensao', 'tensão',
+]);
+
 function normalizeLooseToken(text: string): string {
   return (text || '')
     .toLowerCase()
@@ -57,24 +63,62 @@ function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | strin
   const removed: string[] = [];
   let strategy = 'none';
 
-  // Pass 1: remove explicit variation suffixes from ML combinations (value + name)
+  // Pass 1: remove explicit variation values AND attribute names from end of title
+  // Works on the ORIGINAL title (preserving casing), matching via normalized comparison
   if (normalizedVarTokens.size > 0) {
     const sorted = [...normalizedVarTokens].sort((a, b) => b.length - a.length);
-    for (let pass = 0; pass < 6; pass++) {
+    for (let pass = 0; pass < 8; pass++) {
       let changed = false;
-      for (const token of sorted) {
-        const regex = new RegExp(`\\s+${escapeRegex(token)}\\s*$`, 'i');
-        const normalizedTitle = normalizeLooseToken(title);
-        const stripped = normalizedTitle.replace(regex, '').trim();
-        if (stripped !== normalizedTitle) {
-          removed.push(token);
-          title = stripped;
-          changed = true;
+      const words = title.split(/\s+/).filter(Boolean);
+      if (words.length <= 3) break;
+
+      // Check last word(s) against variation tokens
+      const lastWord = words[words.length - 1];
+      const lastNorm = normalizeLooseToken(lastWord);
+
+      // Check if last word matches any variation token or attribute name
+      const isVarToken = sorted.some(t => t === lastNorm) || VARIATION_ATTR_NAMES.has(lastNorm);
+
+      if (isVarToken) {
+        removed.push(lastWord);
+        words.pop();
+        title = words.join(' ').trim();
+        changed = true;
+      }
+
+      // Also check for multi-word variation tokens at the end (e.g., "azul marinho")
+      if (!changed) {
+        for (const token of sorted) {
+          if (token.includes(' ')) {
+            const tokenWords = token.split(' ');
+            const titleEnd = words.slice(-tokenWords.length).map(w => normalizeLooseToken(w)).join(' ');
+            if (titleEnd === token && words.length > tokenWords.length + 2) {
+              const removedWords = words.splice(-tokenWords.length);
+              removed.push(removedWords.join(' '));
+              title = words.join(' ').trim();
+              changed = true;
+              break;
+            }
+          }
         }
       }
+
       if (!changed) break;
     }
     if (removed.length > 0) strategy = 'variation_strip';
+
+    // Pass 1b: After removing values, also remove orphaned attribute names at end
+    // e.g., if title now ends with "Cor" because we removed "Branco"
+    const postWords = title.split(/\s+/).filter(Boolean);
+    while (postWords.length > 3) {
+      const lastNorm = normalizeLooseToken(postWords[postWords.length - 1]);
+      if (VARIATION_ATTR_NAMES.has(lastNorm)) {
+        removed.push(postWords.pop()!);
+        title = postWords.join(' ').trim();
+      } else {
+        break;
+      }
+    }
   }
 
   // Pass 2: if still > 60, trim only likely variation suffix tokens at the end
@@ -88,10 +132,17 @@ function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | strin
       const looksVariation =
         VARIATION_SUFFIX_TOKENS.has(last) ||
         normalizedVarTokens.has(last) ||
+        VARIATION_ATTR_NAMES.has(last) ||
         (last === 'nenhum') ||
-        ((prev === 'cor' || prev === 'tamanho' || prev === 'voltagem' || prev === 'modelo') && last.length > 0);
+        (VARIATION_ATTR_NAMES.has(prev) && last.length > 0);
 
       if (!looksVariation) break;
+      removed.push(words.pop()!);
+      trimmedBySuffix = true;
+    }
+
+    // Also remove orphaned attribute name left at end after trimming values
+    while (words.length > 3 && VARIATION_ATTR_NAMES.has(normalizeLooseToken(words[words.length - 1]))) {
       removed.push(words.pop()!);
       trimmedBySuffix = true;
     }
@@ -106,6 +157,9 @@ function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | strin
     title = slice.includes(' ') ? slice.slice(0, slice.lastIndexOf(' ')).trim() || slice : slice;
     if (strategy === 'none') strategy = 'hard_limit_guard';
   }
+
+  // Final cleanup: remove trailing dashes, hyphens, or connectors
+  title = title.replace(/[\s\-–]+$/, '').trim();
 
   return {
     canonical: title,
@@ -2533,6 +2587,22 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
     console.log(`[rad-collector] SEO: ${itemDetails.size} items, ${keywordsByCategory.size} categories with keywords`);
 
+    // 4b. Load keyword feedback for all items to filter negative keywords from scoring
+    const allItemIds2 = [...itemDetails.keys()];
+    const feedbackByItem = new Map<string, Map<string, boolean>>();
+    for (let i = 0; i < allItemIds2.length; i += 500) {
+      const { data: fb } = await supabase.from('listing_keyword_feedback')
+        .select('listing_id, keyword, is_relevant')
+        .eq('seller_id', sellerId)
+        .in('listing_id', allItemIds2.slice(i, i + 500));
+      if (fb) for (const f of fb) {
+        const map = feedbackByItem.get(f.listing_id) || new Map();
+        map.set(f.keyword, f.is_relevant);
+        feedbackByItem.set(f.listing_id, map);
+      }
+    }
+    console.log(`[rad-collector] SEO: Loaded feedback for ${feedbackByItem.size} items`);
+
     // 5. Analyze each item with 4 layers
     let analyzed = 0;
     let itemsUsingKeywordFallback = 0;
@@ -2556,6 +2626,24 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
       // Filter keywords by product context — only keep relevant ones
       let { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
+
+      // CRITICAL: Filter out user-marked negative keywords from scoring
+      const itemFeedback = feedbackByItem.get(itemId);
+      if (itemFeedback && itemFeedback.size > 0) {
+        const beforeCount = catKeywords.length;
+        catKeywords = catKeywords.filter(kw => itemFeedback.get(kw.normalized) !== false && itemFeedback.get(normalizeText(kw.keyword)) !== false);
+        const removedByFeedback = beforeCount - catKeywords.length;
+        if (removedByFeedback > 0) {
+          console.log(`[rad-collector] SEO item ${itemId}: ${removedByFeedback} keywords removed by negative feedback`);
+        }
+        // Boost positive keywords weight
+        catKeywords = catKeywords.map(kw => {
+          const isPositive = itemFeedback.get(kw.normalized) === true || itemFeedback.get(normalizeText(kw.keyword)) === true;
+          return isPositive ? { ...kw, weight: Math.min(kw.weight * 1.5, 1.0) } : kw;
+        });
+      }
+
+      let keywordFallbackUsed = false;
       let keywordFallbackUsed = false;
 
       if (catKeywords.length === 0) {
@@ -3820,13 +3908,41 @@ async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, 
 // FLOW 9 — SAVE KEYWORD FEEDBACK
 // ============================================================================
 async function handleSaveKeywordFeedback(supabase: any, sellerId: string, itemId: string, keyword: string, isRelevant: boolean, tenantId?: string) {
+  const feedbackType = isRelevant ? 'positive' : 'negative';
+  console.log(`[rad-collector] KEYWORD_FEEDBACK: ${feedbackType} for "${keyword}" on item ${itemId}`);
+
   const { error } = await supabase.from('listing_keyword_feedback')
     .upsert({
       seller_id: sellerId, listing_id: itemId, keyword: normalizeText(keyword),
       is_relevant: isRelevant, source: 'manual', tenant_id: tenantId || null,
     }, { onConflict: 'seller_id,listing_id,keyword' });
-  if (error) return { success: false, error: error.message };
-  return { success: true, keyword, is_relevant: isRelevant };
+  if (error) {
+    console.error(`[rad-collector] KEYWORD_FEEDBACK error:`, error.message);
+    return { success: false, error: error.message };
+  }
+
+  // Audit log
+  try {
+    await supabase.rpc('register_system_log', {
+      p_level: 'info',
+      p_system_area: 'radiography',
+      p_action: 'keyword_feedback',
+      p_user_id: null,
+      p_success: true,
+      p_message: `Keyword "${keyword}" marked as ${feedbackType} for item ${itemId}`,
+      p_meta_json: { seller_id: sellerId, item_id: itemId, keyword, feedback_type: feedbackType },
+    });
+  } catch (_) { /* fail-safe */ }
+
+  return {
+    success: true,
+    keyword,
+    is_relevant: isRelevant,
+    feedback_type: feedbackType,
+    impact: isRelevant
+      ? 'Essa palavra será priorizada nas sugestões de título e cálculo de SEO'
+      : 'Essa palavra será ignorada nas próximas análises, títulos e score',
+  };
 }
 
 // ============================================================================
