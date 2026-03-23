@@ -4105,6 +4105,13 @@ Deno.serve(async (req) => {
         result = await handleAnalyze(supabase, seller_id, body.item_id);
         break;
 
+      case "analyze_seo_only":
+        if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        console.log(`[rad-collector] analyze_seo_only: running SEO for ${(body.item_ids || []).length} items`);
+        await analyzeSeoForItems(supabase, seller_id, body.item_ids || [], body.tenant_id || null);
+        result = { success: true, action: 'analyze_seo_only', items: (body.item_ids || []).length };
+        break;
+
       case "refresh_keywords":
         result = await handleRefreshMarketKeywords(supabase, body.category_id);
         break;
