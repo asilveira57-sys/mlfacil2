@@ -1016,12 +1016,51 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
   const attrAnalysis = seo.attributes_analysis || null;
   const modelAnalysis = seo.model_analysis || null;
 
+  // Load existing feedback on mount
+  useEffect(() => {
+    if (!item?.seller_id || !item?.item_id || feedbackLoaded) return;
+    (async () => {
+      try {
+        const { data } = await supabase.from('listing_keyword_feedback')
+          .select('keyword, is_relevant')
+          .eq('seller_id', item.seller_id)
+          .eq('listing_id', item.item_id);
+        if (data) {
+          const map: Record<string, boolean> = {};
+          for (const f of data) map[f.keyword] = f.is_relevant;
+          setFeedbackMap(map);
+        }
+      } catch { /* silent */ }
+      setFeedbackLoaded(true);
+    })();
+  }, [item?.seller_id, item?.item_id, feedbackLoaded]);
+
   const handleKeywordFeedback = async (keyword: string, isRelevant: boolean) => {
+    // If already set to this value, toggle off (reset)
+    const currentValue = feedbackMap[keyword];
+    if (currentValue === isRelevant) {
+      // Reset: remove feedback (set to neutral)
+      setFeedbackMap(prev => {
+        const copy = { ...prev };
+        delete copy[keyword];
+        return copy;
+      });
+      return;
+    }
+
     setFeedbackMap(prev => ({ ...prev, [keyword]: isRelevant }));
     try {
-      await supabase.functions.invoke("radiography-collector", {
+      const { data } = await supabase.functions.invoke("radiography-collector", {
         body: { action: "save_keyword_feedback", seller_id: item.seller_id, item_id: item.item_id, keyword, is_relevant: isRelevant },
       });
+      if (data?.success) {
+        toast({
+          title: isRelevant ? "👍 Palavra priorizada" : "👎 Palavra ignorada",
+          description: data.impact || (isRelevant
+            ? "Essa palavra será priorizada nas sugestões"
+            : "Essa palavra será ignorada nas próximas análises"),
+        });
+      }
     } catch { /* silent */ }
   };
 
