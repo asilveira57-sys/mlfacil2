@@ -3908,13 +3908,41 @@ async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, 
 // FLOW 9 — SAVE KEYWORD FEEDBACK
 // ============================================================================
 async function handleSaveKeywordFeedback(supabase: any, sellerId: string, itemId: string, keyword: string, isRelevant: boolean, tenantId?: string) {
+  const feedbackType = isRelevant ? 'positive' : 'negative';
+  console.log(`[rad-collector] KEYWORD_FEEDBACK: ${feedbackType} for "${keyword}" on item ${itemId}`);
+
   const { error } = await supabase.from('listing_keyword_feedback')
     .upsert({
       seller_id: sellerId, listing_id: itemId, keyword: normalizeText(keyword),
       is_relevant: isRelevant, source: 'manual', tenant_id: tenantId || null,
     }, { onConflict: 'seller_id,listing_id,keyword' });
-  if (error) return { success: false, error: error.message };
-  return { success: true, keyword, is_relevant: isRelevant };
+  if (error) {
+    console.error(`[rad-collector] KEYWORD_FEEDBACK error:`, error.message);
+    return { success: false, error: error.message };
+  }
+
+  // Audit log
+  try {
+    await supabase.rpc('register_system_log', {
+      p_level: 'info',
+      p_system_area: 'radiography',
+      p_action: 'keyword_feedback',
+      p_user_id: null,
+      p_success: true,
+      p_message: `Keyword "${keyword}" marked as ${feedbackType} for item ${itemId}`,
+      p_meta_json: { seller_id: sellerId, item_id: itemId, keyword, feedback_type: feedbackType },
+    });
+  } catch (_) { /* fail-safe */ }
+
+  return {
+    success: true,
+    keyword,
+    is_relevant: isRelevant,
+    feedback_type: feedbackType,
+    impact: isRelevant
+      ? 'Essa palavra será priorizada nas sugestões de título e cálculo de SEO'
+      : 'Essa palavra será ignorada nas próximas análises, títulos e score',
+  };
 }
 
 // ============================================================================
