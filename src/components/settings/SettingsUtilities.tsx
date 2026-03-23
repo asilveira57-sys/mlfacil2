@@ -72,6 +72,31 @@ export function SettingsUtilities() {
   const { t } = useTranslation();
   const { preferences, loading, updatePreferences } = useUtilitiesPreferences();
 
+  // Local state for text inputs to avoid saving on every keystroke
+  const [localCity, setLocalCity] = useState('');
+  const [localCountry, setLocalCountry] = useState('');
+  const cityInitialized = useRef(false);
+
+  useEffect(() => {
+    if (!loading && !cityInitialized.current) {
+      setLocalCity(preferences.weatherCity);
+      setLocalCountry(preferences.weatherCountry);
+      cityInitialized.current = true;
+    }
+  }, [loading, preferences.weatherCity, preferences.weatherCountry]);
+
+  const handleCityBlur = useCallback(() => {
+    if (localCity !== preferences.weatherCity) {
+      updatePreferences({ weatherCity: localCity });
+    }
+  }, [localCity, preferences.weatherCity, updatePreferences]);
+
+  const handleCountryBlur = useCallback(() => {
+    if (localCountry !== preferences.weatherCountry) {
+      updatePreferences({ weatherCountry: localCountry });
+    }
+  }, [localCountry, preferences.weatherCountry, updatePreferences]);
+
   if (loading) {
     return (
       <div className="space-y-4">
