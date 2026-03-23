@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Clock, CloudSun, Calculator, StickyNote, Wrench } from 'lucide-react';
@@ -70,6 +71,31 @@ const TIMEZONE_LABELS: Record<string, string> = {
 export function SettingsUtilities() {
   const { t } = useTranslation();
   const { preferences, loading, updatePreferences } = useUtilitiesPreferences();
+
+  // Local state for text inputs to avoid saving on every keystroke
+  const [localCity, setLocalCity] = useState('');
+  const [localCountry, setLocalCountry] = useState('');
+  const cityInitialized = useRef(false);
+
+  useEffect(() => {
+    if (!loading && !cityInitialized.current) {
+      setLocalCity(preferences.weatherCity);
+      setLocalCountry(preferences.weatherCountry);
+      cityInitialized.current = true;
+    }
+  }, [loading, preferences.weatherCity, preferences.weatherCountry]);
+
+  const handleCityBlur = useCallback(() => {
+    if (localCity !== preferences.weatherCity) {
+      updatePreferences({ weatherCity: localCity });
+    }
+  }, [localCity, preferences.weatherCity, updatePreferences]);
+
+  const handleCountryBlur = useCallback(() => {
+    if (localCountry !== preferences.weatherCountry) {
+      updatePreferences({ weatherCountry: localCountry });
+    }
+  }, [localCountry, preferences.weatherCountry, updatePreferences]);
 
   if (loading) {
     return (
@@ -197,10 +223,11 @@ export function SettingsUtilities() {
               <Label htmlFor="weather-city">
                 {t('utilities:settings.city', { defaultValue: 'Cidade' })}
               </Label>
-              <Input
+               <Input
                 id="weather-city"
-                value={preferences.weatherCity}
-                onChange={(e) => updatePreferences({ weatherCity: e.target.value })}
+                value={localCity}
+                onChange={(e) => setLocalCity(e.target.value)}
+                onBlur={handleCityBlur}
                 placeholder="São Paulo"
               />
             </div>
@@ -208,10 +235,11 @@ export function SettingsUtilities() {
               <Label htmlFor="weather-country">
                 {t('utilities:settings.country', { defaultValue: 'País (código)' })}
               </Label>
-              <Input
+               <Input
                 id="weather-country"
-                value={preferences.weatherCountry}
-                onChange={(e) => updatePreferences({ weatherCountry: e.target.value.toUpperCase() })}
+                value={localCountry}
+                onChange={(e) => setLocalCountry(e.target.value.toUpperCase())}
+                onBlur={handleCountryBlur}
                 placeholder="BR"
                 maxLength={2}
               />
