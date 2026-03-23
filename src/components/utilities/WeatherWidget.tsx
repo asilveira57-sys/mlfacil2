@@ -96,7 +96,9 @@ export function WeatherWidget({
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);
-      console.error('[Weather] Error fetching weather:', message);
+      if (!message.includes('city not found') && !message.includes('404')) {
+        console.error('[Weather] Error fetching weather:', message);
+      }
     } finally {
       setLoading(false);
     }
