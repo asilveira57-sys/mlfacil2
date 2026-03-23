@@ -36,6 +36,7 @@ const COMPONENT_MAP: Record<string, React.ComponentType> = {
   "aparencia": SettingsTemplates,
   "privacidade-lgpd": SettingsPrivacy,
   "utilidades": SettingsUtilities,
+  "utilitarios": SettingsUtilities,
   "plano": SettingsPlan,
   "faturamento": SettingsBilling,
   "empresas-contas": SettingsCompanies,
