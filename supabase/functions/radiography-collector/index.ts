@@ -25,6 +25,12 @@ const VARIATION_SUFFIX_TOKENS = new Set([
   'nenhum', 'unico', 'único', 'sortido', 'padrao', 'padrão', 'sem', 'neutro',
 ]);
 
+// Attribute NAME tokens that precede a variation value — must be removed as a block
+const VARIATION_ATTR_NAMES = new Set([
+  'cor', 'cores', 'tamanho', 'voltagem', 'modelo', 'sabor', 'estampa', 'acabamento',
+  'material', 'formato', 'capacidade', 'potencia', 'potência', 'tensao', 'tensão',
+]);
+
 function normalizeLooseToken(text: string): string {
   return (text || '')
     .toLowerCase()
@@ -57,24 +63,62 @@ function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | strin
   const removed: string[] = [];
   let strategy = 'none';
 
-  // Pass 1: remove explicit variation suffixes from ML combinations (value + name)
+  // Pass 1: remove explicit variation values AND attribute names from end of title
+  // Works on the ORIGINAL title (preserving casing), matching via normalized comparison
   if (normalizedVarTokens.size > 0) {
     const sorted = [...normalizedVarTokens].sort((a, b) => b.length - a.length);
-    for (let pass = 0; pass < 6; pass++) {
+    for (let pass = 0; pass < 8; pass++) {
       let changed = false;
-      for (const token of sorted) {
-        const regex = new RegExp(`\\s+${escapeRegex(token)}\\s*$`, 'i');
-        const normalizedTitle = normalizeLooseToken(title);
-        const stripped = normalizedTitle.replace(regex, '').trim();
-        if (stripped !== normalizedTitle) {
-          removed.push(token);
-          title = stripped;
-          changed = true;
+      const words = title.split(/\s+/).filter(Boolean);
+      if (words.length <= 3) break;
+
+      // Check last word(s) against variation tokens
+      const lastWord = words[words.length - 1];
+      const lastNorm = normalizeLooseToken(lastWord);
+
+      // Check if last word matches any variation token or attribute name
+      const isVarToken = sorted.some(t => t === lastNorm) || VARIATION_ATTR_NAMES.has(lastNorm);
+
+      if (isVarToken) {
+        removed.push(lastWord);
+        words.pop();
+        title = words.join(' ').trim();
+        changed = true;
+      }
+
+      // Also check for multi-word variation tokens at the end (e.g., "azul marinho")
+      if (!changed) {
+        for (const token of sorted) {
+          if (token.includes(' ')) {
+            const tokenWords = token.split(' ');
+            const titleEnd = words.slice(-tokenWords.length).map(w => normalizeLooseToken(w)).join(' ');
+            if (titleEnd === token && words.length > tokenWords.length + 2) {
+              const removedWords = words.splice(-tokenWords.length);
+              removed.push(removedWords.join(' '));
+              title = words.join(' ').trim();
+              changed = true;
+              break;
+            }
+          }
         }
       }
+
       if (!changed) break;
     }
     if (removed.length > 0) strategy = 'variation_strip';
+
+    // Pass 1b: After removing values, also remove orphaned attribute names at end
+    // e.g., if title now ends with "Cor" because we removed "Branco"
+    const postWords = title.split(/\s+/).filter(Boolean);
+    while (postWords.length > 3) {
+      const lastNorm = normalizeLooseToken(postWords[postWords.length - 1]);
+      if (VARIATION_ATTR_NAMES.has(lastNorm)) {
+        removed.push(postWords.pop()!);
+        title = postWords.join(' ').trim();
+      } else {
+        break;
+      }
+    }
   }
 
   // Pass 2: if still > 60, trim only likely variation suffix tokens at the end
@@ -88,10 +132,17 @@ function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | strin
       const looksVariation =
         VARIATION_SUFFIX_TOKENS.has(last) ||
         normalizedVarTokens.has(last) ||
+        VARIATION_ATTR_NAMES.has(last) ||
         (last === 'nenhum') ||
-        ((prev === 'cor' || prev === 'tamanho' || prev === 'voltagem' || prev === 'modelo') && last.length > 0);
+        (VARIATION_ATTR_NAMES.has(prev) && last.length > 0);
 
       if (!looksVariation) break;
+      removed.push(words.pop()!);
+      trimmedBySuffix = true;
+    }
+
+    // Also remove orphaned attribute name left at end after trimming values
+    while (words.length > 3 && VARIATION_ATTR_NAMES.has(normalizeLooseToken(words[words.length - 1]))) {
       removed.push(words.pop()!);
       trimmedBySuffix = true;
     }
@@ -106,6 +157,9 @@ function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | strin
     title = slice.includes(' ') ? slice.slice(0, slice.lastIndexOf(' ')).trim() || slice : slice;
     if (strategy === 'none') strategy = 'hard_limit_guard';
   }
+
+  // Final cleanup: remove trailing dashes, hyphens, or connectors
+  title = title.replace(/[\s\-–]+$/, '').trim();
 
   return {
     canonical: title,
