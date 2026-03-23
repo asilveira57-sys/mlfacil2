@@ -2405,6 +2405,19 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
         .in("item_id", itemIds.slice(i, i + 500));
       if (data) for (const row of data) if (row.title && row.category_id && !itemDetails.has(row.item_id)) itemDetails.set(row.item_id, { title: row.title, category_id: row.category_id });
     }
+
+    // AUTO-REFRESH: Check if market_keywords_cache has data, populate if empty
+    const categories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
+    if (categories.length > 0) {
+      const { count: kwCount } = await supabase.from('market_keywords_cache')
+        .select('*', { count: 'exact', head: true })
+        .in('category_id', categories.slice(0, 50));
+      if (!kwCount || kwCount === 0) {
+        console.log(`[rad-collector] SEO: market_keywords_cache EMPTY for ${categories.length} categories — auto-refreshing`);
+        await handleRefreshMarketKeywords(supabase);
+        console.log(`[rad-collector] SEO: keyword auto-refresh completed`);
+      }
+    }
     if (itemDetails.size === 0) return;
 
     // 2. Get ML access token for fetching descriptions/attributes
