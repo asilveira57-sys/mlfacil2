@@ -98,6 +98,7 @@ const SettingsPlan = () => {
 
   const isTooSmall = (tier: PlanTier): boolean => {
     if (tier.is_enterprise) return false;
+    if (tier.code.startsWith('zpl')) return false; // ZPL plans have no volume limit
     if (totalSales30d <= 0) return false;
     if (tier.max_orders_30d === null) return false;
     return totalSales30d > tier.max_orders_30d;
