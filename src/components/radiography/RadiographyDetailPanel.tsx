@@ -1059,7 +1059,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
     if (analysis?.summary) return analysis.summary;
     // Specific fallbacks per layer
     if (layer === 'title') {
-      if (layerScore >= 70) return `Título bem estruturado com ${titleAnalysis?.length || item.title?.length || 0} caracteres.`;
+      if (layerScore >= 70) return `Título bem estruturado com ${titleAnalysis?.canonical_length || titleAnalysis?.length || 0} caracteres.`;
       if (layerScore >= 40) return `Título com oportunidades de melhoria — ${titleAnalysis?.missing_keywords?.length || 0} palavras-chave ausentes.`;
       return `Título precisa de revisão — cobertura baixa de palavras-chave relevantes.`;
     }
