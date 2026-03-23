@@ -5,7 +5,8 @@
   "description": "Análise profissional de anúncios do Mercado Livre em tempo real",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "downloads"
   ],
   "host_permissions": [
     "https://produto.mercadolivre.com.br/*",
