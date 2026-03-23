@@ -19,47 +19,101 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 // variation attributes (e.g., "Branco Nenhum", "Cor Branco", "110v").
 // This function strips those suffixes deterministically.
 // ============================================================================
+const VARIATION_SUFFIX_TOKENS = new Set([
+  'cor', 'cores', 'tamanho', 'voltagem', 'modelo', 'sabor', 'estampa', 'acabamento',
+  'branco', 'preto', 'azul', 'vermelho', 'amarelo', 'verde', 'rosa', 'prata', 'dourado',
+  'nenhum', 'unico', 'único', 'sortido', 'padrao', 'padrão', 'sem', 'neutro',
+]);
+
+function normalizeLooseToken(text: string): string {
+  return (text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9x\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function getCanonicalTitle(rawTitle: string, variationAttrs: Set<string> | string[] | null): { canonical: string; raw_length: number; canonical_length: number; removed_tokens: string[]; strategy: string } {
-  const raw_length = rawTitle.length;
-  if (raw_length <= 60 && (!variationAttrs || (variationAttrs instanceof Set ? variationAttrs.size === 0 : variationAttrs.length === 0))) {
-    return { canonical: rawTitle, raw_length, canonical_length: raw_length, removed_tokens: [], strategy: 'none' };
+  const normalizedRaw = (rawTitle || '').replace(/\s+/g, ' ').trim();
+  const raw_length = normalizedRaw.length;
+  if (!normalizedRaw) {
+    return { canonical: '', raw_length: 0, canonical_length: 0, removed_tokens: [], strategy: 'none' };
   }
 
   const varSet = variationAttrs instanceof Set ? variationAttrs : new Set(variationAttrs || []);
-  let title = rawTitle;
-  const removed: string[] = [];
+  const normalizedVarTokens = new Set(
+    [...varSet]
+      .map(v => normalizeLooseToken(v))
+      .filter(v => v.length > 1)
+  );
 
-  if (varSet.size > 0) {
-    // Sort by length descending to remove longer matches first
-    const sorted = [...varSet].sort((a, b) => b.length - a.length);
-    // Multiple passes (up to 5) to strip chained variation tokens from end
-    for (let pass = 0; pass < 5; pass++) {
+  let title = normalizedRaw;
+  const removed: string[] = [];
+  let strategy = 'none';
+
+  // Pass 1: remove explicit variation suffixes from ML combinations (value + name)
+  if (normalizedVarTokens.size > 0) {
+    const sorted = [...normalizedVarTokens].sort((a, b) => b.length - a.length);
+    for (let pass = 0; pass < 6; pass++) {
       let changed = false;
-      for (const va of sorted) {
-        if (va.length < 2) continue;
-        const escaped = va.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`\\s+${escaped}\\s*$`, 'i');
-        const before = title;
-        title = title.replace(regex, '').trim();
-        if (title !== before) { removed.push(va); changed = true; }
+      for (const token of sorted) {
+        const regex = new RegExp(`\\s+${escapeRegex(token)}\\s*$`, 'i');
+        const normalizedTitle = normalizeLooseToken(title);
+        const stripped = normalizedTitle.replace(regex, '').trim();
+        if (stripped !== normalizedTitle) {
+          removed.push(token);
+          title = stripped;
+          changed = true;
+        }
       }
       if (!changed) break;
     }
+    if (removed.length > 0) strategy = 'variation_strip';
   }
 
-  // If still > 60 after variation stripping, apply word-boundary truncation
+  // Pass 2: if still > 60, trim only likely variation suffix tokens at the end
   if (title.length > 60) {
-    const words = title.split(' ');
-    while (words.join(' ').length > 60 && words.length > 3) {
+    const words = title.split(/\s+/).filter(Boolean);
+    let trimmedBySuffix = false;
+
+    while (words.length > 3 && words.join(' ').length > 60) {
+      const last = normalizeLooseToken(words[words.length - 1]);
+      const prev = words.length > 1 ? normalizeLooseToken(words[words.length - 2]) : '';
+      const looksVariation =
+        VARIATION_SUFFIX_TOKENS.has(last) ||
+        normalizedVarTokens.has(last) ||
+        (last === 'nenhum') ||
+        ((prev === 'cor' || prev === 'tamanho' || prev === 'voltagem' || prev === 'modelo') && last.length > 0);
+
+      if (!looksVariation) break;
       removed.push(words.pop()!);
+      trimmedBySuffix = true;
     }
-    title = words.join(' ');
+
+    title = words.join(' ').trim();
+    if (trimmedBySuffix && strategy === 'none') strategy = 'suffix_variation_trim';
   }
 
-  title = title.trim();
-  const strategy = removed.length > 0 ? (varSet.size > 0 ? 'variation_strip' : 'truncate') : 'none';
+  // Pass 3 (hard safety guard): canonical title cannot exceed 60 chars
+  if (title.length > 60) {
+    const slice = title.slice(0, 60).trim();
+    title = slice.includes(' ') ? slice.slice(0, slice.lastIndexOf(' ')).trim() || slice : slice;
+    if (strategy === 'none') strategy = 'hard_limit_guard';
+  }
 
-  return { canonical: title, raw_length, canonical_length: title.length, removed_tokens: removed, strategy };
+  return {
+    canonical: title,
+    raw_length,
+    canonical_length: title.length,
+    removed_tokens: removed,
+    strategy,
+  };
 }
 
 // Safety timeout for edge function (50s to leave margin)
@@ -1434,6 +1488,38 @@ function buildProductTokens(title: string, description: string | null, attribute
   return new Set(tokens);
 }
 
+function buildContextualFallbackKeywords(
+  title: string,
+  description: string | null,
+  attributes: any[],
+): Array<{ keyword: string; normalized: string; weight: number; relevance_score: number; relevance_level: 'high'; source: string }> {
+  const bagParts = [title, description || ''];
+  for (const a of attributes || []) {
+    if (a?.name) bagParts.push(String(a.name));
+    if (a?.value_name) bagParts.push(String(a.value_name));
+  }
+
+  const tokenFreq = new Map<string, number>();
+  for (const t of tokenize(bagParts.join(' '))) {
+    if (CATEGORY_BLOCKLIST.has(t) || GENERIC_IRRELEVANT_WORDS.has(t)) continue;
+    tokenFreq.set(t, (tokenFreq.get(t) || 0) + 1);
+  }
+
+  const sorted = [...tokenFreq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([kw, count], idx) => ({
+      keyword: kw,
+      normalized: kw,
+      weight: Number(Math.max(0.15, Math.min(1, count / 10)).toFixed(4)),
+      relevance_score: Number(Math.max(0.7, 0.95 - idx * 0.02).toFixed(3)),
+      relevance_level: 'high' as const,
+      source: 'product_context',
+    }));
+
+  return sorted;
+}
+
 // --- 4-LAYER SEO ANALYSIS ---
 
 function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; normalized: string; weight: number}>): {
@@ -1456,17 +1542,18 @@ function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; nor
   if (titleLen >= 50 && titleLen <= 60) {
     score += 30;
     positives.push(`Título com ${titleLen} caracteres — dentro da faixa ideal (50-60)`);
-  } else if (titleLen >= 40 && titleLen <= 70) {
+  } else if (titleLen > 60) {
+    limit_status = 'above_limit';
+    score += titleLen <= 70 ? 20 : 12;
+    issues.push(`Título excede 60 caracteres (${titleLen})`);
+    negatives.push(`Título com ${titleLen} caracteres — excede o limite de 60`);
+    suggestions.push('Remova o sufixo de variação e mantenha no máximo 60 caracteres');
+    improvement_actions.push(`Reduza ${titleLen - 60} caracteres (sem contar atributos de variação)`);
+  } else if (titleLen >= 40) {
     score += 22;
-    if (titleLen > 60) {
-      limit_status = 'above_limit';
-      negatives.push(`Título com ${titleLen} caracteres — excede o limite de 60`);
-      improvement_actions.push(`Reduza ${titleLen - 60} caracteres do título para ficar no limite ideal`);
-    } else {
-      limit_status = 'short';
-      negatives.push(`Título com ${titleLen} caracteres — abaixo da faixa ideal de 50-60`);
-      improvement_actions.push(`Adicione mais ${50 - titleLen} caracteres com termos relevantes`);
-    }
+    limit_status = 'short';
+    negatives.push(`Título com ${titleLen} caracteres — abaixo da faixa ideal de 50-60`);
+    improvement_actions.push(`Adicione mais ${50 - titleLen} caracteres com termos relevantes`);
   } else if (titleLen >= 30) {
     score += 12;
     limit_status = 'short';
@@ -1479,7 +1566,9 @@ function computeTitleSeo(title: string, catKeywords: Array<{keyword: string; nor
     suggestions.push('Expanda o título para 50-60 caracteres com termos relevantes');
     improvement_actions.push('Expanda o título para 50-60 caracteres usando palavras-chave da categoria');
   }
-  if (titleLen > 60) { issues.push(`Título excede 60 caracteres (${titleLen})`); suggestions.push('Reduza o título para no máximo 60 caracteres'); }
+  if (titleLen > 60 && !suggestions.includes('Remova o sufixo de variação e mantenha no máximo 60 caracteres')) {
+    suggestions.push('Remova o sufixo de variação e mantenha no máximo 60 caracteres');
+  }
 
   // Keyword presence in title → +40
   const titleTokens = tokenize(title);
@@ -2398,6 +2487,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 
     // 5. Analyze each item with 4 layers
     let analyzed = 0;
+    let itemsUsingKeywordFallback = 0;
     const seoRows: any[] = [];
 
     for (const [itemId, detail] of itemDetails) {
@@ -2417,8 +2507,19 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       const productTokens = buildProductTokens(seoTitle, extras.description, extras.attributes || [], modelAttr?.value_name || '');
 
       // Filter keywords by product context — only keep relevant ones
-      const { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
-      console.log(`[rad-collector] SEO item ${itemId}: ${rawCatKeywords.length} raw kws → ${catKeywords.length} relevant, ${discardedKeywords.length} discarded`);
+      let { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
+      let keywordFallbackUsed = false;
+
+      if (catKeywords.length === 0) {
+        const contextualFallback = buildContextualFallbackKeywords(seoTitle, extras.description, extras.attributes || []);
+        if (contextualFallback.length > 0) {
+          catKeywords = contextualFallback;
+          keywordFallbackUsed = true;
+          itemsUsingKeywordFallback++;
+        }
+      }
+
+      console.log(`[rad-collector] SEO item ${itemId}: ${rawCatKeywords.length} raw kws → ${catKeywords.length} relevant, ${discardedKeywords.length} discarded${keywordFallbackUsed ? ' (fallback=context)' : ''}`);
 
       // Layer 1: Title (40%) — uses cleaned title without variation
       const titleResult = computeTitleSeo(seoTitle, catKeywords);
@@ -2449,9 +2550,11 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       const allIssues = [...titleResult.issues, ...descResult.issues, ...attrResult.issues, ...modelResult.issues];
       if (adherence.coverage_ratio < 0.3 && catKeywords.length > 0) allIssues.push('Baixa cobertura de palavras-chave relevantes');
       if (adherence.irrelevant.length > 0) allIssues.push('Termos genéricos detectados no título');
+      if (keywordFallbackUsed) allIssues.push('Palavras-chave de categoria indisponíveis; usamos termos do próprio anúncio para análise.');
 
       const allSuggestions = [...titleResult.suggestions, ...descResult.suggestions, ...attrResult.suggestions, ...modelResult.suggestions];
       if (adherence.missing.length > 0 && catKeywords.length > 0) allSuggestions.push('Adicionar termos mais buscados da categoria no título');
+      if (keywordFallbackUsed) allSuggestions.push('Atualize os dados da categoria para enriquecer a base de palavras-chave do mercado.');
 
       // Category keyword details with match locations + source
       const categoryKeywordDetails = adherence.details.map(d => {
@@ -2462,7 +2565,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           weight: d.weight,
           relevance_score: filteredKw?.relevance_score ?? null,
           relevance_level: filteredKw?.relevance_level ?? null,
-          source: rawKw?.source || 'sales',
+          source: filteredKw?.source || rawKw?.source || 'sales',
           in_autocomplete: rawKw?.in_autocomplete || false,
           in_top_listings: rawKw?.in_top_listings || false,
           matched_in_title: d.matched_in_title,
@@ -2527,7 +2630,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
             improvement_actions: modelResult.improvement_actions, summary: modelResult.summary,
             issues: modelResult.issues, suggestions: modelResult.suggestions,
           },
-          adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length, total_raw_keywords: rawCatKeywords.length, discarded_count: discardedKeywords.length },
+          adherence: { score: adherence.score, coverage_ratio: adherence.coverage_ratio, found_count: adherence.found.length, total_keywords: catKeywords.length, total_raw_keywords: rawCatKeywords.length, discarded_count: discardedKeywords.length, keywords_fallback_used: keywordFallbackUsed },
           analyzed_at: new Date().toISOString(),
         },
         updated_at: new Date().toISOString(),
@@ -2549,6 +2652,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           description_length: descResult.length, keyword_density: descResult.density,
           total_keywords: catKeywords.length, found_count: adherence.found.length, coverage_ratio: adherence.coverage_ratio,
           total_raw_keywords: rawCatKeywords.length, discarded_count: discardedKeywords.length,
+          keywords_fallback_used: keywordFallbackUsed,
           discarded_keywords: discardedWithReasons,
           missing_attributes: attrResult.missing.slice(0, 5), weak_attributes: attrResult.weak.slice(0, 5),
           model_value: modelResult.modelValue,
@@ -2602,7 +2706,7 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       seller_id: sellerId, tenant_id: tenantId, status: 'completed', action: 'SEO_ANALYSIS_COMPLETED',
       score: analyzed, execution_time_ms: dur,
       message: `${analyzed} items analyzed (4-layer)`,
-      metadata_json: { items_analyzed: analyzed, categories_with_keywords: keywordsByCategory.size, items_with_extras: itemExtras.size },
+      metadata_json: { items_analyzed: analyzed, categories_with_keywords: keywordsByCategory.size, items_with_extras: itemExtras.size, items_using_keyword_fallback: itemsUsingKeywordFallback },
     });
 
     console.log(`[rad-collector] SEO 4-layer: ${analyzed} items analyzed, ${dur}ms`);
