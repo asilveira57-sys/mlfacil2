@@ -1335,13 +1335,36 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
 // ============================================================================
 
 const SEO_STOPWORDS = new Set([
+  // Articles, prepositions, conjunctions (with and without accents, normalized)
   'de','para','com','e','a','o','os','as','do','da','dos','das','em','no','na','nos','nas',
-  'um','uma','uns','umas','por','se','que','ao','ou','mais','não','sim','x','mm','cm','kg','ml','un',
+  'um','uma','uns','umas','por','se','que','ao','ou','mais','nao','sim','x','mm','cm','kg','ml','un',
+  // Common Portuguese stopwords (normalized, no accents)
+  'ele','ela','eles','elas','nos','vos','lhe','lhes','me','te','meu','minha','seu','sua',
+  'esse','essa','este','esta','esses','essas','estes','estas','isso','isto','aquele','aquela',
+  'entre','sobre','sob','ate','apos','desde','durante','sem','contra',
+  'como','quando','onde','quem','qual','quais','porque','pois','logo','tambem','ainda',
+  'muito','pouco','bem','mal','aqui','ali','la','ca','agora','hoje','ontem','amanha',
+  'ser','estar','ter','haver','fazer','poder','dever','saber','querer','dizer','ver','dar',
+  'vai','vem','tem','esta','sao','foi','era','pode','deve','faz','diz',
+  'todo','toda','todos','todas','cada','outro','outra','outros','outras',
+  'so','ja','nao','nem','mas','porem','contudo','entretanto','portanto','entao',
+  'voce','gente','coisa','forma','modo','tipo','parte','vez','vezes',
+  'assim','apenas','mesmo','mesma','caso','alem','atraves',
+  'ideal','praticidade','adesao','aplicacao','utilizacao','funcionalidade',
+  'sempre','nunca','talvez','realmente','certamente','provavelmente',
 ]);
 
 const GENERIC_IRRELEVANT_WORDS = new Set([
-  'promoção','promocao','barato','qualidade','top','melhor','oferta','super','mega','ultra',
-  'premium','original','novo','lançamento','lancamento','desconto','grátis','gratis','frete',
+  'promocao','barato','qualidade','top','melhor','oferta','super','mega','ultra',
+  'premium','original','novo','lancamento','desconto','gratis','frete',
+  'ideal','praticidade','pratico','facil','rapido','seguro','resistente',
+  'excelente','perfeito','incrivel','maravilhoso','otimo','bom','ruim',
+  'grande','pequeno','medio','leve','pesado',
+  'moderno','classico','elegante','bonito','lindo',
+  'profissional','domestico','industrial','comercial','residencial',
+  'alta','baixa','media','boa','otima','excelente',
+  'produto','item','artigo','peca','unidade','pacote','kit','conjunto','lote',
+  'compre','comprar','venda','vender','confira','aproveite','garanta',
 ]);
 
 function normalizeText(text: string): string {
@@ -2381,6 +2404,19 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
         .select("item_id, title, category_id").eq("seller_id", sellerId)
         .in("item_id", itemIds.slice(i, i + 500));
       if (data) for (const row of data) if (row.title && row.category_id && !itemDetails.has(row.item_id)) itemDetails.set(row.item_id, { title: row.title, category_id: row.category_id });
+    }
+
+    // AUTO-REFRESH: Check if market_keywords_cache has data, populate if empty
+    const categories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
+    if (categories.length > 0) {
+      const { count: kwCount } = await supabase.from('market_keywords_cache')
+        .select('*', { count: 'exact', head: true })
+        .in('category_id', categories.slice(0, 50));
+      if (!kwCount || kwCount === 0) {
+        console.log(`[rad-collector] SEO: market_keywords_cache EMPTY for ${categories.length} categories — auto-refreshing`);
+        await handleRefreshMarketKeywords(supabase);
+        console.log(`[rad-collector] SEO: keyword auto-refresh completed`);
+      }
     }
     if (itemDetails.size === 0) return;
 

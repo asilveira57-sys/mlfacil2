@@ -1458,8 +1458,8 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           <div className="p-2.5 rounded-md bg-slate-800/50 border border-slate-700/50">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] text-slate-500">Título atual</span>
-              <span className={`text-[10px] font-mono ${(titleData?.current_length || titleAnalysis?.canonical_length || titleAnalysis?.length || 0) > 60 ? 'text-red-400' : 'text-slate-500'}`}>
-                {titleData?.current_length || titleAnalysis?.canonical_length || titleAnalysis?.length || 0}/60 chars
+              <span className={`text-[10px] font-mono ${(titleAnalysis?.canonical_length ?? titleData?.current_length ?? 0) > 60 ? 'text-red-400' : 'text-slate-500'}`}>
+                {titleAnalysis?.canonical_length ?? titleData?.current_length ?? 0}/60 chars
               </span>
             </div>
             <p className="text-sm text-slate-300">{titleData?.current_title || item.title || "—"}</p>
