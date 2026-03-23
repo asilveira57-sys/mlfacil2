@@ -2673,6 +2673,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           details: categoryKeywordDetails,
           title_analysis: {
             score: titleResult.score, length: titleResult.length, limit_status: titleResult.limit_status,
+            canonical_length: canonResult.canonical_length, raw_length: canonResult.raw_length,
+            variation_removed: canonResult.removed_tokens.length > 0,
+            removed_tokens: canonResult.removed_tokens,
             matched_keywords: titleResult.matched_keywords.slice(0, 10), missing_keywords: titleResult.missing_keywords.slice(0, 10),
             positives: titleResult.positives, negatives: titleResult.negatives,
             improvement_actions: titleResult.improvement_actions, summary: titleResult.summary,
