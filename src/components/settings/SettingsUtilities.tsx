@@ -223,10 +223,11 @@ export function SettingsUtilities() {
               <Label htmlFor="weather-city">
                 {t('utilities:settings.city', { defaultValue: 'Cidade' })}
               </Label>
-              <Input
+               <Input
                 id="weather-city"
-                value={preferences.weatherCity}
-                onChange={(e) => updatePreferences({ weatherCity: e.target.value })}
+                value={localCity}
+                onChange={(e) => setLocalCity(e.target.value)}
+                onBlur={handleCityBlur}
                 placeholder="São Paulo"
               />
             </div>
