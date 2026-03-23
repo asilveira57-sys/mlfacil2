@@ -1059,7 +1059,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
     if (analysis?.summary) return analysis.summary;
     // Specific fallbacks per layer
     if (layer === 'title') {
-      if (layerScore >= 70) return `Título bem estruturado com ${titleAnalysis?.length || item.title?.length || 0} caracteres.`;
+      if (layerScore >= 70) return `Título bem estruturado com ${titleAnalysis?.canonical_length || titleAnalysis?.length || 0} caracteres.`;
       if (layerScore >= 40) return `Título com oportunidades de melhoria — ${titleAnalysis?.missing_keywords?.length || 0} palavras-chave ausentes.`;
       return `Título precisa de revisão — cobertura baixa de palavras-chave relevantes.`;
     }
@@ -1145,14 +1145,14 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>Título atual</span>
-                  <span className={`font-mono ${(titleAnalysis.length || 0) > 60 ? 'text-red-400' : 'text-slate-400'}`}>
-                    {titleAnalysis.length || 0}/60 chars
+                  <span className={`font-mono ${(titleAnalysis.canonical_length || titleAnalysis.length || 0) > 60 ? 'text-red-400' : 'text-slate-400'}`}>
+                    {titleAnalysis.canonical_length || titleAnalysis.length || 0}/60 chars
                     {titleAnalysis.limit_status === 'above_limit' && ' ⚠️'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 bg-slate-900/50 p-1.5 rounded font-mono">{item.title || '—'}</p>
-                {(item.title?.length || 0) > (titleAnalysis.length || 0) && (
-                  <p className="text-[10px] text-slate-500 italic">Variação removida do cálculo de caracteres</p>
+                {titleAnalysis.variation_removed && (
+                  <p className="text-[10px] text-cyan-400/70 italic">✂️ Variação removida do cálculo de caracteres</p>
                 )}
                 {titleAnalysis.matched_keywords?.length > 0 && (
                   <div>
@@ -1458,13 +1458,13 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
           <div className="p-2.5 rounded-md bg-slate-800/50 border border-slate-700/50">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] text-slate-500">Título atual</span>
-              <span className={`text-[10px] font-mono ${(titleData?.current_length || titleAnalysis?.length || item.title?.length || 0) > 60 ? 'text-red-400' : 'text-slate-500'}`}>
-                {titleData?.current_length || titleAnalysis?.length || item.title?.length || 0}/60 chars
+              <span className={`text-[10px] font-mono ${(titleData?.current_length || titleAnalysis?.canonical_length || titleAnalysis?.length || 0) > 60 ? 'text-red-400' : 'text-slate-500'}`}>
+                {titleData?.current_length || titleAnalysis?.canonical_length || titleAnalysis?.length || 0}/60 chars
               </span>
             </div>
             <p className="text-sm text-slate-300">{titleData?.current_title || item.title || "—"}</p>
-            {(item.title?.length || 0) > (titleData?.current_length || titleAnalysis?.length || 61) && (
-              <p className="text-[10px] text-slate-500 italic mt-1">Variação removida do cálculo de caracteres</p>
+            {(titleAnalysis?.variation_removed) && (
+              <p className="text-[10px] text-cyan-400/70 italic mt-1">✂️ Variação removida do cálculo de caracteres</p>
             )}
           </div>
 

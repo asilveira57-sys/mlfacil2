@@ -2237,31 +2237,43 @@ async function handleRefreshMarketKeywords(supabase: any, categoryId?: string) {
     if (categoryId) {
       categoryIds = [categoryId];
     } else {
-      const { data: cats } = await supabase
-        .from('meli_order_items_cache')
+      // FIX: Use meli_listings_cache (has category_id) instead of meli_order_items_cache (does NOT have category_id)
+      const { data: cats, error: catsErr } = await supabase
+        .from('meli_listings_cache')
         .select('category_id')
-        .gte('created_at', cutoff)
         .not('category_id', 'is', null);
+      if (catsErr) {
+        console.error(`[rad-collector] KEYWORDS: failed to fetch categories:`, catsErr.message);
+      }
       if (cats) categoryIds = [...new Set(cats.map((c: any) => c.category_id).filter(Boolean))];
     }
 
     console.log(`[rad-collector] KEYWORDS: ${categoryIds.length} categories to process`);
+    if (categoryIds.length === 0) {
+      await supabase.from('seo_analysis_logs').insert({
+        status: 'completed', action: 'REFRESH_KEYWORDS_COMPLETED',
+        score: 0, execution_time_ms: Date.now() - startTime,
+        message: 'No categories found — check meli_listings_cache data',
+      });
+      return { success: true, categories: 0, keywords: 0, enriched: 0, duration_ms: Date.now() - startTime };
+    }
     let totalKeywords = 0;
     let totalEnriched = 0;
 
     for (const catId of categoryIds) {
       if (Date.now() - startTime > SAFETY_TIMEOUT_MS - 10000) break;
 
+      // FIX: Use meli_listings_cache (has title + category_id) instead of meli_order_items_cache
       let allTitles: string[] = [];
       let from = 0;
       while (true) {
-        const { data: items } = await supabase
-          .from('meli_order_items_cache')
+        const { data: items, error: itemsErr } = await supabase
+          .from('meli_listings_cache')
           .select('title')
           .eq('category_id', catId)
-          .gte('created_at', cutoff)
           .not('title', 'is', null)
           .range(from, from + 999);
+        if (itemsErr) { console.warn(`[rad-collector] KEYWORDS: fetch titles error for ${catId}:`, itemsErr.message); break; }
         if (!items || items.length === 0) break;
         allTitles.push(...items.map((i: any) => i.title));
         if (items.length < 1000) break;
@@ -2661,6 +2673,9 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
           details: categoryKeywordDetails,
           title_analysis: {
             score: titleResult.score, length: titleResult.length, limit_status: titleResult.limit_status,
+            canonical_length: canonResult.canonical_length, raw_length: canonResult.raw_length,
+            variation_removed: canonResult.removed_tokens.length > 0,
+            removed_tokens: canonResult.removed_tokens,
             matched_keywords: titleResult.matched_keywords.slice(0, 10), missing_keywords: titleResult.missing_keywords.slice(0, 10),
             positives: titleResult.positives, negatives: titleResult.negatives,
             improvement_actions: titleResult.improvement_actions, summary: titleResult.summary,
@@ -3638,12 +3653,14 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
       for (let i = 0; i < mediaRows.length; i += 200) { const { error: me } = await supabase.from('listing_media_analysis').insert(mediaRows.slice(i,i+200)); if (me) console.warn('[rad-collector] media insert err:', me.message); }
     }
 
-    // Run SEO analysis after main analysis
+    // Run SEO analysis after main analysis — NEVER skip, chain if needed
     const allItemIds = items.map((i: any) => i.item_id);
     if (Date.now() - startTime < SAFETY_TIMEOUT_MS - 15000) {
       await analyzeSeoForItems(supabase, sellerId, allItemIds, tenantId);
     } else {
-      console.log(`[rad-collector] ANALYZE: skipping SEO (timeout approaching)`);
+      // Instead of skipping, self-chain a dedicated SEO pass
+      console.log(`[rad-collector] ANALYZE: timeout approaching, chaining SEO as separate pass`);
+      selfChain(sellerId, "analyze_seo_only", { item_ids: allItemIds, tenant_id: tenantId });
     }
 
     const dur = Date.now() - startTime;
@@ -4086,6 +4103,13 @@ Deno.serve(async (req) => {
       case "analyze":
         if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         result = await handleAnalyze(supabase, seller_id, body.item_id);
+        break;
+
+      case "analyze_seo_only":
+        if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        console.log(`[rad-collector] analyze_seo_only: running SEO for ${(body.item_ids || []).length} items`);
+        await analyzeSeoForItems(supabase, seller_id, body.item_ids || [], body.tenant_id || null);
+        result = { success: true, action: 'analyze_seo_only', items: (body.item_ids || []).length };
         break;
 
       case "refresh_keywords":

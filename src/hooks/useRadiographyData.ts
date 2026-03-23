@@ -42,6 +42,10 @@ export interface ChangeFlag {
 export interface SeoLayerAnalysis {
   score?: number;
   length?: number;
+  canonical_length?: number;
+  raw_length?: number;
+  variation_removed?: boolean;
+  removed_tokens?: string[];
   limit_status?: string;
   length_status?: string;
   density?: number;
