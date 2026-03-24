@@ -401,18 +401,47 @@ const PrimeiroAcesso = () => {
             <h2 className="text-2xl font-bold text-foreground mb-2">
               Conectar conta do Mercado Livre
             </h2>
-            <p className="text-muted-foreground max-w-md mb-8 text-base leading-relaxed">
+            <p className="text-muted-foreground max-w-md mb-6 text-base leading-relaxed">
               Vincule sua conta para importar seus dados e ativar o painel completo. A conexão é rápida e segura.
             </p>
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl px-4 py-3 max-w-md mb-8">
+              <p className="text-sm text-amber-800 dark:text-amber-300 leading-relaxed">
+                <strong>Importante:</strong> Use a <strong>conta principal (titular)</strong> do Mercado Livre para autenticar. Contas colaboradoras não possuem acesso completo aos dados.
+              </p>
+            </div>
             <div className="w-full max-w-sm space-y-3">
               <Button
                 size="lg"
                 className="gap-2 w-full text-base h-12 rounded-xl"
-                onClick={() => {
+                disabled={submitting}
+                onClick={async () => {
+                  setSubmitting(true);
                   registerEvent("marketplace_connection_started", {}, state.companyId);
-                  navigate("/settings?section=contas");
+                  try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session) {
+                      toast.error("Sessão expirada. Faça login novamente.");
+                      navigate("/auth");
+                      return;
+                    }
+                    const response = await supabase.functions.invoke('ml-auth-url', {
+                      body: { frontendOrigin: window.location.origin },
+                      headers: { Authorization: `Bearer ${session.access_token}` },
+                    });
+                    if (response.error) throw response.error;
+                    if (response.data?.authUrl) {
+                      window.location.href = response.data.authUrl;
+                    } else {
+                      throw new Error("URL de autorização não recebida");
+                    }
+                  } catch (err: any) {
+                    console.error("[Onboarding] ML connect error:", err);
+                    toast.error("Erro ao conectar: " + (err?.message || "Tente novamente"));
+                    setSubmitting(false);
+                  }
                 }}
               >
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Conectar Mercado Livre <ArrowRight className="w-5 h-5" />
               </Button>
               <Button
