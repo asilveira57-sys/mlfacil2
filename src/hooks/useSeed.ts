@@ -334,14 +334,61 @@ export function useSeed(): UseSeedResult {
       const metricsMap = new Map(metricsResults.map(r => [r.itemId, r.metrics]));
       const historyMap = new Map(historyResults.map(r => [r.itemId, r.count]));
 
+      // Collect items needing thumbnail hydration from DB
+      const itemsNeedingHydration = plantedData.filter(item => {
+        const listing = getCachedListing(item.item_id);
+        return !item.item_thumbnail && !listing?.thumbnail;
+      });
+
+      // Batch fetch thumbnails for items missing them
+      const hydratedThumbnails = new Map<string, { title: string | null; thumbnail: string | null }>();
+      if (itemsNeedingHydration.length > 0) {
+        const baseIds = itemsNeedingHydration.map(i => i.item_id.split(':')[0]);
+        const { data: directListings } = await supabase
+          .from('meli_listings_cache')
+          .select('item_id, title, thumbnail')
+          .in('item_id', baseIds)
+          .not('thumbnail', 'is', null);
+        
+        if (directListings) {
+          for (const dl of directListings) {
+            hydratedThumbnails.set(dl.item_id, { title: dl.title, thumbnail: dl.thumbnail });
+          }
+        }
+
+        // Fallback: order items cache for still-missing
+        const stillMissing = itemsNeedingHydration
+          .filter(i => !hydratedThumbnails.has(i.item_id.split(':')[0]))
+          .map(i => i.item_id.split(':')[0]);
+        
+        if (stillMissing.length > 0) {
+          const { data: orderHits } = await supabase
+            .from('meli_order_items_cache')
+            .select('item_id, item_title, item_thumbnail')
+            .eq('seller_id', sellerId)
+            .in('item_id', stillMissing)
+            .not('item_thumbnail', 'is', null)
+            .limit(stillMissing.length);
+          
+          if (orderHits) {
+            for (const oh of orderHits) {
+              if (!hydratedThumbnails.has(oh.item_id)) {
+                hydratedThumbnails.set(oh.item_id, { title: oh.item_title, thumbnail: oh.item_thumbnail });
+              }
+            }
+          }
+        }
+      }
+
       for (const item of plantedData) {
         const listing = getCachedListing(item.item_id);
+        const baseId = item.item_id.split(':')[0];
+        const hydrated = hydratedThumbnails.get(baseId);
         
         plantedWithMetrics.push({
           ...item,
-          // Hydrate from cache if stored values are missing
-          item_title: item.item_title || listing?.title || item.item_id,
-          item_thumbnail: item.item_thumbnail || listing?.thumbnail || null,
+          item_title: item.item_title || listing?.title || hydrated?.title || item.item_id,
+          item_thumbnail: item.item_thumbnail || listing?.thumbnail || hydrated?.thumbnail || null,
           latestMetrics: metricsMap.get(item.id) as SeedMetricsSnapshot | null,
           historyCount: historyMap.get(item.id) || 0,
         });

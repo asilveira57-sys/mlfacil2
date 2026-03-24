@@ -437,17 +437,63 @@ async function processPlantedItem(
     if (histErr) console.warn(`[seed-metrics] History insert error for ${itemId}:`, histErr.message);
   }
 
+  // ── Hydrate missing thumbnail/title ────────────────────────────────────────
+  const updateFields: Record<string, any> = {
+    days_planted: daysDiff,
+    health_status: newHealth,
+    growth_stage: newStage,
+    last_metrics_at: now.toISOString(),
+    last_health_check_at: now.toISOString(),
+    updated_at: now.toISOString(),
+  };
+
+  if (!item.item_thumbnail || !item.item_title) {
+    const searchIds = mlbIds.length > 0 ? mlbIds : [itemId.split(':')[0]];
+    const { data: listingHit } = await supabase
+      .from('meli_listings_cache')
+      .select('thumbnail, title')
+      .in('item_id', searchIds)
+      .not('thumbnail', 'is', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (listingHit) {
+      if (!item.item_thumbnail && listingHit.thumbnail) {
+        updateFields.item_thumbnail = listingHit.thumbnail;
+        console.log(`[seed-metrics] THUMBNAIL_HYDRATED: ${itemId} → ${listingHit.thumbnail}`);
+      }
+      if (!item.item_title && listingHit.title) {
+        updateFields.item_title = listingHit.title;
+        console.log(`[seed-metrics] TITLE_HYDRATED: ${itemId} → ${listingHit.title}`);
+      }
+    } else {
+      // Fallback: try order items cache
+      const { data: orderHit } = await supabase
+        .from('meli_order_items_cache')
+        .select('item_title, item_thumbnail')
+        .eq('seller_id', sellerId)
+        .or(searchIds.map(id => `item_id.eq.${id}`).join(','))
+        .not('item_thumbnail', 'is', null)
+        .limit(1)
+        .maybeSingle();
+
+      if (orderHit) {
+        if (!item.item_thumbnail && orderHit.item_thumbnail) {
+          updateFields.item_thumbnail = orderHit.item_thumbnail;
+          console.log(`[seed-metrics] THUMBNAIL_HYDRATED_FROM_ORDERS: ${itemId}`);
+        }
+        if (!item.item_title && orderHit.item_title) {
+          updateFields.item_title = orderHit.item_title;
+          console.log(`[seed-metrics] TITLE_HYDRATED_FROM_ORDERS: ${itemId}`);
+        }
+      }
+    }
+  }
+
   // ── Update planted item ───────────────────────────────────────────────────
   const { error: updateErr } = await supabase
     .from('send_planted_items')
-    .update({
-      days_planted: daysDiff,
-      health_status: newHealth,
-      growth_stage: newStage,
-      last_metrics_at: now.toISOString(),
-      last_health_check_at: now.toISOString(),
-      updated_at: now.toISOString(),
-    })
+    .update(updateFields)
     .eq('id', item.id);
 
   if (updateErr) {
@@ -486,7 +532,7 @@ async function countSales(
     .select('*', { count: 'exact', head: true })
     .eq('seller_id', sellerId)
     .eq('product_key', itemId)
-    .gte('created_at', dateFrom);
+    .gte('created_at_meli', dateFrom);
 
   let mlbCount = 0;
   if (mlbIds.length > 0 && !itemId.startsWith('MLB')) {
@@ -496,7 +542,7 @@ async function countSales(
       .select('*', { count: 'exact', head: true })
       .eq('seller_id', sellerId)
       .in('item_id', mlbIds)
-      .gte('created_at', dateFrom);
+      .gte('created_at_meli', dateFrom);
     mlbCount = count || 0;
   }
 
@@ -508,7 +554,7 @@ async function countSales(
       .select('*', { count: 'exact', head: true })
       .eq('seller_id', sellerId)
       .eq('item_id', baseId)
-      .gte('created_at', dateFrom);
+      .gte('created_at_meli', dateFrom);
     return count || 0;
   }
 
