@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -81,7 +82,7 @@ export function SocialCalendarSettings() {
     setMunSearch('');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (niches.length === 0) {
       toast.error('Selecione ao menos um nicho.');
       return;
@@ -90,6 +91,24 @@ export function SocialCalendarSettings() {
       toast.error('Selecione ao menos um formato.');
       return;
     }
+
+    // If municipality changed, fetch municipal holidays from complementary API
+    if (codigoIbge && codigoIbge !== (prefs as any)?.codigo_ibge) {
+      try {
+        const currentYear = new Date().getFullYear();
+        const { error } = await supabase.functions.invoke('fetch-municipal-holidays', {
+          body: { codigo_ibge: codigoIbge, ano: currentYear },
+        });
+        if (error) {
+          console.warn('Failed to fetch municipal holidays:', error);
+        } else {
+          toast.success('Feriados municipais atualizados!');
+        }
+      } catch (e) {
+        console.warn('Municipal holidays fetch error:', e);
+      }
+    }
+
     save.mutate({
       country_code: 'BR',
       selected_niches: niches,
