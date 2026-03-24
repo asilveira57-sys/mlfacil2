@@ -149,7 +149,7 @@ export function useMarkNotificationRead() {
     mutationFn: async (notificationId: string) => {
       const { error } = await supabase
         .from('app_notifications')
-        .update({ is_read: true, read_at: new Date().toISOString() } as never)
+        .update({ is_read: true, is_actioned: true, read_at: new Date().toISOString() } as never)
         .eq('id', notificationId);
 
       if (error) throw error;
@@ -173,9 +173,10 @@ export function useMarkAllNotificationsRead() {
 
       let query = supabase
         .from('app_notifications')
-        .update({ is_read: true, read_at: new Date().toISOString() } as never)
+        .update({ is_read: true, is_actioned: true, read_at: new Date().toISOString() } as never)
         .eq('user_id', user.id)
-        .eq('is_read', false);
+        .eq('is_dismissed', false)
+        .or('is_read.eq.false,is_actioned.eq.false');
 
       if (workspaceId) {
         query = query.eq('workspace_id', workspaceId);
