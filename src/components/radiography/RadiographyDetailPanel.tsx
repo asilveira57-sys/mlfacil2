@@ -639,7 +639,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               ) : (
                 <>
                   <div className="flex items-center gap-3 mb-3">
-                    <EvolutionPill label="Visitas" delta={chartData[chartData.length - 1].visits - chartData[0].visits} />
+                    <VisitsSumPill chartData={chartData} />
                     <EvolutionPill label="Preço" delta={chartData[chartData.length - 1].price - chartData[0].price} isCurrency />
                     <EvolutionPill label="Estoque" delta={chartData[chartData.length - 1].stock - chartData[0].stock} />
                   </div>
@@ -763,6 +763,23 @@ function EvolutionPill({ label, delta, isCurrency }: { label: string; delta: num
       <Icon className="h-3 w-3" />
       <span className="font-mono">{isPositive ? "+" : isZero ? "" : "-"}{formatted}</span>
       <span className="text-slate-500">{label}</span>
+    </div>
+  );
+}
+
+function VisitsSumPill({ chartData }: { chartData: { visits: number }[] }) {
+  const totalVisits = chartData.reduce((sum, d) => sum + (d.visits || 0), 0);
+  const mid = Math.floor(chartData.length / 2);
+  const firstHalf = chartData.slice(0, mid).reduce((s, d) => s + (d.visits || 0), 0);
+  const secondHalf = chartData.slice(mid).reduce((s, d) => s + (d.visits || 0), 0);
+  const trend = secondHalf > firstHalf ? "up" : secondHalf < firstHalf ? "down" : "flat";
+  const color = trend === "up" ? "text-emerald-400" : trend === "down" ? "text-red-400" : "text-slate-400";
+  const Icon = trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : Activity;
+  return (
+    <div className={`flex items-center gap-1 text-xs ${color}`}>
+      <Icon className="h-3 w-3" />
+      <span className="font-mono">∑ {totalVisits.toLocaleString("pt-BR")}</span>
+      <span className="text-slate-500">Visitas</span>
     </div>
   );
 }
@@ -1458,7 +1475,7 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
             </div>
           )}
 
-          {/* Discarded keywords (not relevant to this product) */}
+          {/* Discarded keywords (not relevant to this product) — with revert */}
           {discardedCount > 0 && (
             <div className="p-2 rounded-md bg-slate-800/30 border border-slate-700/20">
               <div className="text-[10px] text-slate-500 flex items-center gap-1 mb-1">
@@ -1466,18 +1483,33 @@ function InteractiveSeoCard({ item, seo, score, found, missing, structuralScore,
                 {discardedCount} palavras da categoria foram descartadas por irrelevância ao produto
               </div>
               {discardedKws.length > 0 && (
-                <div className="space-y-0.5 max-h-24 overflow-y-auto">
-                  {discardedKws.slice(0, 12).map((kw: any, i: number) => {
+                <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                  {discardedKws.slice(0, 20).map((kw: any, i: number) => {
                     const kwText = typeof kw === 'string' ? kw : kw.keyword;
                     const reason = typeof kw === 'object' ? kw.reason_label : null;
+                    const isRestored = feedbackMap[kwText] === true;
                     return (
-                      <div key={i} className="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-slate-800/50">
-                        <span className="text-slate-600 truncate">{kwText}</span>
-                        {reason && <span className="text-red-400/60 text-[9px] flex-shrink-0 ml-2">{reason}</span>}
+                      <div key={i} className={`flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded ${isRestored ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-slate-800/50'}`}>
+                        <span className={isRestored ? 'text-emerald-300' : 'text-slate-600'}>{kwText}</span>
+                        <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                          {reason && !isRestored && <span className="text-red-400/60 text-[9px]">{reason}</span>}
+                          {isRestored ? (
+                            <span className="text-emerald-400 text-[9px] font-medium">✓ resgatada</span>
+                          ) : (
+                            <button
+                              onClick={() => handleKeywordFeedback(kwText, true)}
+                              className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+                              title="Reverter — marcar como relevante"
+                            >
+                              <RefreshCw className="h-2.5 w-2.5" />
+                              Reverter
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
-                  {discardedKws.length > 12 && <span className="text-[10px] text-slate-600 px-1.5">+{discardedKws.length - 12} mais</span>}
+                  {discardedKws.length > 20 && <span className="text-[10px] text-slate-600 px-1.5">+{discardedKws.length - 20} mais</span>}
                 </div>
               )}
             </div>
