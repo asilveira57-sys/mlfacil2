@@ -2644,9 +2644,26 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
       // Filter keywords by product context — only keep relevant ones
       let { filtered: catKeywords, discarded: discardedKeywords } = filterKeywordsByProductContext(rawCatKeywords, productTokens);
 
-      // CRITICAL: Filter out user-marked negative keywords from scoring
+      // CRITICAL: Check user feedback — restore discarded keywords marked as relevant by seller
       const itemFeedback = feedbackByItem.get(itemId);
       if (itemFeedback && itemFeedback.size > 0) {
+        // Restore discarded keywords that have positive feedback
+        const restoredFromDiscarded: any[] = [];
+        discardedKeywords = discardedKeywords.filter(kw => {
+          const kwNorm = typeof kw === 'string' ? kw : (kw.normalized || normalizeText(kw.keyword));
+          const kwText = typeof kw === 'string' ? kw : kw.keyword;
+          if (itemFeedback.get(kwNorm) === true || itemFeedback.get(normalizeText(kwText)) === true) {
+            restoredFromDiscarded.push(typeof kw === 'object' ? kw : { keyword: kw, normalized: normalizeText(kw), weight: 0.5 });
+            return false; // remove from discarded
+          }
+          return true;
+        });
+        if (restoredFromDiscarded.length > 0) {
+          catKeywords = [...catKeywords, ...restoredFromDiscarded];
+          console.log(`[rad-collector] KEYWORD_RESTORED: ${restoredFromDiscarded.map(k => k.keyword || k).join(', ')} restored by seller feedback for ${itemId}`);
+        }
+
+        // Filter out user-marked negative keywords from scoring
         const beforeCount = catKeywords.length;
         catKeywords = catKeywords.filter(kw => itemFeedback.get(kw.normalized) !== false && itemFeedback.get(normalizeText(kw.keyword)) !== false);
         const removedByFeedback = beforeCount - catKeywords.length;
