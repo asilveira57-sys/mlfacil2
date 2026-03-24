@@ -85,7 +85,6 @@ Deno.serve(async (req) => {
     }
 
     // 2. Delete all related data in FK-safe order
-    // Get ml_account ids first (needed for finance cleanup)
     const { data: mlAccounts } = await supabaseAdmin
       .from("ml_accounts")
       .select("id")
@@ -113,9 +112,33 @@ Deno.serve(async (req) => {
       }
     };
 
+    // Nullify columns that reference auth.users without CASCADE (SET NULL via migration,
+    // but also clean up data explicitly to be safe)
+    const nullifyColumn = async (table: string, column: string, userId: string) => {
+      try {
+        const { error } = await supabaseAdmin
+          .from(table)
+          .update({ [column]: null })
+          .eq(column, userId);
+        if (error) console.error(`Error nullifying ${table}.${column}:`, error.message);
+      } catch (e) {
+        console.error(`Exception nullifying ${table}.${column}:`, e.message);
+      }
+    };
+
+    // Phase 0: Nullify non-cascade FK references to prevent auth deletion failure
+    await Promise.all([
+      nullifyColumn("sync_jobs", "created_by_user_id", target_user_id),
+      nullifyColumn("app_notifications", "resolved_by", target_user_id),
+      nullifyColumn("email_campaigns", "created_by", target_user_id),
+      nullifyColumn("learned_listings", "imported_by", target_user_id),
+      nullifyColumn("ml_publication_jobs", "created_by", target_user_id),
+      nullifyColumn("pricing_simulation_events", "actor_user_id", target_user_id),
+      nullifyColumn("product_records", "created_by", target_user_id),
+    ]);
+
     // Phase 1: finance tables (depend on finance_accounts which depends on ml_accounts)
     if (mlAccountIds.length > 0) {
-      // Get finance_account ids
       const { data: finAccts } = await supabaseAdmin
         .from("finance_accounts")
         .select("id")
@@ -132,10 +155,8 @@ Deno.serve(async (req) => {
     }
 
     // Phase 2: tables referencing ml_accounts
-    await deleteFromTable("listing_clone_drafts", "user_id", target_user_id);
     await deleteFromTable("clone_drafts", "user_id", target_user_id);
     await deleteFromTable("analyzed_items", "user_id", target_user_id);
-    await deleteFromTable("sync_jobs", "user_id", target_user_id);
 
     // Phase 3: ads / timeline
     await deleteFromTable("ad_timeline_stats", "workspace_id", target_user_id);
@@ -175,27 +196,44 @@ Deno.serve(async (req) => {
     await deleteFromTable("account_events", "user_id", target_user_id);
     await deleteFromTable("app_notifications", "user_id", target_user_id);
 
-    // Phase 7b: Seed module (FK-safe order)
-    await deleteFromTable("seed_metrics_snapshots", "user_id", target_user_id);
-    await deleteFromTable("seed_item_history", "user_id", target_user_id);
-    await deleteFromTable("seed_planted_items", "user_id", target_user_id);
-    await deleteFromTable("seed_balance", "user_id", target_user_id);
-    await deleteFromTable("seed_aplus_candidates", "user_id", target_user_id);
-    await deleteFromTable("seed_purchases", "user_id", target_user_id);
+    // Phase 7b: Seed module
+    await deleteFromTable("seed_account_rules", "user_id", target_user_id);
 
-    // Phase 7c: Pricing simulator
+    // Phase 7c: Pricing simulator (correct column: created_by_user_id)
     {
       const { data: sims } = await supabaseAdmin
         .from("pricing_simulations")
         .select("id")
-        .eq("user_id", target_user_id);
+        .eq("created_by_user_id", target_user_id);
       const simIds = (sims || []).map((s: { id: string }) => s.id);
       if (simIds.length > 0) {
         await deleteFromTable("pricing_simulation_results", "simulation_id", simIds);
         await deleteFromTable("pricing_simulation_inputs", "simulation_id", simIds);
+        await deleteFromTable("pricing_simulation_events", "simulation_id", simIds);
       }
-      await deleteFromTable("pricing_simulations", "user_id", target_user_id);
+      await deleteFromTable("pricing_simulations", "created_by_user_id", target_user_id);
     }
+
+    // Phase 7d: Email / support / other user data
+    await deleteFromTable("email_queue", "user_id", target_user_id);
+    await deleteFromTable("email_event_dedup", "user_id", target_user_id);
+    await deleteFromTable("support_ai_sessions", "user_id", target_user_id);
+    await deleteFromTable("support_tickets", "user_id", target_user_id);
+    await deleteFromTable("user_consents", "user_id", target_user_id);
+    await deleteFromTable("user_dashboard_widgets", "user_id", target_user_id);
+    await deleteFromTable("user_label_preferences", "user_id", target_user_id);
+    await deleteFromTable("user_preferences", "user_id", target_user_id);
+    await deleteFromTable("user_sentiments", "user_id", target_user_id);
+    await deleteFromTable("widget_event_stream", "user_id", target_user_id);
+    await deleteFromTable("widget_usage_logs", "user_id", target_user_id);
+    await deleteFromTable("zpl_generated_files", "user_id", target_user_id);
+    await deleteFromTable("zpl_imports", "user_id", target_user_id);
+    await deleteFromTable("trend_alerts", "user_id", target_user_id);
+    await deleteFromTable("trend_module_settings", "user_id", target_user_id);
+    await deleteFromTable("collaborator_menu_permissions", "user_id", target_user_id);
+
+    // Phase 7e: Tenant
+    await deleteFromTable("tenant_members", "user_id", target_user_id);
 
     // Phase 8: core user tables
     await deleteFromTable("user_access_state", "user_id", target_user_id);
