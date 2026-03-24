@@ -120,7 +120,7 @@ const Auth = () => {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate("/dashboard", { replace: true });
+        navigate("/primeiro-acesso", { replace: true });
       } else {
         setCheckingSession(false);
       }
@@ -128,7 +128,7 @@ const Auth = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session) {
-        navigate("/dashboard", { replace: true });
+        navigate("/primeiro-acesso", { replace: true });
       }
     });
 
