@@ -12498,6 +12498,66 @@ export type Database = {
           },
         ]
       }
+      processing_queue: {
+        Row: {
+          attempts: number
+          created_at: string
+          duration_ms: number | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          job_type: string
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          payload: Json | null
+          priority: string
+          result_summary: Json | null
+          seller_id: string
+          started_at: string | null
+          status: string
+          tenant_id: string | null
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          job_type: string
+          locked_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
+          payload?: Json | null
+          priority?: string
+          result_summary?: Json | null
+          seller_id: string
+          started_at?: string | null
+          status?: string
+          tenant_id?: string | null
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          job_type?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
+          payload?: Json | null
+          priority?: string
+          result_summary?: Json | null
+          seller_id?: string
+          started_at?: string | null
+          status?: string
+          tenant_id?: string | null
+        }
+        Relationships: []
+      }
       product_assets: {
         Row: {
           asset_type: string | null
@@ -13921,6 +13981,45 @@ export type Database = {
           signature_template?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      queue_execution_log: {
+        Row: {
+          batch_id: string
+          blocked_attempts: number
+          created_at: string
+          id: string
+          jobs_completed: number
+          jobs_failed: number
+          jobs_picked: number
+          sellers_processed: number
+          total_duration_ms: number | null
+          worker_id: string | null
+        }
+        Insert: {
+          batch_id: string
+          blocked_attempts?: number
+          created_at?: string
+          id?: string
+          jobs_completed?: number
+          jobs_failed?: number
+          jobs_picked?: number
+          sellers_processed?: number
+          total_duration_ms?: number | null
+          worker_id?: string | null
+        }
+        Update: {
+          batch_id?: string
+          blocked_attempts?: number
+          created_at?: string
+          id?: string
+          jobs_completed?: number
+          jobs_failed?: number
+          jobs_picked?: number
+          sellers_processed?: number
+          total_duration_ms?: number | null
+          worker_id?: string | null
         }
         Relationships: []
       }
