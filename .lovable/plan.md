@@ -1,84 +1,40 @@
 
-Plano corretivo definitivo (erro de caracteres + keywords sumidas)
-
-Do I know what the issue is? Sim.
-
 Diagnóstico (com evidência)
-1) Erro de caracteres persiste por SEO desatualizado (não por título real):
-- `listing_health_current.title` já está limpo (ex.: 54/55 chars),
-- mas `seo_analysis_json.title_analysis.length` ficou antigo (ex.: 61/62/67).
-- Evidência: `seo_updated_at` de vários itens ficou em 2026-03-22, enquanto `updated_at` foi atualizado hoje.
-- Causa: no `handleAnalyze`, quando o processamento encosta no timeout, ele faz `skipping SEO` e deixa JSON antigo.
+1) O pedido informado `2000012046908069` não existe no cache local atual.  
+2) Pelo contexto da tela (buyer `CHARBON_WEAR`, 15/03), o pedido correspondente no cache é `2000015560022610` (shipment `46658814350`).  
+3) Esse shipment está **stale**: `shipment_status=pending`, `shipment_substatus=buffered`, `last_sync_at=2026-03-16`, então o sistema mantém `final_status='outros'` e ele não entra em “Etiquetas para imprimir”.  
+4) Causa-raiz: há dois filtros que “congelam” envios antigos:
+   - `shipping-status-sync` só revalida ativos com `last_sync_at` dos últimos 7 dias.
+   - `useShippingLabels` (fase 4.5) revalida apenas `ready_to_ship/handling`, excluindo `pending`.
 
-2) Keywords “sumiram”:
-- `market_keywords_cache` está vazio (`0` linhas / `0` categorias).
-- O refresh atual depende de colunas de `meli_order_items_cache` que não batem com o schema real (consulta quebra silenciosamente e não popula nada).
-- Resultado: `total_keywords=0`, `details=[]` em vários itens.
+Plano de correção (definitivo)
+1) Corrigir revalidação de ativos no backend (`shipping-status-sync`)
+- Remover a trava de 7 dias em `last_sync_at`.
+- Revalidar ativos por prioridade: `pending` e mais antigos primeiro.
+- Manter limite por execução (ex.: 150 por conta) para controle de custo.
+- Logar contadores: `active_found`, `rechecked`, `updated`, `api_errors`.
 
-3) Front ainda pode mostrar estado incoerente:
-- Card de título usa fallback para `item.title` quando `title_analysis` está ausente/desatualizado, então reaparece `62/60` mesmo com título canônico já salvo.
+2) Corrigir recheck manual na tela de Envios (`useShippingLabels`)
+- Na fase 4.5, incluir `pending` junto com `ready_to_ship`/`handling`.
+- Preservar lote e debounce já existentes (sem aumento descontrolado de chamadas).
+- Garantir que pedidos antigos com envio ativo também sejam atualizados.
 
-Escopo da correção
-- Corrigir a origem dos dados (SEO sempre atualizado e keywords realmente disponíveis).
-- Remover fallback visual enganoso no frontend.
-- Garantir regra definitiva: contagem de 60 sempre baseada no título canônico sem variação.
+3) Hardening de consistência para “Envios de hoje”
+- Manter `today_dispatch` baseado em status logístico ativo.
+- Evitar que status stale fique indefinidamente em `outros` por falta de refresh.
+- Não mudar regra de negócio de Full (continuar usando `logistic_type` como fonte de verdade).
 
-Implementação proposta
+4) Backfill corretivo imediato (após deploy)
+- Rodar uma passada de revalidação para shipments ativos com `last_sync_at` antigo.
+- Objetivo: normalizar casos já afetados (incluindo o shipment `46658814350`).
 
-Fase 1 — SEO nunca mais ficar “stale”
-1. Em `supabase/functions/radiography-collector/index.ts`:
-- Remover a lógica “skip SEO near timeout” para o lote inteiro.
-- Processar SEO em chunks menores (ex.: 20–40 itens por chamada) com self-chain de continuação quando aproximar timeout.
-- Persistir checkpoint (último item processado) para concluir 100% dos itens.
-- Ao final do fluxo, todos os itens analisados devem ter `seo_updated_at` da execução atual.
-
-2. No fluxo `full`:
-- Manter `sync/collection/analyze`, mas garantir que análise SEO completa finalize em cadeia (sem deixar itens com JSON antigo).
-
-Fase 2 — Reativar keywords com fonte válida
-1. Em `handleRefreshMarketKeywords`:
-- Corrigir leitura da base de vendas para colunas reais da tabela (sem depender de campos inexistentes).
-- Validar erro de query explicitamente (não seguir silenciosamente com categoria vazia).
-- Popular `market_keywords_cache` por categorias ativas do seller (sem limite artificial de registros).
-
-2. Em `analyzeSeoForItems`:
-- Garantir fallback contextual obrigatório quando categoria vier sem keywords:
-  - se categoria = 0 keywords, gerar palavras do próprio anúncio (título + descrição + atributos).
-  - nunca retornar `details=[]` quando há texto útil no anúncio.
-- Logar métricas por item: `raw_keywords`, `filtered_keywords`, `fallback_used`.
-
-Fase 3 — Regra definitiva dos 60 caracteres
-1. Backend:
-- Consolidar `getCanonicalTitle` para remover sufixo de variação completo (nome + valor), não apenas parte.
-- Salvar no `seo_analysis_json.title_analysis`:
-  - `raw_length`, `canonical_length`,
-  - `variation_removed=true/false`,
-  - `removed_tokens`.
-- Score e limite usam somente `canonical_length`.
-
-2. Frontend (`src/components/radiography/RadiographyDetailPanel.tsx`):
-- No card de título, usar apenas `title_analysis.canonical_length` para contador e alerta.
-- Não usar `item.title` bruto para pintar vermelho.
-- Se `title_analysis` ausente, mostrar “análise pendente” (não mostrar 62/60 bruto).
-
-Fase 4 — Verificação e bloqueio de regressão
-1. Criar validações de aceite:
-- Nenhum item com `title_analysis.limit_status='above_limit'` quando `canonical_length <= 60`.
-- Itens com variação “Cor Branco/Nenhum” devem exibir “variação removida do cálculo”.
-- `market_keywords_cache` com volume > 0 após refresh.
-- `details` de SEO preenchido para itens com descrição/atributos.
-
-2. Logs obrigatórios:
-- `SEO_ANALYSIS_STARTED/COMPLETED` com `items_total`, `items_processed`, `items_remaining`.
-- `REFRESH_KEYWORDS_*` com `categories_processed`, `keywords_written`.
-- `TITLE_CANONICALIZATION` com before/after por item (amostrado).
+Validação de aceite
+1) O shipment `46658814350` deve atualizar de `pending/buffered` para status/substatus real do marketplace.  
+2) Com filtros “Envios de hoje” + “Etiquetas para imprimir”, o pedido deve aparecer quando estiver de fato `ready_to_print/printed`.  
+3) Pedido com venda >7 dias e envio ativo hoje deve continuar aparecendo corretamente.  
+4) Não regressão: enviados/delivered continuam fora da fila operacional.
 
 Arquivos impactados
-- `supabase/functions/radiography-collector/index.ts`
-- `src/components/radiography/RadiographyDetailPanel.tsx`
-- (se necessário para estado de “análise pendente”) `src/hooks/useRadiographyData.ts`
-
-Resultado esperado após correção
-- O erro de “título acima de 60” desaparece de forma definitiva para anúncios com variação concatenada.
-- As keywords voltam a aparecer com contexto real do anúncio/categoria.
-- O seller deixa de ver inconsistência entre título exibido e score SEO.
+- `supabase/functions/shipping-status-sync/index.ts`
+- `src/hooks/useShippingLabels.ts`
+- (se necessário para observabilidade) logs em `sync_jobs`/`system_logs` nos pontos de recheck.
