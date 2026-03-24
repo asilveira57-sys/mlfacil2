@@ -96,13 +96,19 @@ export function useAnnouncements() {
         const target = a.target_seller_id;
         if (target) {
           // Comunicado segmentado → só para o seller alvo
+          // Ex: robô de promoções gera comunicado para 1 seller específico
           return activeSellerId && target === activeSellerId;
         }
 
-        // Comunicado global → só para sellers criados ANTES do published_at
-        if (userCreatedAt && a.published_at) {
-          return userCreatedAt <= new Date(a.published_at);
+        // Comunicado global → só exibe se foi criado DEPOIS do cadastro do usuário
+        // Cliente novo NÃO recebe mensagem antiga
+        if (userCreatedAt) {
+          const announcementDate = a.published_at
+            ? new Date(a.published_at)
+            : new Date(a.created_at);
+          return announcementDate >= userCreatedAt;
         }
+
         return true;
       });
 
