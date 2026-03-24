@@ -364,16 +364,16 @@ export function useSeed(): UseSeedResult {
         if (stillMissing.length > 0) {
           const { data: orderHits } = await supabase
             .from('meli_order_items_cache')
-            .select('item_id, item_title, item_thumbnail')
+            .select('item_id, title, thumbnail')
             .eq('seller_id', sellerId)
             .in('item_id', stillMissing)
-            .not('item_thumbnail', 'is', null)
+            .not('thumbnail', 'is', null)
             .limit(stillMissing.length);
           
           if (orderHits) {
             for (const oh of orderHits) {
               if (!hydratedThumbnails.has(oh.item_id)) {
-                hydratedThumbnails.set(oh.item_id, { title: oh.item_title, thumbnail: oh.item_thumbnail });
+                hydratedThumbnails.set(oh.item_id, { title: oh.title, thumbnail: oh.thumbnail });
               }
             }
           }

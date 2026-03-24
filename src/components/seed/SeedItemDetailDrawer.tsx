@@ -574,9 +574,9 @@ export function SeedItemDetailDrawer({
                             .insert({
                               title: taskTitle,
                               workspace_id: memberRow.workspace_id,
-                              created_by: user.id,
-                              priority: 'medium',
-                              status: 'todo',
+                              created_by_user_id: user.id,
+                              source_type: 'seed',
+                              source_id: itemId || null,
                             });
 
                           if (insertErr) throw insertErr;
