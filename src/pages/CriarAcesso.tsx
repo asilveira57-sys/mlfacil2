@@ -30,7 +30,7 @@ const CriarAcesso = () => {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate("/dashboard", { replace: true });
+        navigate("/primeiro-acesso", { replace: true });
       } else {
         setCheckingSession(false);
       }
