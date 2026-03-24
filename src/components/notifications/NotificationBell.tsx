@@ -161,7 +161,7 @@ export function NotificationBell({ workspaceId, sellerId }: NotificationBellProp
               </Badge>
             )}
           </div>
-          {counts?.unread && counts.unread > 0 && (
+          {pendingCount > 0 && (
             <Button
               variant="ghost"
               size="sm"
