@@ -1,40 +1,65 @@
 
-Diagnóstico (com evidência)
-1) O pedido informado `2000012046908069` não existe no cache local atual.  
-2) Pelo contexto da tela (buyer `CHARBON_WEAR`, 15/03), o pedido correspondente no cache é `2000015560022610` (shipment `46658814350`).  
-3) Esse shipment está **stale**: `shipment_status=pending`, `shipment_substatus=buffered`, `last_sync_at=2026-03-16`, então o sistema mantém `final_status='outros'` e ele não entra em “Etiquetas para imprimir”.  
-4) Causa-raiz: há dois filtros que “congelam” envios antigos:
-   - `shipping-status-sync` só revalida ativos com `last_sync_at` dos últimos 7 dias.
-   - `useShippingLabels` (fase 4.5) revalida apenas `ready_to_ship/handling`, excluindo `pending`.
 
-Plano de correção (definitivo)
-1) Corrigir revalidação de ativos no backend (`shipping-status-sync`)
-- Remover a trava de 7 dias em `last_sync_at`.
-- Revalidar ativos por prioridade: `pending` e mais antigos primeiro.
-- Manter limite por execução (ex.: 150 por conta) para controle de custo.
-- Logar contadores: `active_found`, `rechecked`, `updated`, `api_errors`.
+# Plano corretivo — Radiografia (4 problemas)
 
-2) Corrigir recheck manual na tela de Envios (`useShippingLabels`)
-- Na fase 4.5, incluir `pending` junto com `ready_to_ship`/`handling`.
-- Preservar lote e debounce já existentes (sem aumento descontrolado de chamadas).
-- Garantir que pedidos antigos com envio ativo também sejam atualizados.
+## Diagnóstico confirmado
 
-3) Hardening de consistência para “Envios de hoje”
-- Manter `today_dispatch` baseado em status logístico ativo.
-- Evitar que status stale fique indefinidamente em `outros` por falta de refresh.
-- Não mudar regra de negócio de Full (continuar usando `logistic_type` como fonte de verdade).
+### Problema 1: Keywords descartadas sem possibilidade de reversão
+O sistema descarta keywords por filtro semântico e as exibe como "descartadas por irrelevância" (seção cinza no card SEO). Não há botão para o seller reverter — se uma keyword descartada é relevante ao produto, ele não pode recuperá-la. A tabela `listing_keyword_feedback` já existe mas só funciona para keywords da lista principal (👍/👎). Descartadas ficam presas.
 
-4) Backfill corretivo imediato (após deploy)
-- Rodar uma passada de revalidação para shipments ativos com `last_sync_at` antigo.
-- Objetivo: normalizar casos já afetados (incluindo o shipment `46658814350`).
+### Problema 2: Atacado mostra "0 faixas" mesmo com faixas ativas
+A screenshot do ML confirma 2 faixas (2un 3% OFF e 10un 10% OFF). O código detecta atacado via tag `standard_price_by_quantity` (Strategy 1, linha 3115) e marca `hasMLWholesale=true` mas deixa `mlRangesCount=0`. Strategy 2 (prices API) roda em seguida mas o filtro por `context_restrictions` ou `min_purchase_unit` pode não bater com a estrutura real retornada pela API do ML. Resultado: `ranges_count: 0` no JSON, frontend exibe "Ativo (0 faixas)".
 
-Validação de aceite
-1) O shipment `46658814350` deve atualizar de `pending/buffered` para status/substatus real do marketplace.  
-2) Com filtros “Envios de hoje” + “Etiquetas para imprimir”, o pedido deve aparecer quando estiver de fato `ready_to_print/printed`.  
-3) Pedido com venda >7 dias e envio ativo hoje deve continuar aparecendo corretamente.  
-4) Não regressão: enviados/delivered continuam fora da fila operacional.
+### Problema 3: Visitas mostram "0 Visitas" no header do gráfico
+O gráfico plota corretamente os picos de visitas (13/03, 16/03, 20/03), mas o `EvolutionPill` no header calcula `delta = último_ponto - primeiro_ponto`. Como o primeiro e último ponto do período são ambos ~0, exibe "0 Visitas". Não é que visitas não estão sendo coletadas — é que o indicador resume errado.
 
-Arquivos impactados
-- `supabase/functions/shipping-status-sync/index.ts`
-- `src/hooks/useShippingLabels.ts`
-- (se necessário para observabilidade) logs em `sync_jobs`/`system_logs` nos pontos de recheck.
+### Problema 4: `visits_last` no health card também pode estar 0
+Se a última coleta capturou um dia sem visitas, `visits_last` fica 0 mesmo que nos 7 dias anteriores houve dezenas de visitas. O campo deveria representar o total da janela, não o valor do último dia.
+
+---
+
+## Correções
+
+### 1. Botão "Reverter" nas keywords descartadas
+**Arquivo:** `src/components/radiography/RadiographyDetailPanel.tsx`
+- Na seção de "palavras descartadas por irrelevância" (linhas 1461-1484), adicionar um botão `↩ Reverter` ao lado de cada keyword descartada.
+- Ao clicar, gravar na `listing_keyword_feedback` com `is_relevant = true`, sinalizando que o seller quer a palavra de volta.
+- Mover visualmente a keyword da lista "descartadas" para a lista "relevantes" (com badge de "resgatada pelo seller").
+- Na próxima análise SEO, o backend já lê `listing_keyword_feedback` e deve respeitar `is_relevant = true` como override do filtro automático.
+
+**Arquivo:** `supabase/functions/radiography-collector/index.ts`
+- No fluxo de filtragem de keywords (onde aplica blocklist/semântica), verificar se a keyword tem feedback `is_relevant = true` antes de descartar. Se sim, manter na lista de relevantes independentemente do score semântico.
+- Logar: `KEYWORD_RESTORED: "{keyword}" por feedback do seller`.
+
+### 2. Corrigir contagem de faixas de atacado
+**Arquivo:** `supabase/functions/radiography-collector/index.ts` (linhas 3100-3190)
+- Quando Strategy 1 detecta via tag mas `mlRangesCount` fica 0, Strategy 2 já roda (linha 3136). O problema está nos filtros `pxqPrices`:
+  - Adicionar detecção por `p.amount !== undefined && p.conditions?.start_quantity > 1` (estrutura real usada pelo ML para PxQ).
+  - Adicionar fallback: contar entradas com `conditions.start_quantity` distintos como faixas.
+- Se após ambas as strategies `ranges_count` continua 0 mas `hasMLWholesale = true` (tag confirmada), setar `ranges_count` = pelo menos 1 como mínimo garantido e logar `WHOLESALE_RANGES_ESTIMATED`.
+- No `positives`, usar a contagem real quando disponível.
+
+### 3. Corrigir indicador "0 Visitas" no header do gráfico
+**Arquivo:** `src/components/radiography/RadiographyDetailPanel.tsx` (linhas 641-644)
+- Substituir o `EvolutionPill` de Visitas para mostrar o **total acumulado** de visitas no período (soma de todos os pontos) em vez do delta primeiro→último.
+- Manter o delta para Preço e Estoque (faz sentido nessas métricas).
+- Formato: `∑ 62 Visitas` (soma) com seta de tendência baseada na comparação entre primeira e segunda metade do período.
+
+### 4. Garantir `visits_last` represente janela completa
+**Arquivo:** `supabase/functions/radiography-collector/index.ts` (linha 873)
+- O campo `visits` usado para `visits_last` vem da API `items/visits` com `date_from/date_to` de 7 dias. Verificar que o `date_from` está correto (7 dias atrás, não apenas "hoje").
+- Se a API retorna visitas por dia (array), somar todos os valores da janela em vez de pegar apenas o último.
+- Logar `VISITS_FETCH: item={id}, raw_value={v}, window=7d, source={api_response_type}`.
+
+---
+
+## Arquivos impactados
+- `src/components/radiography/RadiographyDetailPanel.tsx` (reversão de keywords + fix do pill de visitas)
+- `supabase/functions/radiography-collector/index.ts` (respeitar feedback na filtragem + fix atacado ranges + log de visitas)
+
+## Validação de aceite
+1. Keyword descartada pode ser revertida com 1 clique e reaparece na lista de relevantes.
+2. Produto com atacado ativo no ML (2 faixas) mostra "Ativo (2 faixas)" no card.
+3. Header do gráfico mostra total real de visitas do período, não delta zero.
+4. O health factor "Tráfego" reflete as visitas acumuladas da janela.
+
