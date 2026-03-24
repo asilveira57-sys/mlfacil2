@@ -90,14 +90,13 @@ Deno.serve(async (req) => {
       stats.accounts++;
 
       try {
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
+        // No time-based filter — revalidate ALL active shipments (pending included)
+        // Prioritize oldest-synced first to catch stale entries
         const { data: activeShipments, error: shipError } = await supabase
           .from("meli_shipments_cache")
           .select("shipment_id, shipment_status, shipment_substatus")
           .eq("seller_id", account.ml_user_id)
           .in("shipment_status", ACTIVE_STATUSES)
-          .gte("last_sync_at", sevenDaysAgo)
           .order("last_sync_at", { ascending: true })
           .limit(MAX_SHIPMENTS_PER_ACCOUNT);
 
