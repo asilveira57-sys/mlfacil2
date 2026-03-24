@@ -116,8 +116,10 @@ export function useBrFeriados(
   const from = `${year}-${monthStr}-01`;
   const lastDay = new Date(year, month, 0).getDate();
   const to = `${year}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+  const qc = useQueryClient();
+  const fetchedRef = useRef<string | null>(null);
 
-  return useQuery({
+  const query = useQuery({
     queryKey: ['br_feriados', from, to, uf, codigoIbge],
     queryFn: async () => {
       // Build OR filter: NACIONAL always + ESTADUAL if uf + MUNICIPAL if codigo_ibge
@@ -141,4 +143,30 @@ export function useBrFeriados(
     },
     staleTime: 30 * 60 * 1000,
   });
+
+  // Auto-fetch municipal holidays from API if none exist for this municipality+year
+  useEffect(() => {
+    if (!codigoIbge || !query.data) return;
+    const key = `${codigoIbge}-${year}`;
+    if (fetchedRef.current === key) return;
+
+    const hasMunicipal = query.data.some((f) => f.tipo === 'MUNICIPAL');
+    if (hasMunicipal) {
+      fetchedRef.current = key;
+      return;
+    }
+
+    // No municipal holidays found — fetch from complementary API
+    fetchedRef.current = key;
+    supabase.functions.invoke('fetch-municipal-holidays', {
+      body: { codigo_ibge: codigoIbge, ano: year },
+    }).then(({ error }) => {
+      if (!error) {
+        // Refetch holidays after new data inserted
+        qc.invalidateQueries({ queryKey: ['br_feriados'] });
+      }
+    });
+  }, [codigoIbge, year, query.data, qc]);
+
+  return query;
 }
