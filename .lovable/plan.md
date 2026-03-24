@@ -1,39 +1,57 @@
 
+Diagnóstico confirmado (com evidência)
 
-# Plano — Corrigir redirecionamento pós-confirmação de email
+1) O redirecionamento de Auth/CriarAcesso já está correto para `/primeiro-acesso` (não é mais `/dashboard`).
+2) O problema real está no backend: existe um trigger ativo `trg_auto_setup_new_user` (tabela `user_access_state`) que chama `handle_new_user_setup()` e força:
+   - `onboarding_status = 'completed'`
+   - `onboarding_completed_at = now()`
+3) Isso “mata” a jornada antes de começar. Resultado:
+   - `requires_onboarding = false`
+   - `ProtectedRoute` libera `/dashboard`
+   - seller cai direto no card “Conectar conta”.
+4) Evidência no seller de teste: `adeconex4@gmail.com` foi criado com `onboarding_status=completed` no mesmo timestamp da criação (sem progresso real de onboarding).
 
-## Diagnóstico
+Plano de correção definitiva
 
-O seller confirma o email e cai direto no Dashboard (tela "Conectar Mercado Livre") em vez de `/primeiro-acesso`. Existem **dois problemas** concorrentes:
+1) Corrigir a função de setup de novo usuário (migração)
+- Atualizar `public.handle_new_user_setup()` para:
+  - manter criação inicial da empresa (idempotente)
+  - remover a atualização automática para `onboarding_status='completed'`
+- Manter o trigger, mas sem “auto-completar onboarding”.
 
-### Problema 1: Auth.tsx redireciona para /dashboard incondicionalmente
-Em `Auth.tsx` (linha 131), o listener `onAuthStateChange` captura o evento `SIGNED_IN` após confirmação de email e redireciona para `/dashboard` sem verificar se o onboarding está pendente.
+2) Ajuste de dados dos usuários já afetados
+- Rodar backfill seguro para voltar a `pending` somente contas claramente auto-completadas indevidamente:
+  - `onboarding_status='completed'`
+  - `onboarding_completed_at` praticamente igual a `created_at`
+  - sem progresso real de onboarding
+  - sem conta ML conectada / sem plano selecionado
+- Corrigir explicitamente o seller de teste atual (`adeconex4@gmail.com`) para garantir desbloqueio imediato dos testes.
 
-### Problema 2: ProtectedRoute depende de accessLoading
-O `ProtectedRoute` deveria redirecionar para `/primeiro-acesso` quando `requiresOnboarding = true`, mas existe uma janela de tempo onde `accessLoading = true` e o componente mostra apenas o loader — se o Dashboard renderizar antes do access state resolver, o seller vê a tela de conexão.
+3) Garantia de fluxo
+- Não alterar rotas/lógica de frontend (já está correta).
+- O fluxo passa a funcionar assim:
+  - confirma email → entra/sessão inicia → vai para `/primeiro-acesso`
+  - como `requires_onboarding=true`, mostra Boas-vindas (step 1)
+  - só vai para dashboard após conclusão real do onboarding.
 
-## Correções
+4) Validação de aceite (obrigatória)
+- Cenário A (novo seller): cadastro + confirmação → abre Boas-vindas (não dashboard).
+- Cenário B (seller já onboarded): login → dashboard normalmente.
+- Cenário C (acesso direto em `/dashboard` com onboarding pendente): redireciona para `/primeiro-acesso`.
+- Cenário D (seller de teste atual): após ajuste, consegue iniciar onboarding completo para testes.
 
-### 1. Auth.tsx — Redirecionar para /primeiro-acesso quando onboarding pendente
-**Arquivo:** `src/pages/Auth.tsx`
-- No `onAuthStateChange` (SIGNED_IN), em vez de ir direto para `/dashboard`, navegar para `/primeiro-acesso`.
-- No `getSession` inicial (linha 122), mesma lógica: se já tem sessão, ir para `/primeiro-acesso` em vez de `/dashboard`.
-- A página `/primeiro-acesso` já tem a lógica interna que verifica `requiresOnboarding` — se o onboarding já está completo, ela redireciona para `/dashboard` automaticamente (linhas 68-72). Portanto é seguro sempre redirecionar para `/primeiro-acesso` após login.
+Arquivos/objetos impactados
 
-### 2. CriarAcesso.tsx — Mesma correção
-**Arquivo:** `src/pages/CriarAcesso.tsx`
-- Linha 33: trocar redirect de `/dashboard` para `/primeiro-acesso` quando sessão já existe.
+- Nova migração SQL:
+  - redefine `public.handle_new_user_setup()`
+  - backfill de `public.user_access_state` para casos afetados
+- Objetos de banco afetados:
+  - trigger `trg_auto_setup_new_user` (mantido)
+  - função `handle_new_user_setup` (corrigida)
+  - registros específicos em `user_access_state` (reparo)
 
-### 3. PrimeiroAcesso.tsx — Garantir robustez
-**Arquivo:** `src/pages/PrimeiroAcesso.tsx`
-- Já redireciona para `/dashboard` quando onboarding completo (linhas 68-72) — nenhuma alteração necessária.
+Resultado esperado
 
-## Arquivos impactados
-- `src/pages/Auth.tsx` (2 pontos: getSession redirect + onAuthStateChange)
-- `src/pages/CriarAcesso.tsx` (1 ponto: getSession redirect)
-
-## Validação
-1. Seller confirma email → abre `/primeiro-acesso` → tela de boas-vindas.
-2. Seller já com onboarding completo faz login → `/primeiro-acesso` → redireciona para `/dashboard` automaticamente.
-3. Sem regressão no fluxo de login normal.
-
+- Onboarding de Boas-vindas volta a ser a porta de entrada real para novos sellers.
+- Dashboard não sobrescreve mais a jornada inicial.
+- Correção definitiva para novos cadastros + reparo dos usuários já contaminados pelo auto-complete indevido.
