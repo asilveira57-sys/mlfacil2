@@ -591,9 +591,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         .from('meli_shipments_cache')
         .select('shipment_id')
         .eq('seller_id', sellerId)
-        .in('shipment_status', ['ready_to_ship', 'handling'])
+        .in('shipment_status', ['ready_to_ship', 'handling', 'pending'])
         .order('last_sync_at', { ascending: true })
-        .limit(100); // Only check the 100 oldest-synced active shipments
+        .limit(150); // Check oldest-synced active shipments including pending
 
       const activeIds = (activeShipments || []).map(s => s.shipment_id);
       console.log(`Phase 4.5: Re-checking ${activeIds.length} active shipments for status changes`);
@@ -1007,7 +1007,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         .from('meli_shipments_cache')
         .select('shipment_id')
         .eq('seller_id', sellerId)
-        .in('shipment_status', ['ready_to_ship', 'handling']);
+        .in('shipment_status', ['ready_to_ship', 'handling', 'pending']);
 
       if (!activeShipments || activeShipments.length === 0) return;
 
