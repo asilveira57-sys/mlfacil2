@@ -5,14 +5,13 @@ import { useUserAccess } from "@/contexts/UserAccessContext";
 import { useOnboardingEvents } from "@/hooks/useOnboardingEvents";
 import {
   BarChart3, Loader2, ArrowRight, Rocket, Building2, Printer,
-  User, Sparkles, PartyPopper,
+  User, Sparkles, PartyPopper, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
-// ZPL plan tier ID — must match DB
 const ZPL_PLAN_ID = "a0000000-0000-0000-0000-000000000001";
 
 type OnboardingStep = "welcome" | "name" | "company" | "plan" | "connect" | "importing" | "done";
@@ -48,10 +47,8 @@ const PrimeiroAcesso = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Persist on change
   useEffect(() => { saveState(state); }, [state]);
 
-  // Auth check
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
@@ -60,8 +57,6 @@ const PrimeiroAcesso = () => {
         setLoading(false);
         registerEvent("onboarding_page_opened");
         registerEvent("email_confirmed_return", { user_id: session.user.id });
-
-        // Pre-fill name from signup metadata
         if (!state.userName && session.user.user_metadata?.full_name) {
           setState(prev => ({ ...prev, userName: session.user.user_metadata?.full_name || "" }));
         }
@@ -70,7 +65,6 @@ const PrimeiroAcesso = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
 
-  // If onboarding done, go to dashboard
   useEffect(() => {
     if (!accessLoading && isAuthenticated && !requiresOnboarding) {
       navigate("/dashboard", { replace: true });
@@ -81,7 +75,7 @@ const PrimeiroAcesso = () => {
     setState(prev => ({ ...prev, step }));
   }, []);
 
-  // ── Step: Save user name ──
+  // ── Save user name ──
   const handleSaveName = async () => {
     if (!state.userName.trim()) {
       toast.error("Por favor, informe seu nome.");
@@ -91,17 +85,12 @@ const PrimeiroAcesso = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
-      // Update auth metadata
       await supabase.auth.updateUser({ data: { full_name: state.userName.trim() } });
-
-      // Update profiles table
       await supabase.from("profiles").upsert({
         id: user.id,
         full_name: state.userName.trim(),
         email: user.email,
       }, { onConflict: "id" });
-
       registerEvent("user_name_saved", { name: state.userName.trim() });
       goTo("company");
     } catch (err: any) {
@@ -112,7 +101,7 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  // ── Step: Save company ──
+  // ── Save company ──
   const handleSaveCompany = async () => {
     if (!state.companyName.trim()) {
       toast.error("Informe o nome da empresa.");
@@ -122,14 +111,11 @@ const PrimeiroAcesso = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
-      // Check existing
       const { data: existing } = await supabase
         .from("companies")
         .select("id")
         .eq("user_id", user.id)
         .limit(1);
-
       let companyId: string;
       if (existing && existing.length > 0) {
         companyId = existing[0].id;
@@ -143,7 +129,6 @@ const PrimeiroAcesso = () => {
         if (error) throw error;
         companyId = newCompany.id;
       }
-
       setState(prev => ({ ...prev, companyId }));
       registerEvent("company_created", { company_id: companyId, company_name: state.companyName.trim() }, companyId);
       goTo("plan");
@@ -155,16 +140,14 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  // ── Step: Plan choice ──
+  // ── Plan choice ──
   const handlePlanChoice = async (choice: "full" | "zpl") => {
     setSubmitting(true);
     try {
       setState(prev => ({ ...prev, planChoice: choice }));
-
       if (choice === "zpl") {
         const ok = await selectPlan(ZPL_PLAN_ID);
         if (!ok) throw new Error("Failed to select ZPL plan");
-
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           await (supabase as any).from("user_plan_assignments").insert({
@@ -175,16 +158,13 @@ const PrimeiroAcesso = () => {
             created_by: user.id,
           });
         }
-
         registerEvent("plan_selected", { plan: "zpl", plan_id: ZPL_PLAN_ID }, state.companyId);
-
-        // Complete onboarding immediately for ZPL
         const success = await updateOnboarding({ status: "completed" });
         if (success) {
           registerEvent("onboarding_completed", { plan: "zpl" }, state.companyId);
           localStorage.removeItem(STORAGE_KEY);
           await refetch();
-          toast.success("Ambiente ZPL ativado!");
+          toast.success("Ambiente pronto!");
           navigate("/dashboard", { replace: true });
         }
       } else {
@@ -199,7 +179,7 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  // ── Step: Skip connect (placeholder → user will connect from dashboard) ──
+  // ── Skip connect ──
   const handleConnectLater = async () => {
     setSubmitting(true);
     try {
@@ -209,7 +189,7 @@ const PrimeiroAcesso = () => {
         registerEvent("onboarding_completed", { plan: "full", connected: false }, state.companyId);
         localStorage.removeItem(STORAGE_KEY);
         await refetch();
-        toast.success("Ambiente ativado! Conecte o Mercado Livre no painel.");
+        toast.success("Ambiente ativado!");
         navigate("/dashboard", { replace: true });
       }
     } catch (err: any) {
@@ -220,7 +200,7 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  // ── Final activation (after import) ──
+  // ── Final activation ──
   const handleFinalize = async () => {
     setSubmitting(true);
     try {
@@ -239,7 +219,6 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  // ── Loading ──
   if (loading || accessLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -248,7 +227,6 @@ const PrimeiroAcesso = () => {
     );
   }
 
-  // ── Step renders ──
   const renderStep = () => {
     switch (state.step) {
       // ═══════════════════════════════════════════════
@@ -256,18 +234,18 @@ const PrimeiroAcesso = () => {
       // ═══════════════════════════════════════════════
       case "welcome":
         return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4 animate-in fade-in duration-500">
-            <div className="w-20 h-20 bg-primary/10 rounded-2xl flex items-center justify-center mb-8">
+          <div className="flex flex-col items-center justify-center min-h-[65vh] text-center px-4 animate-fade-in">
+            <div className="w-20 h-20 bg-primary/10 rounded-2xl flex items-center justify-center mb-8 animate-scale-in">
               <Sparkles className="w-10 h-10 text-primary" />
             </div>
-            <h1 className="text-3xl font-bold text-foreground mb-4">
-              Seja muito bem-vindo ao MKTP Fácil
+            <h1 className="text-3xl font-bold text-foreground mb-3 tracking-tight">
+              Bem-vindo ao MKTP Fácil
             </h1>
-            <p className="text-muted-foreground max-w-lg text-lg leading-relaxed mb-10">
-              O MKTP Fácil foi desenvolvido para aplicar técnicas práticas de consultoria, organização, automação e acompanhamento da operação do seller em um só lugar.
+            <p className="text-muted-foreground max-w-md text-base leading-relaxed mb-10">
+              Aqui você organiza, acompanha e melhora sua operação com base em práticas reais de consultoria — tudo em um só lugar.
             </p>
-            <Button size="lg" onClick={() => goTo("name")} className="gap-2 px-10 text-base">
-              Avançar <ArrowRight className="w-5 h-5" />
+            <Button size="lg" onClick={() => goTo("name")} className="gap-2 px-12 text-base h-12 rounded-xl">
+              Começar <ArrowRight className="w-5 h-5" />
             </Button>
           </div>
         );
@@ -277,15 +255,15 @@ const PrimeiroAcesso = () => {
       // ═══════════════════════════════════════════════
       case "name":
         return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4 animate-in fade-in duration-500">
-            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6">
+          <div className="flex flex-col items-center justify-center min-h-[65vh] text-center px-4 animate-fade-in">
+            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6 animate-scale-in">
               <User className="w-8 h-8 text-primary" />
             </div>
             <h2 className="text-2xl font-bold text-foreground mb-2">
-              Prometo ser breve.
+              Como você prefere ser chamado?
             </h2>
-            <p className="text-muted-foreground text-lg mb-8">
-              Mas preciso saber seu nome.
+            <p className="text-muted-foreground text-base mb-8">
+              Vamos personalizar sua experiência dentro do sistema.
             </p>
             <div className="w-full max-w-sm space-y-4">
               <Input
@@ -293,7 +271,7 @@ const PrimeiroAcesso = () => {
                 value={state.userName}
                 onChange={(e) => setState(prev => ({ ...prev, userName: e.target.value }))}
                 maxLength={80}
-                className="text-center text-lg h-12"
+                className="text-center text-lg h-12 rounded-xl border-border/60 focus:border-primary transition-colors"
                 autoFocus
                 onKeyDown={(e) => e.key === "Enter" && !submitting && state.userName.trim() && handleSaveName()}
               />
@@ -301,7 +279,7 @@ const PrimeiroAcesso = () => {
                 size="lg"
                 onClick={handleSaveName}
                 disabled={!state.userName.trim() || submitting}
-                className="gap-2 w-full text-base"
+                className="gap-2 w-full text-base h-12 rounded-xl"
               >
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Avançar <ArrowRight className="w-5 h-5" />
@@ -315,15 +293,15 @@ const PrimeiroAcesso = () => {
       // ═══════════════════════════════════════════════
       case "company":
         return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4 animate-in fade-in duration-500">
-            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6">
+          <div className="flex flex-col items-center justify-center min-h-[65vh] text-center px-4 animate-fade-in">
+            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6 animate-scale-in">
               <Building2 className="w-8 h-8 text-primary" />
             </div>
             <h2 className="text-2xl font-bold text-foreground mb-2">
-              Também preciso saber o nome da sua empresa
+              Qual o nome da sua empresa?
             </h2>
-            <p className="text-muted-foreground text-lg mb-8">
-              para criar seu workspace.
+            <p className="text-muted-foreground text-base mb-8">
+              Vamos usar esse nome para organizar seu ambiente e suas tarefas.
             </p>
             <div className="w-full max-w-sm space-y-4">
               <Input
@@ -331,7 +309,7 @@ const PrimeiroAcesso = () => {
                 value={state.companyName}
                 onChange={(e) => setState(prev => ({ ...prev, companyName: e.target.value }))}
                 maxLength={120}
-                className="text-center text-lg h-12"
+                className="text-center text-lg h-12 rounded-xl border-border/60 focus:border-primary transition-colors"
                 autoFocus
                 onKeyDown={(e) => e.key === "Enter" && !submitting && state.companyName.trim() && handleSaveCompany()}
               />
@@ -339,7 +317,7 @@ const PrimeiroAcesso = () => {
                 size="lg"
                 onClick={handleSaveCompany}
                 disabled={!state.companyName.trim() || submitting}
-                className="gap-2 w-full text-base"
+                className="gap-2 w-full text-base h-12 rounded-xl"
               >
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Avançar <ArrowRight className="w-5 h-5" />
@@ -353,57 +331,59 @@ const PrimeiroAcesso = () => {
       // ═══════════════════════════════════════════════
       case "plan":
         return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4 animate-in fade-in duration-500">
+          <div className="flex flex-col items-center justify-center min-h-[65vh] text-center px-4 animate-fade-in">
             <h2 className="text-2xl font-bold text-foreground mb-2">
-              {state.userName ? `${state.userName}, você` : "Você"} vai testar as ferramentas de Mercado Livre ou somente impressão em ZPL?
+              Como você quer usar o sistema?
             </h2>
-            <p className="text-muted-foreground mb-8">Escolha como deseja usar o sistema.</p>
+            <p className="text-muted-foreground text-base mb-8">
+              Você pode mudar isso depois, se precisar.
+            </p>
 
             <div className="w-full max-w-lg grid gap-4">
               <Card
-                className="cursor-pointer hover:border-primary/60 transition-all hover:shadow-lg border-2 group"
+                className="cursor-pointer border-2 border-border/60 hover:border-primary/70 transition-all duration-200 hover:shadow-md group"
                 onClick={() => !submitting && handlePlanChoice("full")}
               >
                 <CardContent className="p-6">
                   <div className="flex items-start gap-4">
-                    <div className="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
+                    <div className="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors duration-200">
                       <BarChart3 className="w-7 h-7 text-primary" />
                     </div>
                     <div className="flex-1 text-left">
-                      <h3 className="font-semibold text-lg text-foreground mb-1">Quero testar Mercado Livre</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Dashboard completo, análises de vendas, radiografia de anúncios, publicidade, envios, promoções e muito mais.
+                      <h3 className="font-semibold text-lg text-foreground mb-1">Gerenciar Mercado Livre</h3>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        Importe vendas, acompanhe resultados e use ferramentas de análise.
                       </p>
-                      <p className="text-xs text-primary mt-2 font-medium">Requer conexão com Mercado Livre</p>
                     </div>
+                    <ArrowRight className="w-5 h-5 text-muted-foreground/30 group-hover:text-primary transition-colors duration-200 mt-4 flex-shrink-0" />
                   </div>
                 </CardContent>
               </Card>
 
               <Card
-                className="cursor-pointer hover:border-primary/60 transition-all hover:shadow-lg border-2 group"
+                className="cursor-pointer border-2 border-border/60 hover:border-primary/70 transition-all duration-200 hover:shadow-md group"
                 onClick={() => !submitting && handlePlanChoice("zpl")}
               >
                 <CardContent className="p-6">
                   <div className="flex items-start gap-4">
-                    <div className="w-14 h-14 bg-muted rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-muted/80 transition-colors">
+                    <div className="w-14 h-14 bg-muted rounded-xl flex items-center justify-center flex-shrink-0 group-hover:bg-muted/80 transition-colors duration-200">
                       <Printer className="w-7 h-7 text-muted-foreground" />
                     </div>
                     <div className="flex-1 text-left">
-                      <h3 className="font-semibold text-lg text-foreground mb-1">Quero usar somente ZPL</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Impressão de etiquetas, calculadora de precificação, comissões e outras ferramentas — sem integração.
+                      <h3 className="font-semibold text-lg text-foreground mb-1">Usar apenas etiquetas (ZPL)</h3>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        Impressão de etiquetas e uso das ferramentas básicas.
                       </p>
-                      <p className="text-xs text-muted-foreground mt-2">Sem necessidade de conta no Mercado Livre</p>
                     </div>
+                    <ArrowRight className="w-5 h-5 text-muted-foreground/30 group-hover:text-primary transition-colors duration-200 mt-4 flex-shrink-0" />
                   </div>
                 </CardContent>
               </Card>
             </div>
 
             {submitting && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground mt-6">
-                <Loader2 className="w-4 h-4 animate-spin" /> Configurando seu ambiente...
+              <div className="flex items-center gap-2 text-sm text-muted-foreground mt-6 animate-fade-in">
+                <Loader2 className="w-4 h-4 animate-spin" /> Preparando seu ambiente...
               </div>
             )}
           </div>
@@ -414,23 +394,22 @@ const PrimeiroAcesso = () => {
       // ═══════════════════════════════════════════════
       case "connect":
         return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4 animate-in fade-in duration-500">
-            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6">
+          <div className="flex flex-col items-center justify-center min-h-[65vh] text-center px-4 animate-fade-in">
+            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6 animate-scale-in">
               <BarChart3 className="w-8 h-8 text-primary" />
             </div>
             <h2 className="text-2xl font-bold text-foreground mb-2">
               Conectar conta do Mercado Livre
             </h2>
-            <p className="text-muted-foreground max-w-md mb-8">
-              Para importar seus dados e ativar o painel completo, vincule sua conta do Mercado Livre. A conexão é rápida e segura via OAuth oficial.
+            <p className="text-muted-foreground max-w-md mb-8 text-base leading-relaxed">
+              Vincule sua conta para importar seus dados e ativar o painel completo. A conexão é rápida e segura.
             </p>
             <div className="w-full max-w-sm space-y-3">
               <Button
                 size="lg"
-                className="gap-2 w-full text-base"
+                className="gap-2 w-full text-base h-12 rounded-xl"
                 onClick={() => {
                   registerEvent("marketplace_connection_started", {}, state.companyId);
-                  // Navigate to the ML OAuth connection flow
                   navigate("/settings?section=contas");
                 }}
               >
@@ -438,12 +417,12 @@ const PrimeiroAcesso = () => {
               </Button>
               <Button
                 variant="ghost"
-                className="w-full text-muted-foreground"
+                className="w-full text-muted-foreground hover:text-foreground transition-colors"
                 onClick={handleConnectLater}
                 disabled={submitting}
               >
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Conectar depois e entrar no sistema
+                Conectar depois
               </Button>
             </div>
           </div>
@@ -454,17 +433,25 @@ const PrimeiroAcesso = () => {
       // ═══════════════════════════════════════════════
       case "importing":
         return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4 animate-in fade-in duration-500">
-            <Loader2 className="w-16 h-16 text-primary animate-spin mb-6" />
-            <h2 className="text-2xl font-bold text-foreground mb-2">
-              Estamos importando as vendas dos últimos 30 dias
+          <div className="flex flex-col items-center justify-center min-h-[65vh] text-center px-4 animate-fade-in">
+            <div className="relative w-20 h-20 mb-8">
+              <div className="absolute inset-0 rounded-full bg-primary/10 animate-ping opacity-20" />
+              <div className="relative w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
+                <Loader2 className="w-10 h-10 text-primary animate-spin" />
+              </div>
+            </div>
+            <h2 className="text-2xl font-bold text-foreground mb-3">
+              Estamos preparando seus dados
             </h2>
-            <p className="text-muted-foreground text-lg mb-4">
-              Enquanto isso, vá buscar um café. ☕
+            <p className="text-muted-foreground text-base mb-2 max-w-md leading-relaxed">
+              Estamos importando suas vendas recentes para montar seu ambiente.
             </p>
-            <p className="text-sm text-muted-foreground">
-              Avisaremos quando estiver terminado.
+            <p className="text-sm text-muted-foreground/70 mb-6">
+              Isso pode levar alguns minutos.
             </p>
+            <div className="bg-muted/40 rounded-xl px-5 py-3 text-sm text-muted-foreground max-w-sm">
+              Você pode deixar essa tela aberta. Avisaremos quando estiver pronto.
+            </div>
           </div>
         );
 
@@ -473,24 +460,24 @@ const PrimeiroAcesso = () => {
       // ═══════════════════════════════════════════════
       case "done":
         return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4 animate-in fade-in duration-500">
-            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6 animate-bounce">
-              <PartyPopper className="w-10 h-10 text-primary" />
+          <div className="flex flex-col items-center justify-center min-h-[65vh] text-center px-4 animate-fade-in">
+            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6 animate-scale-in">
+              <CheckCircle2 className="w-10 h-10 text-primary" />
             </div>
             <h2 className="text-3xl font-bold text-foreground mb-3">
-              🎉 Tudo pronto!
+              Tudo pronto
             </h2>
-            <p className="text-muted-foreground text-lg max-w-md mb-8">
-              Seu ambiente inicial já foi preparado e o sistema está liberado para uso.
+            <p className="text-muted-foreground text-base max-w-md mb-10 leading-relaxed">
+              Seu ambiente inicial já foi preparado. Agora você pode começar a usar o sistema.
             </p>
             <Button
               size="lg"
               onClick={handleFinalize}
               disabled={submitting}
-              className="gap-2 px-10 text-base"
+              className="gap-2 px-12 text-base h-12 rounded-xl"
             >
               {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-5 h-5" />}
-              Entrar no sistema
+              Acessar sistema
             </Button>
           </div>
         );
@@ -500,19 +487,18 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  // ── Step indicator dots ──
   const stepOrder: OnboardingStep[] = ["welcome", "name", "company", "plan"];
   const currentIndex = stepOrder.indexOf(state.step);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted/20 to-background">
       {/* Minimal header */}
-      <header className="border-b border-border/50 bg-card/60 backdrop-blur-sm">
+      <header className="border-b border-border/40 bg-card/50 backdrop-blur-sm">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center gap-3">
           <div className="w-9 h-9 bg-primary rounded-xl flex items-center justify-center">
             <BarChart3 className="w-5 h-5 text-primary-foreground" />
           </div>
-          <span className="text-lg font-bold text-foreground">MKTP Fácil</span>
+          <span className="text-lg font-bold text-foreground tracking-tight">MKTP Fácil</span>
         </div>
       </header>
 
@@ -525,12 +511,12 @@ const PrimeiroAcesso = () => {
             {stepOrder.map((s, i) => (
               <div
                 key={s}
-                className={`w-2.5 h-2.5 rounded-full transition-all ${
+                className={`h-2 rounded-full transition-all duration-300 ${
                   i === currentIndex
-                    ? "bg-primary w-6"
+                    ? "bg-primary w-7"
                     : i < currentIndex
-                    ? "bg-primary/40"
-                    : "bg-muted-foreground/20"
+                    ? "bg-primary/40 w-2.5"
+                    : "bg-muted-foreground/20 w-2.5"
                 }`}
               />
             ))}
