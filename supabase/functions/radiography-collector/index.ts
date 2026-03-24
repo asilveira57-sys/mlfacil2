@@ -3141,10 +3141,11 @@ async function analyzeWholesaleForItem(
             if (priceResp.ok) {
               const priceData = await priceResp.json();
               const prices = Array.isArray(priceData.prices) ? priceData.prices : [];
-              // PxQ uses type="standard" with conditions.context_restrictions containing user_type_business
-              // or conditions.min_purchase_unit
+              // PxQ detection: multiple strategies
               const pxqPrices = prices.filter((p: any) => {
                 if (!p.conditions) return false;
+                // Check start_quantity > 1 (main PxQ indicator)
+                if (p.conditions.start_quantity && p.conditions.start_quantity > 1) return true;
                 // Check min_purchase_unit > 1
                 if (p.conditions.min_purchase_unit && p.conditions.min_purchase_unit > 1) return true;
                 // Check context_restrictions for business user
@@ -3153,11 +3154,16 @@ async function analyzeWholesaleForItem(
                 }
                 return false;
               });
+              
               if (pxqPrices.length > 0) {
                 hasMLWholesale = true;
-                mlRangesCount = Math.max(mlRangesCount, pxqPrices.length);
+                // Count distinct start_quantity values as ranges
+                const distinctQuantities = new Set(pxqPrices.map((p: any) => p.conditions?.start_quantity).filter(Boolean));
+                mlRangesCount = Math.max(mlRangesCount, distinctQuantities.size > 0 ? distinctQuantities.size : pxqPrices.length);
                 if (detectionSource === 'none') detectionSource = 'prices_api:pxq';
+                console.log(`[rad-collector] Wholesale prices API: ${pxqPrices.length} pxq entries, ${distinctQuantities.size} distinct quantities`);
               }
+              
               // Also check for bulk type as legacy fallback
               if (!hasMLWholesale) {
                 const bulkPrices = prices.filter((p: any) => p.type === 'bulk');
@@ -3167,8 +3173,24 @@ async function analyzeWholesaleForItem(
                   detectionSource = 'prices_api:bulk';
                 }
               }
+              
+              // Also check for amount-based entries with quantity conditions
+              if (!hasMLWholesale) {
+                const amountPrices = prices.filter((p: any) => p.amount !== undefined && p.conditions?.start_quantity > 1);
+                if (amountPrices.length > 0) {
+                  hasMLWholesale = true;
+                  mlRangesCount = amountPrices.length;
+                  detectionSource = 'prices_api:amount_qty';
+                }
+              }
             }
           } catch {}
+        }
+        
+        // Fallback: if tag detected wholesale but ranges still 0, guarantee at least 1
+        if (hasMLWholesale && mlRangesCount === 0) {
+          mlRangesCount = 1;
+          console.log(`[rad-collector] WHOLESALE_RANGES_ESTIMATED: ${itemId} tag confirmed but ranges=0, setting minimum=1`);
         }
       } catch (mlErr) {
         console.warn(`[rad-collector] Wholesale ML API check failed for ${itemId}:`, mlErr);
