@@ -550,7 +550,42 @@ export function SeedItemDetailDrawer({
                     <Button 
                       variant="outline" 
                       className="w-full justify-start"
-                      onClick={() => toast.info("Em breve: Criar tarefa")}
+                      onClick={async () => {
+                        try {
+                          const { data: { user } } = await supabase.auth.getUser();
+                          if (!user) { toast.error("Usuário não autenticado"); return; }
+
+                          // Find user's workspace
+                          const { data: memberRow } = await supabase
+                            .from('workspace_members')
+                            .select('workspace_id')
+                            .eq('user_id', user.id)
+                            .limit(1)
+                            .maybeSingle();
+
+                          if (!memberRow?.workspace_id) {
+                            toast.error("Crie um workspace primeiro em Configurações");
+                            return;
+                          }
+
+                          const taskTitle = `Revisar: ${data.planted?.item_title || data.listing?.title || itemId}`;
+                          const { error: insertErr } = await supabase
+                            .from('tasks')
+                            .insert({
+                              title: taskTitle,
+                              workspace_id: memberRow.workspace_id,
+                              created_by_user_id: user.id,
+                              source_type: 'seed',
+                              source_id: itemId || null,
+                            });
+
+                          if (insertErr) throw insertErr;
+                          toast.success("Tarefa criada! Acesse em /tarefas");
+                        } catch (err: any) {
+                          console.error('[Seed] Task creation error:', err);
+                          toast.error("Erro ao criar tarefa: " + (err.message || ''));
+                        }
+                      }}
                     >
                       <ClipboardPlus className="h-4 w-4 mr-2" />
                       Criar tarefa para este anúncio
