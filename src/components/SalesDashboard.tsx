@@ -304,6 +304,7 @@ export function SalesDashboard() {
 
       // Onboarding sync is now handled by /primeiro-acesso flow
       // Just trigger background sync if account has no cached orders
+      const debug = response.data?._debug;
       if (
         isFirstLoad && 
         debug?.cachedOrdersCount === 0 && 
