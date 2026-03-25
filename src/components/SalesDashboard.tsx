@@ -8,7 +8,6 @@ import { SalesChart } from "./SalesChart";
 import { AnnualSalesChart } from "./AnnualSalesChart";
 import { TopProductsTable } from "./TopProductsTable";
 import { DashboardFilters } from "./DashboardFilters";
-// OnboardingSync removed — onboarding now handled entirely by /primeiro-acesso
 import { SyncStatusIndicator } from "./sales/SyncStatusIndicator";
 import { SystemEmpty, SystemError } from "@/components/ui/system-states";
 import { Card } from "@/components/ui/card";
