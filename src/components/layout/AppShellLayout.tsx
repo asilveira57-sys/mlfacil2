@@ -19,6 +19,7 @@ import { HeaderUtilities } from "@/components/utilities";
 import { ModuleNotesOverlay, FloatingPostItButton } from "@/components/notes";
 import { useUtilitiesPreferences } from "@/hooks/useUtilitiesPreferences";
 import { GlobalExplanatoryCardGate } from "@/components/explanatory-cards/GlobalExplanatoryCardGate";
+import { ModuleIntroProvider } from "@/contexts/ModuleIntroContext";
 
 // Context for page-level header customization
 interface PageHeaderContextType {
@@ -93,6 +94,7 @@ export function AppShellLayout() {
 
   return (
     <ProtectedRoute>
+    <ModuleIntroProvider>
     <PageHeaderContext.Provider value={contextValue}>
       <SidebarProvider defaultOpen={true}>
         <div className="min-h-screen flex w-full bg-background">
@@ -150,6 +152,7 @@ export function AppShellLayout() {
         </div>
       </SidebarProvider>
     </PageHeaderContext.Provider>
+    </ModuleIntroProvider>
     </ProtectedRoute>
   );
 }
