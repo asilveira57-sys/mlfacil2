@@ -1,32 +1,37 @@
 
 
-## Plano: Rotear e-mails de autenticação pelo Resend
+## Diagnóstico: Por que os e-mails ainda saem pelo Lovable
 
-### Problema
-O `auth-email-hook` usa `@lovable.dev/email-js` (API do Lovable) para enviar e-mails de autenticação. Como não há domínio Lovable Email configurado, os e-mails saem de `no-reply@auth.lovable.cloud` ao invés do seu domínio `ale.mktpfacil.com`.
+O problema não está no código da edge function — ela já usa o Resend corretamente. O problema é que **o sistema de autenticação não está chamando a sua edge function**. Confirmações:
 
-### Solução
-Modificar o `auth-email-hook` para enviar e-mails via **Resend API** usando a `RESEND_API_KEY` que já está configurada, mantendo os templates React Email existentes.
+- `auth-email-hook` tem **zero logs** (nunca foi invocado)
+- **Nenhum domínio de e-mail** está configurado no workspace Lovable
 
-### Mudanças
+### Por que isso acontece
 
-**1. Atualizar `supabase/functions/auth-email-hook/index.ts`**
-- Remover imports de `@lovable.dev/email-js` e `@lovable.dev/webhooks-js`
-- Usar Resend API (`https://api.resend.com/emails`) para envio
-- Usar `RESEND_API_KEY` (já existe como secret)
-- Remetente: `MKTP Fácil <noreply@ale.mktpfacil.com>`
-- Manter verificação de webhook via `LOVABLE_API_KEY` para o fluxo de preview
-- Manter todos os 6 templates existentes (signup, invite, magiclink, recovery, email_change, reauthentication)
-- Manter rendering via React Email (`renderAsync`)
+Para que o sistema de autenticação use sua edge function customizada (`auth-email-hook`), é necessário que um **domínio de e-mail Lovable** esteja configurado e com DNS verificado. Sem isso, o sistema ignora o hook e usa o e-mail padrão (`auth.lovable.cloud`).
 
-**2. Deploy da edge function**
-- Redeployar `auth-email-hook`
+A verificação de DNS do Lovable exige **registros NS para subdomínio** — e a Hostinger não suporta isso.
 
-### Resultado
-- E-mails de cadastro, reset de senha, magic link → saem de `noreply@ale.mktpfacil.com` via Resend
-- Templates visuais em português permanecem iguais
-- Sistema de e-mails transacionais/campanhas (email-worker-send) continua inalterado
+### Solução: Migrar DNS para Cloudflare (gratuito)
 
-### Nota técnica
-O fluxo de preview (`/preview`) continuará funcionando com `LOVABLE_API_KEY`. Apenas o envio real será redirecionado para o Resend.
+O Cloudflare suporta registros NS para subdomínios. Com ele:
+
+1. **Criar conta gratuita no Cloudflare** e adicionar `mktpfacil.com`
+2. **Atualizar os nameservers** na Hostinger para apontar para o Cloudflare
+3. **Recriar todos os registros DNS existentes** no Cloudflare (ele importa automaticamente na maioria dos casos)
+4. **Adicionar os registros do Resend** (TXT, CNAME, MX) para `ale.mktpfacil.com` no Cloudflare
+5. **Configurar domínio de e-mail Lovable** — o Cloudflare suporta os registros NS necessários
+6. **Registrar o hook de autenticação** — com o domínio verificado, o sistema passa a chamar `auth-email-hook`, que envia via Resend
+
+### Resultado esperado
+
+- O sistema de autenticação chama `auth-email-hook`
+- A edge function renderiza os templates em português e envia via **Resend**
+- E-mails saem de `noreply@ale.mktpfacil.com`
+- Templates visuais personalizados são mantidos
+
+### Nota importante
+
+Sem migrar o DNS para um provedor que suporte registros NS para subdomínios (como Cloudflare), não há como ativar o hook customizado dentro do Lovable Cloud. A Hostinger é o bloqueio atual.
 
