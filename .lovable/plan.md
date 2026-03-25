@@ -1,38 +1,32 @@
 
 
-## Plano: Resolver conflito de DNS e manter apenas Resend
+## Plano: Rotear e-mails de autenticação pelo Resend
 
 ### Problema
-O subdomínio `ale.mktpfacil.com` está delegado ao Lovable Emails (NS records apontando para `ns3.adorável.nuvem` / `ns4.adorável.nuvem`), o que impede o Resend de verificar os registros DNS nesse subdomínio. A Hostinger não permite criar registros NS para subdomínios na interface padrão.
+O `auth-email-hook` usa `@lovable.dev/email-js` (API do Lovable) para enviar e-mails de autenticação. Como não há domínio Lovable Email configurado, os e-mails saem de `no-reply@auth.lovable.cloud` ao invés do seu domínio `ale.mktpfacil.com`.
 
-### Solução (3 passos)
+### Solução
+Modificar o `auth-email-hook` para enviar e-mails via **Resend API** usando a `RESEND_API_KEY` que já está configurada, mantendo os templates React Email existentes.
 
-**Passo 1 — Remover o domínio do Lovable Emails**
-- Na tela que você está agora (**Cloud → Emails → Gerenciar domínios**), clique nos 3 pontinhos (⋮) ao lado de `mktpfacil.com` e selecione **Remover domínio**
-- Isso desativa a tentativa de delegação NS do Lovable
+### Mudanças
 
-**Passo 2 — Remover registros DNS na Hostinger (se existirem)**
-- Acesse o painel de DNS da Hostinger para `mktpfacil.com`
-- Procure e **remova** qualquer registro NS ou TXT relacionado ao Lovable:
-  - NS `ale.mktpfacil.com` → ns3.adorável.nuvem (ou ns3.lovable.cloud)
-  - NS `ale.mktpfacil.com` → ns4.adorável.nuvem (ou ns4.lovable.cloud)  
-  - TXT `_lovable-email.mktpfacil.com` → lovable_email_verify=...
-- Se esses registros nunca foram adicionados (já que a Hostinger não suporta NS para subdomínios), pule este passo
+**1. Atualizar `supabase/functions/auth-email-hook/index.ts`**
+- Remover imports de `@lovable.dev/email-js` e `@lovable.dev/webhooks-js`
+- Usar Resend API (`https://api.resend.com/emails`) para envio
+- Usar `RESEND_API_KEY` (já existe como secret)
+- Remetente: `MKTP Fácil <noreply@ale.mktpfacil.com>`
+- Manter verificação de webhook via `LOVABLE_API_KEY` para o fluxo de preview
+- Manter todos os 6 templates existentes (signup, invite, magiclink, recovery, email_change, reauthentication)
+- Manter rendering via React Email (`renderAsync`)
 
-**Passo 3 — Configurar DNS do Resend na Hostinger**
-- No dashboard do Resend, vá em **Domains** e adicione `ale.mktpfacil.com` (ou o domínio raiz `mktpfacil.com`)
-- O Resend vai pedir registros do tipo **TXT**, **MX** e **CNAME** — esses a Hostinger suporta normalmente
-- Adicione os registros conforme indicado pelo Resend:
-  - TXT (SPF) 
-  - CNAME (DKIM — geralmente 3 registros)
-  - MX (para bounce handling)
-- Aguarde a propagação DNS (pode levar até 72h) e clique em **Verify** no Resend
+**2. Deploy da edge function**
+- Redeployar `auth-email-hook`
 
 ### Resultado
-- Resend conseguirá verificar o domínio
-- Seus e-mails transacionais (onboarding, campanhas, etc.) continuarão funcionando via Resend
-- Sem conflito de DNS
+- E-mails de cadastro, reset de senha, magic link → saem de `noreply@ale.mktpfacil.com` via Resend
+- Templates visuais em português permanecem iguais
+- Sistema de e-mails transacionais/campanhas (email-worker-send) continua inalterado
 
 ### Nota técnica
-Nenhuma alteração de código é necessária. O sistema de e-mails do app já usa Resend via edge function e `RESEND_API_KEY`. Apenas a configuração de DNS precisa ser resolvida.
+O fluxo de preview (`/preview`) continuará funcionando com `LOVABLE_API_KEY`. Apenas o envio real será redirecionado para o Resend.
 
