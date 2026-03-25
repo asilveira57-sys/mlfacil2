@@ -107,12 +107,12 @@ const PrimeiroAcesso = () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // Check for active sync jobs
+        // Check for active sync jobs (sync_jobs uses "module" not "job_type", "created_by_user_id" not "user_id")
         const { data: jobs } = await supabase
           .from("sync_jobs")
-          .select("id, status, metadata, job_type")
-          .eq("user_id", user.id)
-          .in("job_type", ["orders_sync", "full_sync", "initial_sync"])
+          .select("id, status, metadata, module")
+          .eq("created_by_user_id", user.id)
+          .in("module", ["orders", "sales", "initial"])
           .order("created_at", { ascending: false })
           .limit(3);
 
@@ -121,11 +121,11 @@ const PrimeiroAcesso = () => {
           return;
         }
 
-        const activeJob = jobs.find(j => j.status === "running" || j.status === "pending" || j.status === "processing");
-        const completedJob = jobs.find(j => j.status === "success" || j.status === "done");
+        const activeJob = jobs.find((j: any) => j.status === "running" || j.status === "pending" || j.status === "processing");
+        const completedJob = jobs.find((j: any) => j.status === "success" || j.status === "done");
 
         if (activeJob) {
-          const meta = activeJob.metadata as any;
+          const meta = (activeJob as any).metadata as any;
           setImportProgress({
             phase: meta?.phase || 1,
             processed: meta?.processed_records || 0,
@@ -133,7 +133,7 @@ const PrimeiroAcesso = () => {
           });
         } else if (completedJob) {
           // Import finished — move to done step
-          registerEvent("import_completed", { job_id: completedJob.id });
+          registerEvent("import_completed", { job_id: (completedJob as any).id });
           setState(prev => ({ ...prev, step: "done" }));
         }
       } catch (err) {
