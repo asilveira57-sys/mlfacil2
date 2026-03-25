@@ -5,7 +5,7 @@ import {
   Settings, Activity, Target, Store, Package, Printer, ListChecks,
   LogOut, TrendingUp, ChevronDown, MessageSquareText, Shield, Tags,
   History, Sprout, BookOpen, Calculator, Percent, Truck, Bell, Star,
-  Wrench, CalendarDays, Sparkles, LucideIcon,
+  Wrench, CalendarDays, Sparkles, Info, LucideIcon,
 } from "lucide-react";
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
@@ -24,6 +24,7 @@ import { useDynamicMenu, DynamicMenuItem } from "@/hooks/useDynamicMenu";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import { useModuleIntro } from "@/contexts/ModuleIntroContext";
 
 // Icon registry
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -44,6 +45,7 @@ export function DynamicSidebar() {
   const { state: sidebarState } = useSidebar();
   const isCollapsed = sidebarState === "collapsed";
   const { menuTree, isLoading } = useDynamicMenu();
+  const { modulesWithCards, openModuleIntro } = useModuleIntro();
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [comingSoonDialog, setComingSoonDialog] = useState<string | null>(null);
@@ -130,32 +132,54 @@ export function DynamicSidebar() {
       );
     }
 
+    const hasIntro = modulesWithCards.has(item.key);
+
     return (
       <SidebarMenuItem key={item.id}>
-        <SidebarMenuButton
-          asChild={item.status !== 'coming_soon'}
-          isActive={active}
-          className={cn(
-            "transition-colors",
-            active && "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
-            item.status === 'coming_soon' && "opacity-60 cursor-default"
+        <div className="flex items-center w-full group/intro">
+          <SidebarMenuButton
+            asChild={item.status !== 'coming_soon'}
+            isActive={active}
+            className={cn(
+              "transition-colors flex-1",
+              active && "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+              item.status === 'coming_soon' && "opacity-60 cursor-default"
+            )}
+            onClick={item.status === 'coming_soon' ? (e: React.MouseEvent) => handleItemClick(item, e) : undefined}
+          >
+            {item.status === 'coming_soon' ? (
+              <div className="flex items-center gap-3 w-full">
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="flex-1 truncate">{item.label}</span>
+                {renderStatusBadge(item.status)}
+              </div>
+            ) : (
+              <Link to={item.route!} className="flex items-center gap-3 w-full">
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="flex-1 truncate">{item.label}</span>
+                {renderStatusBadge(item.status)}
+              </Link>
+            )}
+          </SidebarMenuButton>
+          {hasIntro && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openModuleIntro(item.key);
+                  }}
+                  className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-muted-foreground hover:bg-sidebar-accent/50 transition-colors opacity-0 group-hover/intro:opacity-100 shrink-0 mr-1"
+                  aria-label="Ver introdução do módulo"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Ver introdução do módulo</TooltipContent>
+            </Tooltip>
           )}
-          onClick={item.status === 'coming_soon' ? (e: React.MouseEvent) => handleItemClick(item, e) : undefined}
-        >
-          {item.status === 'coming_soon' ? (
-            <div className="flex items-center gap-3 w-full">
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="flex-1 truncate">{item.label}</span>
-              {renderStatusBadge(item.status)}
-            </div>
-          ) : (
-            <Link to={item.route!} className="flex items-center gap-3 w-full">
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="flex-1 truncate">{item.label}</span>
-              {renderStatusBadge(item.status)}
-            </Link>
-          )}
-        </SidebarMenuButton>
+        </div>
       </SidebarMenuItem>
     );
   };
