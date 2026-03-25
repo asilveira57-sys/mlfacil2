@@ -8,7 +8,6 @@ import { SalesChart } from "./SalesChart";
 import { AnnualSalesChart } from "./AnnualSalesChart";
 import { TopProductsTable } from "./TopProductsTable";
 import { DashboardFilters } from "./DashboardFilters";
-// OnboardingSync removed — onboarding now handled entirely by /primeiro-acesso
 import { SyncStatusIndicator } from "./sales/SyncStatusIndicator";
 import { SystemEmpty, SystemError } from "@/components/ui/system-states";
 import { Card } from "@/components/ui/card";
@@ -167,7 +166,7 @@ export function SalesDashboard() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
-  // showOnboarding removed — onboarding handled by /primeiro-acesso
+  
   const [syncPhase, setSyncPhase] = useState<1 | 2 | 3>(1);
   
   // Background sync indicator

@@ -81,11 +81,12 @@ const PrimeiroAcesso = () => {
   }, [navigate]);
 
   // CRITICAL: Only redirect to dashboard when onboarding is TRULY completed
-  // This is the guard that prevents premature access
+  // AND user is NOT in the import/done flow (they must explicitly click "Acessar sistema")
   useEffect(() => {
     if (!accessLoading && isAuthenticated && !requiresOnboarding) {
-      // Only redirect if we're not in the middle of import/done flow
-      if (state.step !== "importing" && state.step !== "done") {
+      // Block redirect if user is in importing or done steps — they MUST finalize explicitly
+      const isInImportFlow = state.step === "importing" || state.step === "done";
+      if (!isInImportFlow) {
         localStorage.removeItem(STORAGE_KEY);
         navigate("/dashboard", { replace: true });
       }
