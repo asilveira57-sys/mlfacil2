@@ -167,7 +167,7 @@ export function SalesDashboard() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  // showOnboarding removed — onboarding handled by /primeiro-acesso
   const [syncPhase, setSyncPhase] = useState<1 | 2 | 3>(1);
   
   // Background sync indicator
