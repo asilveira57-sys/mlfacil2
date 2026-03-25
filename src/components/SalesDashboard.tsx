@@ -338,7 +338,7 @@ export function SalesDashboard() {
   // Reset states when account changes
   useEffect(() => {
     setIsFirstLoad(true);
-    setShowOnboarding(false);
+    // showOnboarding removed
     setIsSyncing(false);
     setSalesData(null);
     setError(null);
@@ -463,7 +463,7 @@ export function SalesDashboard() {
 
       // Show dashboard with 7 days of data
       console.log("[Progressive Sync] Phase 1 complete - showing dashboard");
-      setShowOnboarding(false);
+      // showOnboarding removed
       setIsSyncing(false);
       fetchSalesData(undefined, true);
 
@@ -510,7 +510,7 @@ export function SalesDashboard() {
 
     } catch (err: any) {
       console.error("Error in progressive sync:", err);
-      setShowOnboarding(false);
+      // showOnboarding removed
     } finally {
       setIsSyncing(false);
     }
