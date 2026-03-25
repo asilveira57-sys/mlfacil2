@@ -9593,6 +9593,41 @@ export type Database = {
         }
         Relationships: []
       }
+      module_intro_logs: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          module_slug: string
+          tenant_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action?: string
+          created_at?: string
+          id?: string
+          module_slug: string
+          tenant_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          module_slug?: string
+          tenant_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_intro_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       module_rating_stats: {
         Row: {
           avg_stars: number | null
