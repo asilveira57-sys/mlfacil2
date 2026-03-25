@@ -5,7 +5,7 @@ import {
   Settings, Activity, Target, Store, Package, Printer, ListChecks,
   LogOut, TrendingUp, ChevronDown, MessageSquareText, Shield, Tags,
   History, Sprout, BookOpen, Calculator, Percent, Truck, Bell, Star,
-  Wrench, CalendarDays, Sparkles, LucideIcon,
+  Wrench, CalendarDays, Sparkles, Info, LucideIcon,
 } from "lucide-react";
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
@@ -24,6 +24,7 @@ import { useDynamicMenu, DynamicMenuItem } from "@/hooks/useDynamicMenu";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import { useModuleIntro } from "@/contexts/ModuleIntroContext";
 
 // Icon registry
 const ICON_MAP: Record<string, LucideIcon> = {
