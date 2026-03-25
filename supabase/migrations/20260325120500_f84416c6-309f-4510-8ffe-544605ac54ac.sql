@@ -1,0 +1,1 @@
+UPDATE public.system_modules SET name = 'Curva ABC Shopee' WHERE id = 'b0000000-0000-0000-0000-000000000201';
