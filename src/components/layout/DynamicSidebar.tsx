@@ -45,6 +45,7 @@ export function DynamicSidebar() {
   const { state: sidebarState } = useSidebar();
   const isCollapsed = sidebarState === "collapsed";
   const { menuTree, isLoading } = useDynamicMenu();
+  const { modulesWithCards, openModuleIntro } = useModuleIntro();
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [comingSoonDialog, setComingSoonDialog] = useState<string | null>(null);
