@@ -8,7 +8,7 @@ import { SalesChart } from "./SalesChart";
 import { AnnualSalesChart } from "./AnnualSalesChart";
 import { TopProductsTable } from "./TopProductsTable";
 import { DashboardFilters } from "./DashboardFilters";
-import { OnboardingSync } from "./OnboardingSync";
+// OnboardingSync removed — onboarding now handled entirely by /primeiro-acesso
 import { SyncStatusIndicator } from "./sales/SyncStatusIndicator";
 import { SystemEmpty, SystemError } from "@/components/ui/system-states";
 import { Card } from "@/components/ui/card";
@@ -302,9 +302,8 @@ export function SalesDashboard() {
       setCached(cacheKey, response.data, currentFilters.dateTo);
       setSalesData(response.data);
 
-      // Check if this is a new account that needs onboarding sync
-      // Only trigger ONCE per seller to prevent infinite loop for accounts with no sales
-      const debug = response.data?._debug;
+      // Onboarding sync is now handled by /primeiro-acesso flow
+      // Just trigger background sync if account has no cached orders
       if (
         isFirstLoad && 
         debug?.cachedOrdersCount === 0 && 
@@ -312,7 +311,6 @@ export function SalesDashboard() {
         hasSyncedForSellerRef.current !== activeSellerId
       ) {
         hasSyncedForSellerRef.current = activeSellerId;
-        setShowOnboarding(true);
         startProgressiveSync(activeSellerId, session.access_token);
       }
       setIsFirstLoad(false);
@@ -550,23 +548,7 @@ export function SalesDashboard() {
     };
   }, [activeSellerId, toast, fetchSalesData, t]);
 
-  // Show onboarding sync screen
-  if (showOnboarding) {
-    const totalRec = (syncJob?.metadata?.total_records as number) || 0;
-    const processedRec = (syncJob?.metadata?.processed_records as number) || 0;
-    const progress = totalRec > 0 ? (processedRec / totalRec) * 100 : 0;
-
-    return (
-      <OnboardingSync
-        sellerNickname={salesData?.seller?.nickname}
-        progress={progress}
-        processedRecords={processedRec}
-        totalRecords={totalRec}
-        status={syncJob?.status || "running"}
-        phase={syncPhase}
-      />
-    );
-  }
+  // OnboardingSync removed — dashboard is now pure, no onboarding overlay
 
   if (error === "connect") {
     return (
