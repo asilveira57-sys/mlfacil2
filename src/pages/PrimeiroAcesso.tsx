@@ -1,11 +1,11 @@
-import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserAccess } from "@/contexts/UserAccessContext";
 import { useOnboardingEvents } from "@/hooks/useOnboardingEvents";
 import {
   BarChart3, Loader2, ArrowRight, Rocket, Building2, Printer,
-  User, Sparkles, PartyPopper, CheckCircle2,
+  User, Sparkles, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,14 +40,30 @@ function saveState(s: OnboardingState) {
 
 const PrimeiroAcesso = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { loading: accessLoading, isAuthenticated, requiresOnboarding, updateOnboarding, selectPlan, refetch } = useUserAccess();
   const { registerEvent } = useOnboardingEvents();
 
   const [state, setState] = useState<OnboardingState>(loadState);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ phase: 1, processed: 0, total: 0 });
+  const importPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => { saveState(state); }, [state]);
+
+  // Detect ml_connected param from OAuth callback
+  useEffect(() => {
+    const mlConnected = searchParams.get("ml_connected");
+    if (mlConnected === "true") {
+      const nickname = searchParams.get("nickname") || "";
+      registerEvent("marketplace_connected_return", { nickname });
+      setState(prev => ({ ...prev, step: "importing", planChoice: "full" }));
+      // Clean URL params
+      window.history.replaceState({}, "", "/primeiro-acesso");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -56,7 +72,6 @@ const PrimeiroAcesso = () => {
       } else {
         setLoading(false);
         registerEvent("onboarding_page_opened");
-        registerEvent("email_confirmed_return", { user_id: session.user.id });
         if (!state.userName && session.user.user_metadata?.full_name) {
           setState(prev => ({ ...prev, userName: session.user.user_metadata?.full_name || "" }));
         }
@@ -65,11 +80,79 @@ const PrimeiroAcesso = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
 
+  // CRITICAL: Only redirect to dashboard when onboarding is TRULY completed
+  // This is the guard that prevents premature access
   useEffect(() => {
     if (!accessLoading && isAuthenticated && !requiresOnboarding) {
-      navigate("/dashboard", { replace: true });
+      // Only redirect if we're not in the middle of import/done flow
+      if (state.step !== "importing" && state.step !== "done") {
+        localStorage.removeItem(STORAGE_KEY);
+        navigate("/dashboard", { replace: true });
+      }
     }
-  }, [accessLoading, isAuthenticated, requiresOnboarding, navigate]);
+  }, [accessLoading, isAuthenticated, requiresOnboarding, navigate, state.step]);
+
+  // Poll for import progress when on "importing" step
+  useEffect(() => {
+    if (state.step !== "importing") {
+      if (importPollRef.current) {
+        clearInterval(importPollRef.current);
+        importPollRef.current = null;
+      }
+      return;
+    }
+
+    const pollImport = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        // Check for active sync jobs (sync_jobs uses "module" not "job_type", "created_by_user_id" not "user_id")
+        const { data: jobs } = await supabase
+          .from("sync_jobs")
+          .select("id, status, metadata, module")
+          .eq("created_by_user_id", user.id)
+          .in("module", ["orders", "sales", "initial"])
+          .order("created_at", { ascending: false })
+          .limit(3);
+
+        if (!jobs || jobs.length === 0) {
+          // No sync jobs yet — might still be starting, wait
+          return;
+        }
+
+        const activeJob = jobs.find((j: any) => j.status === "running" || j.status === "pending" || j.status === "processing");
+        const completedJob = jobs.find((j: any) => j.status === "success" || j.status === "done");
+
+        if (activeJob) {
+          const meta = (activeJob as any).metadata as any;
+          setImportProgress({
+            phase: meta?.phase || 1,
+            processed: meta?.processed_records || 0,
+            total: meta?.total_records || 0,
+          });
+        } else if (completedJob) {
+          // Import finished — move to done step
+          registerEvent("import_completed", { job_id: (completedJob as any).id });
+          setState(prev => ({ ...prev, step: "done" }));
+        }
+      } catch (err) {
+        console.error("[Onboarding] Poll error:", err);
+      }
+    };
+
+    // Initial poll
+    pollImport();
+    importPollRef.current = setInterval(pollImport, 3000);
+
+    return () => {
+      if (importPollRef.current) {
+        clearInterval(importPollRef.current);
+        importPollRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.step]);
 
   const goTo = useCallback((step: OnboardingStep) => {
     setState(prev => ({ ...prev, step }));
@@ -200,7 +283,7 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  // ── Final activation ──
+  // ── Final activation (from "done" step) ──
   const handleFinalize = async () => {
     setSubmitting(true);
     try {
@@ -217,6 +300,12 @@ const PrimeiroAcesso = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // ── Skip import (go to done directly) ──
+  const handleSkipImport = async () => {
+    registerEvent("import_skipped", {}, state.companyId);
+    goTo("done");
   };
 
   if (loading || accessLoading) {
@@ -458,7 +547,7 @@ const PrimeiroAcesso = () => {
         );
 
       // ═══════════════════════════════════════════════
-      // TELA 6 — IMPORTAÇÃO EM ANDAMENTO
+      // TELA 6 — IMPORTAÇÃO EM ANDAMENTO (FIXA)
       // ═══════════════════════════════════════════════
       case "importing":
         return (
@@ -478,9 +567,31 @@ const PrimeiroAcesso = () => {
             <p className="text-sm text-muted-foreground/70 mb-6">
               Isso pode levar alguns minutos.
             </p>
-            <div className="bg-muted/40 rounded-xl px-5 py-3 text-sm text-muted-foreground max-w-sm">
+            {importProgress.total > 0 && (
+              <div className="w-full max-w-sm mb-6">
+                <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                  <span>Fase {importProgress.phase}</span>
+                  <span>{importProgress.processed} / {importProgress.total}</span>
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min((importProgress.processed / importProgress.total) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            <div className="bg-muted/40 rounded-xl px-5 py-3 text-sm text-muted-foreground max-w-sm mb-6">
               Você pode deixar essa tela aberta. Avisaremos quando estiver pronto.
             </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground/60 hover:text-foreground"
+              onClick={handleSkipImport}
+            >
+              Pular e entrar no sistema
+            </Button>
           </div>
         );
 

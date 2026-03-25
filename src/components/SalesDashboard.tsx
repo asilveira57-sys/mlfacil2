@@ -8,7 +8,7 @@ import { SalesChart } from "./SalesChart";
 import { AnnualSalesChart } from "./AnnualSalesChart";
 import { TopProductsTable } from "./TopProductsTable";
 import { DashboardFilters } from "./DashboardFilters";
-import { OnboardingSync } from "./OnboardingSync";
+// OnboardingSync removed — onboarding now handled entirely by /primeiro-acesso
 import { SyncStatusIndicator } from "./sales/SyncStatusIndicator";
 import { SystemEmpty, SystemError } from "@/components/ui/system-states";
 import { Card } from "@/components/ui/card";
@@ -167,7 +167,7 @@ export function SalesDashboard() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  // showOnboarding removed — onboarding handled by /primeiro-acesso
   const [syncPhase, setSyncPhase] = useState<1 | 2 | 3>(1);
   
   // Background sync indicator
@@ -302,8 +302,8 @@ export function SalesDashboard() {
       setCached(cacheKey, response.data, currentFilters.dateTo);
       setSalesData(response.data);
 
-      // Check if this is a new account that needs onboarding sync
-      // Only trigger ONCE per seller to prevent infinite loop for accounts with no sales
+      // Onboarding sync is now handled by /primeiro-acesso flow
+      // Just trigger background sync if account has no cached orders
       const debug = response.data?._debug;
       if (
         isFirstLoad && 
@@ -312,7 +312,6 @@ export function SalesDashboard() {
         hasSyncedForSellerRef.current !== activeSellerId
       ) {
         hasSyncedForSellerRef.current = activeSellerId;
-        setShowOnboarding(true);
         startProgressiveSync(activeSellerId, session.access_token);
       }
       setIsFirstLoad(false);
@@ -339,7 +338,7 @@ export function SalesDashboard() {
   // Reset states when account changes
   useEffect(() => {
     setIsFirstLoad(true);
-    setShowOnboarding(false);
+    // showOnboarding removed
     setIsSyncing(false);
     setSalesData(null);
     setError(null);
@@ -464,7 +463,7 @@ export function SalesDashboard() {
 
       // Show dashboard with 7 days of data
       console.log("[Progressive Sync] Phase 1 complete - showing dashboard");
-      setShowOnboarding(false);
+      // showOnboarding removed
       setIsSyncing(false);
       fetchSalesData(undefined, true);
 
@@ -511,7 +510,7 @@ export function SalesDashboard() {
 
     } catch (err: any) {
       console.error("Error in progressive sync:", err);
-      setShowOnboarding(false);
+      // showOnboarding removed
     } finally {
       setIsSyncing(false);
     }
@@ -550,23 +549,7 @@ export function SalesDashboard() {
     };
   }, [activeSellerId, toast, fetchSalesData, t]);
 
-  // Show onboarding sync screen
-  if (showOnboarding) {
-    const totalRec = (syncJob?.metadata?.total_records as number) || 0;
-    const processedRec = (syncJob?.metadata?.processed_records as number) || 0;
-    const progress = totalRec > 0 ? (processedRec / totalRec) * 100 : 0;
-
-    return (
-      <OnboardingSync
-        sellerNickname={salesData?.seller?.nickname}
-        progress={progress}
-        processedRecords={processedRec}
-        totalRecords={totalRec}
-        status={syncJob?.status || "running"}
-        phase={syncPhase}
-      />
-    );
-  }
+  // OnboardingSync removed — dashboard is now pure, no onboarding overlay
 
   if (error === "connect") {
     return (

@@ -466,8 +466,8 @@ serve(async (req) => {
       }
     );
 
-    // Redirect to sync screen instead of dashboard
-    const redirectUrl = new URL(`${frontendOrigin}/sincronizando`);
+    // Redirect to onboarding flow (it will detect ml_connected and show import step)
+    const redirectUrl = new URL(`${frontendOrigin}/primeiro-acesso`);
     redirectUrl.searchParams.set('ml_connected', 'true');
     redirectUrl.searchParams.set('nickname', userData.nickname || '');
     
