@@ -16,7 +16,10 @@ export function EmailTemplatesTab() {
   const { data: categories } = useEmailCategories();
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewSubject, setPreviewSubject] = useState<string | null>(null);
   const [previewVariables, setPreviewVariables] = useState<Record<string, string>>({});
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [previewTemplateName, setPreviewTemplateName] = useState('');
 
   const getCategoryName = (categoryId: string) => {
     return categories?.find((c) => c.id === categoryId)?.name || '—';
@@ -25,7 +28,7 @@ export function EmailTemplatesTab() {
   const handleEdit = (tpl: EmailTemplate) => {
     setEditingTemplate({ ...tpl });
     setPreviewHtml(null);
-    // Pre-fill preview variables
+    setPreviewSubject(null);
     const vars: Record<string, string> = {};
     for (const v of tpl.variables_schema_json || []) {
       vars[v] = '';
@@ -45,12 +48,35 @@ export function EmailTemplatesTab() {
     setEditingTemplate(null);
   };
 
-  const handlePreview = () => {
+  const handlePreviewInEdit = () => {
     if (!editingTemplate) return;
     renderPreview.mutate(
       { template_id: editingTemplate.id, variables: previewVariables },
       {
         onSuccess: (data) => setPreviewHtml(data.body_html),
+      }
+    );
+  };
+
+  const handleQuickPreview = (tpl: EmailTemplate) => {
+    setPreviewTemplateName(tpl.name);
+    setPreviewHtml(null);
+    setPreviewSubject(null);
+    setPreviewDialogOpen(true);
+
+    // Build sample variables
+    const sampleVars: Record<string, string> = {};
+    for (const v of tpl.variables_schema_json || []) {
+      sampleVars[v] = getSampleValue(v);
+    }
+
+    renderPreview.mutate(
+      { template_id: tpl.id, variables: sampleVars },
+      {
+        onSuccess: (data) => {
+          setPreviewHtml(data.body_html);
+          setPreviewSubject(data.subject);
+        },
       }
     );
   };
@@ -87,14 +113,55 @@ export function EmailTemplatesTab() {
                     <span className="text-[10px] text-muted-foreground">{getCategoryName(tpl.category_id)}</span>
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => handleEdit(tpl)}>
-                  <Pencil className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => handleQuickPreview(tpl)} title="Preview">
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleEdit(tpl)} title="Editar">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
         </CardContent>
       </Card>
+
+      {/* Quick Preview Dialog */}
+      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-4 w-4" />
+              Preview: {previewTemplateName}
+            </DialogTitle>
+          </DialogHeader>
+
+          {renderPreview.isPending && !previewHtml ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : previewHtml ? (
+            <div className="space-y-3">
+              {previewSubject && (
+                <div className="rounded-md border bg-muted/30 px-3 py-2">
+                  <span className="text-xs text-muted-foreground">Assunto: </span>
+                  <span className="text-sm font-medium">{previewSubject}</span>
+                </div>
+              )}
+              <div className="rounded-lg border bg-background p-4">
+                <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">Erro ao carregar preview</p>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewDialogOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Dialog */}
       <Dialog open={!!editingTemplate} onOpenChange={(open) => !open && setEditingTemplate(null)}>
@@ -159,7 +226,7 @@ export function EmailTemplatesTab() {
               <div className="border rounded-lg p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-medium">Preview</Label>
-                  <Button variant="outline" size="sm" onClick={handlePreview} disabled={renderPreview.isPending}>
+                  <Button variant="outline" size="sm" onClick={handlePreviewInEdit} disabled={renderPreview.isPending}>
                     {renderPreview.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Eye className="h-3 w-3 mr-1" />}
                     Renderizar
                   </Button>
@@ -199,4 +266,25 @@ export function EmailTemplatesTab() {
       </Dialog>
     </div>
   );
+}
+
+/** Returns a realistic sample value for common variable names */
+function getSampleValue(varName: string): string {
+  const samples: Record<string, string> = {
+    user_name: 'João Silva',
+    recipient: 'joao@exemplo.com',
+    site_name: 'MKTP Fácil',
+    confirmation_url: 'https://mktpfacil.com/confirm?token=abc123',
+    subject: 'Oferta Especial de Novembro',
+    plan_name: 'Profissional',
+    days_to_expire: '3',
+    token: '482901',
+    ticket_id: '#1042',
+    company_name: 'Loja Exemplo LTDA',
+    period: '30 dias',
+    date: new Date().toLocaleDateString('pt-BR'),
+    amount: 'R$ 149,90',
+    message: 'Sua solicitação foi processada com sucesso.',
+  };
+  return samples[varName] || `[${varName}]`;
 }
