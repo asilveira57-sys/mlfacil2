@@ -6,7 +6,7 @@ import { useOnboardingEvents } from "@/hooks/useOnboardingEvents";
 import { useJourneySnapshot } from "@/hooks/useJourneySnapshot";
 import {
   BarChart3, Loader2, ArrowRight, Rocket, Building2, Printer,
-  User, Sparkles, CheckCircle2, AlertCircle,
+  User, Sparkles, CheckCircle2, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import { toast } from "sonner";
 
 const ZPL_PLAN_ID = "a0000000-0000-0000-0000-000000000001";
 
-type OnboardingStep = "welcome" | "name" | "company" | "plan" | "connect" | "importing" | "done";
+type OnboardingStep = "welcome" | "name" | "company" | "guide" | "plan" | "connect" | "importing" | "done";
 
 interface OnboardingState {
   step: OnboardingStep;
@@ -34,7 +34,6 @@ function loadState(): OnboardingState {
     if (stored) {
       const parsed = JSON.parse(stored) as OnboardingState;
       const step = parsed.step;
-      // Validate consistency: advanced steps require previous data to be filled
       const advancedSteps: OnboardingStep[] = ["connect", "importing", "done"];
       if (advancedSteps.includes(step)) {
         if (!parsed.userName?.trim() || !parsed.companyName?.trim() || !parsed.planChoice) {
@@ -77,7 +76,6 @@ const PrimeiroAcesso = () => {
       const nickname = searchParams.get("nickname") || "";
       registerEvent("marketplace_connected_return", { nickname });
       setState(prev => ({ ...prev, step: "importing", planChoice: "full" }));
-      // Clean URL params
       window.history.replaceState({}, "", "/primeiro-acesso");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,11 +97,8 @@ const PrimeiroAcesso = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
 
-  // CRITICAL: Only redirect to dashboard when onboarding is TRULY completed
-  // AND user is NOT in the import/done flow (they must explicitly click "Acessar sistema")
   useEffect(() => {
     if (!accessLoading && isAuthenticated && !requiresOnboarding) {
-      // Block redirect if user is in importing or done steps — they MUST finalize explicitly
       const isInImportFlow = state.step === "importing" || state.step === "done";
       if (!isInImportFlow) {
         localStorage.removeItem(STORAGE_KEY);
@@ -127,7 +122,6 @@ const PrimeiroAcesso = () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // Check for active sync jobs (sync_jobs uses "module" not "job_type", "created_by_user_id" not "user_id")
         const { data: jobs } = await supabase
           .from("sync_jobs")
           .select("id, status, metadata, module")
@@ -136,10 +130,7 @@ const PrimeiroAcesso = () => {
           .order("created_at", { ascending: false })
           .limit(3);
 
-        if (!jobs || jobs.length === 0) {
-          // No sync jobs yet — might still be starting, wait
-          return;
-        }
+        if (!jobs || jobs.length === 0) return;
 
         const activeJob = jobs.find((j: any) => j.status === "running" || j.status === "pending" || j.status === "processing");
         const completedJob = jobs.find((j: any) => j.status === "success" || j.status === "done");
@@ -152,7 +143,6 @@ const PrimeiroAcesso = () => {
             total: meta?.total_records || 0,
           });
         } else if (completedJob) {
-          // Import finished — move to done step
           registerEvent("import_completed", { job_id: (completedJob as any).id });
           logJourneyEvent("import_completed", { job_id: (completedJob as any).id }, state.companyId, null);
           setState(prev => ({ ...prev, step: "done" }));
@@ -162,7 +152,6 @@ const PrimeiroAcesso = () => {
       }
     };
 
-    // Initial poll
     pollImport();
     importPollRef.current = setInterval(pollImport, 3000);
 
@@ -235,7 +224,7 @@ const PrimeiroAcesso = () => {
       }
       setState(prev => ({ ...prev, companyId }));
       registerEvent("company_created", { company_id: companyId, company_name: state.companyName.trim() }, companyId);
-      goTo("plan");
+      goTo("guide");
     } catch (err: any) {
       console.error("[Onboarding] Company error:", err);
       toast.error("Erro ao criar empresa: " + (err.message || "Tente novamente"));
@@ -268,8 +257,6 @@ const PrimeiroAcesso = () => {
             notes: "Selected during onboarding",
             created_by: user.id,
           });
-
-          // Não bloquear o onboarding por falha de escrita complementar.
           if (assignmentError) {
             console.warn("[Onboarding] Non-blocking assignment warning:", assignmentError.message);
           }
@@ -277,7 +264,7 @@ const PrimeiroAcesso = () => {
         registerEvent("plan_selected", { plan: "zpl", plan_id: ZPL_PLAN_ID }, state.companyId);
         const success = await updateOnboarding({ status: "completed" });
         if (success) {
-        registerEvent("onboarding_completed", { plan: "zpl" }, state.companyId);
+          registerEvent("onboarding_completed", { plan: "zpl" }, state.companyId);
           logJourneyEvent("onboarding_completed", { plan: "zpl" }, state.companyId);
           createSnapshot({ snapshotType: 'initial', periodDays: 0, companyId: state.companyId });
           localStorage.removeItem(STORAGE_KEY);
@@ -297,17 +284,28 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  // ── Skip connect ──
+  // ── "Conectar depois" — semi-restricted mode ──
   const handleConnectLater = async () => {
     setSubmitting(true);
     try {
-      registerEvent("marketplace_connection_deferred", {}, state.companyId);
+      registerEvent("marketplace_connection_deferred", { mode: "semi_restrito" }, state.companyId);
+      
+      // Save semi-restricted mode preference
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from("profiles").upsert({
+          id: user.id,
+          user_mode: "semi_restrito",
+        }, { onConflict: "id" });
+      }
+
       const success = await updateOnboarding({ status: "completed" });
       if (success) {
-        registerEvent("onboarding_completed", { plan: "full", connected: false }, state.companyId);
+        registerEvent("onboarding_completed", { plan: "full", connected: false, mode: "semi_restrito" }, state.companyId);
+        logJourneyEvent("onboarding_completed", { plan: "full", connected: false, mode: "semi_restrito" }, state.companyId);
         localStorage.removeItem(STORAGE_KEY);
         await refetch();
-        toast.success("Ambiente ativado!");
+        toast.success("Ambiente ativado! Conecte o Mercado Livre quando quiser para liberar todas as funcionalidades.");
         navigate("/dashboard", { replace: true });
       }
     } catch (err: any) {
@@ -326,7 +324,6 @@ const PrimeiroAcesso = () => {
       if (success) {
         registerEvent("onboarding_completed", { plan: "full", connected: true }, state.companyId);
         logJourneyEvent("onboarding_completed", { plan: "full", connected: true }, state.companyId);
-        // Fire initial snapshot (non-blocking)
         createSnapshot({
           snapshotType: 'initial',
           periodDays: 0,
@@ -454,6 +451,37 @@ const PrimeiroAcesso = () => {
                 Avançar <ArrowRight className="w-5 h-5" />
               </Button>
             </div>
+          </div>
+        );
+
+      // ═══════════════════════════════════════════════
+      // TELA 3.5 — ANTES DE COMEÇAR (GUIDE)
+      // ═══════════════════════════════════════════════
+      case "guide":
+        return (
+          <div className="flex flex-col items-center justify-center min-h-[65vh] text-center px-4 animate-fade-in">
+            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-6 animate-scale-in">
+              <BookOpen className="w-8 h-8 text-primary" />
+            </div>
+            <h2 className="text-2xl font-bold text-foreground mb-4">
+              Antes de começar
+            </h2>
+            <p className="text-muted-foreground text-base max-w-md leading-relaxed mb-3">
+              Cada módulo do sistema possui uma sequência rápida de explicações para te guiar no uso.
+            </p>
+            <p className="text-muted-foreground text-base max-w-md leading-relaxed mb-10">
+              Essas explicações aparecem automaticamente na primeira vez e podem ser acessadas novamente a qualquer momento.
+            </p>
+            <Button
+              size="lg"
+              onClick={() => {
+                registerEvent("guide_step_acknowledged");
+                goTo("plan");
+              }}
+              className="gap-2 px-10 text-base h-12 rounded-xl"
+            >
+              Entendi, vamos continuar <ArrowRight className="w-5 h-5" />
+            </Button>
           </div>
         );
 
@@ -589,7 +617,7 @@ const PrimeiroAcesso = () => {
         );
 
       // ═══════════════════════════════════════════════
-      // TELA 6 — IMPORTAÇÃO EM ANDAMENTO (FIXA)
+      // TELA 6 — IMPORTAÇÃO EM ANDAMENTO
       // ═══════════════════════════════════════════════
       case "importing":
         return (
@@ -638,7 +666,7 @@ const PrimeiroAcesso = () => {
         );
 
       // ═══════════════════════════════════════════════
-      // TELA 7 — TUDO PRONTO (CELEBRAÇÃO)
+      // TELA 7 — TUDO PRONTO
       // ═══════════════════════════════════════════════
       case "done":
         return (
@@ -669,7 +697,7 @@ const PrimeiroAcesso = () => {
     }
   };
 
-  const stepOrder: OnboardingStep[] = ["welcome", "name", "company", "plan"];
+  const stepOrder: OnboardingStep[] = ["welcome", "name", "company", "guide", "plan"];
   const currentIndex = stepOrder.indexOf(state.step);
 
   return (
@@ -687,7 +715,7 @@ const PrimeiroAcesso = () => {
       <main className="max-w-4xl mx-auto px-6 py-8">
         {renderStep()}
 
-        {/* Step dots (only for the 4 main steps) */}
+        {/* Step dots (for the 5 main steps) */}
         {currentIndex >= 0 && (
           <div className="flex items-center justify-center gap-2 mt-10">
             {stepOrder.map((s, i) => (
