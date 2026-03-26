@@ -188,99 +188,175 @@ export function AdminClientes() {
             ) : (
               filtered.map((client) => {
                 const days = daysRemaining(client.trial_end_at);
+                const isExpanded = expandedRows.has(client.user_id);
+                const hasMultipleAccounts = client.ml_accounts.length > 1;
+                const lastAccess = client.last_activity_at || client.last_sign_in_at;
+
+                const toggleExpand = () => {
+                  setExpandedRows(prev => {
+                    const next = new Set(prev);
+                    if (next.has(client.user_id)) next.delete(client.user_id);
+                    else next.add(client.user_id);
+                    return next;
+                  });
+                };
+
                 return (
-                  <TableRow key={client.user_id}>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-foreground">{client.full_name || '—'}</p>
-                        <p className="text-xs text-muted-foreground">{client.email || '—'}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm">{client.company_name || <span className="text-muted-foreground">Sem empresa</span>}</p>
-                      {client.company_document && (
-                        <p className="text-xs text-muted-foreground">{client.company_document}</p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {client.ml_accounts.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">Nenhuma</span>
-                      ) : (
-                        <div className="space-y-0.5">
-                          {client.ml_accounts.map((acc) => (
-                            <div key={acc.id} className="flex items-center gap-1">
-                              <div
-                                className={`h-1.5 w-1.5 rounded-full ${
-                                  acc.connection_status === 'connected'
-                                    ? 'bg-green-500'
-                                    : acc.connection_status === 'attention'
-                                    ? 'bg-yellow-500'
-                                    : 'bg-red-500'
-                                }`}
-                              />
-                              <span className="text-xs">{acc.nickname || acc.ml_user_id}</span>
+                  <>
+                    <TableRow key={client.user_id} className={hasMultipleAccounts ? 'cursor-pointer' : ''} onClick={hasMultipleAccounts ? toggleExpand : undefined}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {hasMultipleAccounts && (
+                            isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                          )}
+                          <div>
+                            <p className="font-medium text-foreground">{client.full_name || '—'}</p>
+                            <p className="text-xs text-muted-foreground">{client.email || '—'}</p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <p className="text-sm">{client.company_name || <span className="text-muted-foreground">Sem empresa</span>}</p>
+                        {client.company_document && (
+                          <p className="text-xs text-muted-foreground">{client.company_document}</p>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {client.ml_accounts.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">Nenhuma</span>
+                        ) : (
+                          <div className="space-y-0.5">
+                            {client.ml_accounts.map((acc) => (
+                              <div key={acc.id} className="flex items-center gap-1">
+                                <div
+                                  className={`h-1.5 w-1.5 rounded-full ${
+                                    acc.connection_status === 'connected'
+                                      ? 'bg-green-500'
+                                      : acc.connection_status === 'attention'
+                                      ? 'bg-yellow-500'
+                                      : 'bg-red-500'
+                                  }`}
+                                />
+                                <span className="text-xs">{acc.nickname || acc.ml_user_id}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>{statusBadge(client.trial_status, client.payment_status)}</TableCell>
+                      <TableCell>
+                        {client.trial_end_at ? (
+                          <div>
+                            <p className="text-xs">{formatDate(client.trial_end_at)}</p>
+                            {days !== null && (
+                              <p className={`text-xs font-medium ${days <= 3 ? 'text-destructive' : days <= 7 ? 'text-yellow-600' : 'text-muted-foreground'}`}>
+                                {days > 0 ? `${days}d restantes` : 'Expirado'}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs text-muted-foreground">{formatDate(client.profile_created_at)}</span>
+                      </TableCell>
+                      <TableCell>
+                        {lastAccess ? (
+                          <div className="flex items-center gap-1">
+                            <Clock className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">{formatDateTime(lastAccess)}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => { setSelectedClient(client); setDetailsOpen(true); }}>
+                              <Eye className="h-4 w-4 mr-2" /> Ver detalhes
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => { setTrialClient(client); setTrialDays('7'); setTrialOpen(true); }}>
+                              <CalendarPlus className="h-4 w-4 mr-2" /> Ajustar trial
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => resetTrial.mutate({ userId: client.user_id, reason: 'Reset via Admin Clientes' }, { onSuccess: () => refetch() })}>
+                              <RotateCcw className="h-4 w-4 mr-2" /> Resetar trial
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {client.payment_status === 'blocked' ? (
+                              <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: false, reason: 'Desbloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
+                                <CheckCircle className="h-4 w-4 mr-2" /> Desbloquear
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: true, reason: 'Bloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
+                                <Ban className="h-4 w-4 mr-2" /> Bloquear
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => { setClientToDelete(client); setDeleteConfirmEmail(''); setDeleteOpen(true); }}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" /> Excluir cliente
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                    {/* Expanded sub-rows for ML accounts */}
+                    {isExpanded && client.ml_accounts.map((acc) => (
+                      <TableRow key={`${client.user_id}-${acc.id}`} className="bg-muted/30">
+                        <TableCell className="pl-12">
+                          <div className="flex items-center gap-2">
+                            <Store className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-sm font-medium">{acc.nickname || acc.ml_user_id}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">ID: {acc.ml_user_id}</span>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <div className={`h-1.5 w-1.5 rounded-full ${
+                              acc.connection_status === 'connected' ? 'bg-green-500'
+                              : acc.connection_status === 'attention' ? 'bg-yellow-500'
+                              : 'bg-red-500'
+                            }`} />
+                            <span className="text-xs">{acc.connection_status || 'unknown'}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={acc.is_active ? 'default' : 'secondary'} className="text-xs">
+                            {acc.is_active ? 'Ativa' : 'Inativa'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell />
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">
+                            {acc.created_at ? formatDate(acc.created_at) : '—'}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {acc.last_activity_at ? (
+                            <div className="flex items-center gap-1">
+                              <Clock className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">{formatDateTime(acc.last_activity_at)}</span>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>{statusBadge(client.trial_status, client.payment_status)}</TableCell>
-                    <TableCell>
-                      {client.trial_end_at ? (
-                        <div>
-                          <p className="text-xs">{formatDate(client.trial_end_at)}</p>
-                          {days !== null && (
-                            <p className={`text-xs font-medium ${days <= 3 ? 'text-destructive' : days <= 7 ? 'text-yellow-600' : 'text-muted-foreground'}`}>
-                              {days > 0 ? `${days}d restantes` : 'Expirado'}
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground">{formatDate(client.profile_created_at)}</span>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => { setSelectedClient(client); setDetailsOpen(true); }}>
-                            <Eye className="h-4 w-4 mr-2" /> Ver detalhes
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => { setTrialClient(client); setTrialDays('7'); setTrialOpen(true); }}>
-                            <CalendarPlus className="h-4 w-4 mr-2" /> Ajustar trial
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => resetTrial.mutate({ userId: client.user_id, reason: 'Reset via Admin Clientes' }, { onSuccess: () => refetch() })}>
-                            <RotateCcw className="h-4 w-4 mr-2" /> Resetar trial
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          {client.payment_status === 'blocked' ? (
-                            <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: false, reason: 'Desbloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
-                              <CheckCircle className="h-4 w-4 mr-2" /> Desbloquear
-                            </DropdownMenuItem>
                           ) : (
-                            <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: true, reason: 'Bloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
-                              <Ban className="h-4 w-4 mr-2" /> Bloquear
-                            </DropdownMenuItem>
+                            <span className="text-xs text-muted-foreground">—</span>
                           )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => { setClientToDelete(client); setDeleteConfirmEmail(''); setDeleteOpen(true); }}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" /> Excluir cliente
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
+                        </TableCell>
+                        <TableCell />
+                      </TableRow>
+                    ))}
+                  </>
                 );
               })
             )}
