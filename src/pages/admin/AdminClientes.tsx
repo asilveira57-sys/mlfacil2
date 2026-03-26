@@ -182,7 +182,7 @@ export function AdminClientes() {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   Nenhum cliente encontrado
                 </TableCell>
               </TableRow>
@@ -361,6 +361,7 @@ export function AdminClientes() {
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
                         </TableCell>
+                        <TableCell />
                         <TableCell />
                       </TableRow>
                     ))}
