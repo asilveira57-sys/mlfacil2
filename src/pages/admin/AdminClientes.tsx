@@ -175,6 +175,7 @@ export function AdminClientes() {
               <TableHead>Trial</TableHead>
               <TableHead>Cadastro</TableHead>
               <TableHead>Último Acesso</TableHead>
+              <TableHead>Tag</TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
