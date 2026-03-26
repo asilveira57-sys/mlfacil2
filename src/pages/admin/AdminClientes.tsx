@@ -19,7 +19,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
-  Building2, Store, Mail, Phone, CreditCard, Calendar, Shield,
+  Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -35,6 +35,11 @@ function statusBadge(trialStatus: string | null, paymentStatus: string | null): 
 function formatDate(d: string | null) {
   if (!d) return '—';
   return format(new Date(d), 'dd/MM/yyyy');
+}
+
+function formatDateTime(d: string | null) {
+  if (!d) return '—';
+  return format(new Date(d), 'dd/MM/yyyy HH:mm');
 }
 
 function daysRemaining(trialEnd: string | null) {
@@ -55,6 +60,7 @@ export function AdminClientes() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
   const [clientToDelete, setClientToDelete] = useState<AdminClient | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   // Trial adjustment dialog
   const [trialOpen, setTrialOpen] = useState(false);
