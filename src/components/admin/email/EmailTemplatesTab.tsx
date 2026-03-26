@@ -11,6 +11,13 @@ import { Loader2, Eye, Pencil, Code } from 'lucide-react';
 import { useEmailTemplates, useEmailCategories } from '@/hooks/useEmailAdmin';
 import type { EmailTemplate } from '@/hooks/useEmailAdmin';
 
+/** Safely coerce variables_schema_json (may be object or array) into string[] */
+function toVarsArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object') return Object.values(raw) as string[];
+  return [];
+}
+
 export function EmailTemplatesTab() {
   const { data: templates, isLoading, updateTemplate, renderPreview } = useEmailTemplates();
   const { data: categories } = useEmailCategories();
