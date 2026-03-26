@@ -244,19 +244,31 @@ const PrimeiroAcesso = () => {
   const handlePlanChoice = async (choice: "full" | "zpl") => {
     setSubmitting(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error("Sua sessão expirou. Faça login novamente.");
+        navigate("/auth", { replace: true });
+        return;
+      }
+
       setState(prev => ({ ...prev, planChoice: choice }));
       if (choice === "zpl") {
         const ok = await selectPlan(ZPL_PLAN_ID);
         if (!ok) throw new Error("Failed to select ZPL plan");
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          await (supabase as any).from("user_plan_assignments").insert({
+          const { error: assignmentError } = await (supabase as any).from("user_plan_assignments").insert({
             user_id: user.id,
             plan_tier_id: ZPL_PLAN_ID,
             status: "active",
             notes: "Selected during onboarding",
             created_by: user.id,
           });
+
+          // Não bloquear o onboarding por falha de escrita complementar.
+          if (assignmentError) {
+            console.warn("[Onboarding] Non-blocking assignment warning:", assignmentError.message);
+          }
         }
         registerEvent("plan_selected", { plan: "zpl", plan_id: ZPL_PLAN_ID }, state.companyId);
         const success = await updateOnboarding({ status: "completed" });
