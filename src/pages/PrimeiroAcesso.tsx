@@ -293,10 +293,9 @@ const PrimeiroAcesso = () => {
       // Save semi-restricted mode preference
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        await supabase.from("profiles").upsert({
-          id: user.id,
+        await (supabase as any).from("profiles").update({
           user_mode: "semi_restrito",
-        }, { onConflict: "id" });
+        }).eq("id", user.id);
       }
 
       const success = await updateOnboarding({ status: "completed" });

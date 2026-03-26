@@ -12,6 +12,7 @@ import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGri
 import { WidgetHubGrid } from "@/components/dashboard/widget-hub";
 
 import { MLConnectionCard } from "@/components/dashboard/MLConnectionCard";
+import { MLNotConnectedBanner } from "@/components/dashboard/MLNotConnectedBanner";
 import { useMLConnectionState } from "@/hooks/useMLConnectionState";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
@@ -63,8 +64,8 @@ const Dashboard = () => {
     );
   }
 
-  // Determine what to render based on connection state
   const isConnected = connectionInfo.state === 'CONNECTED';
+  const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION';
 
   return (
     <PageContainer 
@@ -74,7 +75,6 @@ const Dashboard = () => {
       <div className="p-4 lg:p-6 space-y-6">
         {isConnected ? (
           <>
-            {/* Connected status bar */}
             <MLConnectionCard connectionInfo={connectionInfo} />
             <WidgetHubGrid />
             <ActivationSpeedometer />
@@ -91,8 +91,13 @@ const Dashboard = () => {
               />
             )}
           </>
+        ) : isFirstConnection ? (
+          /* User chose "Conectar depois" — show light banner, no errors */
+          <MLNotConnectedBanner
+            onConnect={() => navigate("/settings?section=integracoes")}
+          />
         ) : (
-          /* FIRST_CONNECTION, RECONNECTING, or RECONNECT_REQUIRED */
+          /* RECONNECTING or RECONNECT_REQUIRED */
           <MLConnectionCard connectionInfo={connectionInfo} />
         )}
       </div>
