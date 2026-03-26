@@ -123,16 +123,55 @@ export function useUserAccessState(): UseUserAccessStateReturn {
   // Select a plan
   const selectPlan = useCallback(async (planId: string): Promise<boolean> => {
     try {
-      const { data, error: rpcError } = await supabase.rpc('select_plan', {
-        p_plan_id: planId,
-      });
+      const attemptRpcSelect = async (): Promise<{ success: boolean; error?: string }> => {
+        const { data, error: rpcError } = await supabase.rpc('select_plan', {
+          p_plan_id: planId,
+        });
 
-      if (rpcError) throw new Error(rpcError.message);
+        if (rpcError) return { success: false, error: rpcError.message };
 
-      const result = data as unknown as { success: boolean; error?: string };
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Erro ao selecionar plano');
+        const result = data as unknown as { success?: boolean; error?: string };
+        if (!result?.success) {
+          return { success: false, error: result?.error || 'Erro ao selecionar plano' };
+        }
+
+        return { success: true };
+      };
+
+      let rpcResult = await attemptRpcSelect();
+
+      // Sessões recém-confirmadas podem falhar no primeiro call; tenta renovar e repetir.
+      if (!rpcResult.success && rpcResult.error === 'not_authenticated') {
+        await supabase.auth.refreshSession();
+        rpcResult = await attemptRpcSelect();
+      }
+
+      if (!rpcResult.success) {
+        // Fallback resiliente: valida plano e grava selected_plan_id direto no estado do usuário.
+        const { data: planRow, error: planError } = await supabase
+          .from('plans_v2')
+          .select('id')
+          .eq('id', planId)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (planError) throw new Error(planError.message);
+        if (!planRow) throw new Error(rpcResult.error || 'plan_not_found');
+
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('not_authenticated');
+
+        const { error: upsertError } = await supabase
+          .from('user_access_state')
+          .upsert(
+            {
+              user_id: user.id,
+              selected_plan_id: planId,
+            },
+            { onConflict: 'user_id' }
+          );
+
+        if (upsertError) throw new Error(upsertError.message);
       }
 
       // Refetch to get updated state
