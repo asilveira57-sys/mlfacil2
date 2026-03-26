@@ -19163,15 +19163,8 @@ export type Database = {
             foreignKeyName: "user_access_state_selected_plan_id_fkey"
             columns: ["selected_plan_id"]
             isOneToOne: false
-            referencedRelation: "plans"
+            referencedRelation: "plans_v2"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "user_access_state_selected_plan_id_fkey"
-            columns: ["selected_plan_id"]
-            isOneToOne: false
-            referencedRelation: "public_plans_v1"
-            referencedColumns: ["plan_id"]
           },
         ]
       }
