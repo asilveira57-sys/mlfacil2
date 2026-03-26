@@ -174,13 +174,14 @@ export function AdminClientes() {
               <TableHead>Status</TableHead>
               <TableHead>Trial</TableHead>
               <TableHead>Cadastro</TableHead>
+              <TableHead>Último Acesso</TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   Nenhum cliente encontrado
                 </TableCell>
               </TableRow>
