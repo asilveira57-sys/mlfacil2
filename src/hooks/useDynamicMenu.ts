@@ -91,6 +91,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
       } else if (!node.parent_module_id) {
         roots.push(node);
       }
+      // Orphan nodes whose parent was filtered out (e.g. ML group removed by plan filter) are dropped
     });
 
     // Prune empty groups

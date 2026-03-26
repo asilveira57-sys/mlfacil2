@@ -69,7 +69,6 @@ const Dashboard = () => {
 
   const isConnected = connectionInfo.state === 'CONNECTED';
   const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION' || isZplMode;
-  const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION';
 
   return (
     <PageContainer 
