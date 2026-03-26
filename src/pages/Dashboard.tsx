@@ -8,6 +8,7 @@ import { SalesDashboard } from "@/components/SalesDashboard";
 import { ActivationSpeedometer } from "@/components/dashboard/ActivationSpeedometer";
 import { PlanLimitBanner } from "@/components/access/PlanLimitBanner";
 import { useTenantLimits } from "@/hooks/useTenantLimits";
+import { useCanAccessModule } from "@/hooks/useCanAccessModule";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { WidgetHubGrid } from "@/components/dashboard/widget-hub";
 

@@ -495,10 +495,17 @@ const Home = () => {
         <DailyMessageSection userId={user?.id} />
 
         {/* Connection-aware content */}
-        {connectionInfo.state === 'CONNECTED' ? (
+        {(connectionInfo.state === 'CONNECTED' || isZplMode) ? (
           <>
-            {/* Connected status bar */}
-            <MLConnectionCard connectionInfo={connectionInfo} />
+            {/* Connected status bar — only show if actually connected to ML */}
+            {connectionInfo.state === 'CONNECTED' && (
+              <MLConnectionCard connectionInfo={connectionInfo} />
+            )}
+
+            {/* Light banner for ZPL users who aren't connected */}
+            {isZplMode && connectionInfo.state !== 'CONNECTED' && (
+              <MLNotConnectedBanner onConnect={() => navigate("/settings?section=integracoes")} />
+            )}
 
             {/* Priority Inbox - Pending Actions */}
             <PriorityInbox sellerId={sellerId || undefined} />
