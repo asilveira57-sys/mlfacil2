@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserAccess } from "@/contexts/UserAccessContext";
 import { useOnboardingEvents } from "@/hooks/useOnboardingEvents";
+import { useJourneySnapshot } from "@/hooks/useJourneySnapshot";
 import {
   BarChart3, Loader2, ArrowRight, Rocket, Building2, Printer,
   User, Sparkles, CheckCircle2, AlertCircle,
@@ -59,6 +60,7 @@ const PrimeiroAcesso = () => {
   const [searchParams] = useSearchParams();
   const { loading: accessLoading, isAuthenticated, requiresOnboarding, updateOnboarding, selectPlan, refetch } = useUserAccess();
   const { registerEvent } = useOnboardingEvents();
+  const { createSnapshot, logJourneyEvent } = useJourneySnapshot();
 
   const [state, setState] = useState<OnboardingState>(loadState);
   const [loading, setLoading] = useState(true);
@@ -88,6 +90,7 @@ const PrimeiroAcesso = () => {
       } else {
         setLoading(false);
         registerEvent("onboarding_page_opened");
+        logJourneyEvent("onboarding_started");
         if (!state.userName && session.user.user_metadata?.full_name) {
           setState(prev => ({ ...prev, userName: session.user.user_metadata?.full_name || "" }));
         }
@@ -151,6 +154,7 @@ const PrimeiroAcesso = () => {
         } else if (completedJob) {
           // Import finished — move to done step
           registerEvent("import_completed", { job_id: (completedJob as any).id });
+          logJourneyEvent("import_completed", { job_id: (completedJob as any).id }, state.companyId, null);
           setState(prev => ({ ...prev, step: "done" }));
         }
       } catch (err) {
@@ -273,7 +277,9 @@ const PrimeiroAcesso = () => {
         registerEvent("plan_selected", { plan: "zpl", plan_id: ZPL_PLAN_ID }, state.companyId);
         const success = await updateOnboarding({ status: "completed" });
         if (success) {
-          registerEvent("onboarding_completed", { plan: "zpl" }, state.companyId);
+        registerEvent("onboarding_completed", { plan: "zpl" }, state.companyId);
+          logJourneyEvent("onboarding_completed", { plan: "zpl" }, state.companyId);
+          createSnapshot({ snapshotType: 'initial', periodDays: 0, companyId: state.companyId });
           localStorage.removeItem(STORAGE_KEY);
           await refetch();
           toast.success("Ambiente pronto!");
@@ -319,6 +325,13 @@ const PrimeiroAcesso = () => {
       const success = await updateOnboarding({ status: "completed" });
       if (success) {
         registerEvent("onboarding_completed", { plan: "full", connected: true }, state.companyId);
+        logJourneyEvent("onboarding_completed", { plan: "full", connected: true }, state.companyId);
+        // Fire initial snapshot (non-blocking)
+        createSnapshot({
+          snapshotType: 'initial',
+          periodDays: 0,
+          companyId: state.companyId,
+        });
         localStorage.removeItem(STORAGE_KEY);
         await refetch();
         navigate("/dashboard", { replace: true });
