@@ -8,6 +8,8 @@ export interface MlAccountInfo {
   ml_user_id: string;
   connection_status: string | null;
   is_active: boolean;
+  created_at: string | null;
+  last_activity_at: string | null;
 }
 
 export interface AdminClient {
@@ -26,6 +28,8 @@ export interface AdminClient {
   selected_plan_id: string | null;
   payment_status: string | null;
   ml_account_connected: boolean | null;
+  last_sign_in_at: string | null;
+  last_activity_at: string | null;
   // company
   company_id: string | null;
   company_name: string | null;
