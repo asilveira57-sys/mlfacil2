@@ -37,7 +37,7 @@ export function EmailTemplatesTab() {
     setPreviewHtml(null);
     setPreviewSubject(null);
     const vars: Record<string, string> = {};
-    for (const v of tpl.variables_schema_json || []) {
+    for (const v of toVarsArray(tpl.variables_schema_json)) {
       vars[v] = '';
     }
     setPreviewVariables(vars);
@@ -73,7 +73,7 @@ export function EmailTemplatesTab() {
 
     // Build sample variables
     const sampleVars: Record<string, string> = {};
-    for (const v of tpl.variables_schema_json || []) {
+    for (const v of toVarsArray(tpl.variables_schema_json)) {
       sampleVars[v] = getSampleValue(v);
     }
 
