@@ -22,6 +22,8 @@ import { DashboardKpiCards } from "@/components/dashboard/DashboardKpiCards";
 import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActions";
 import { MLConnectionCard } from "@/components/dashboard/MLConnectionCard";
 import { useMLConnectionState } from "@/hooks/useMLConnectionState";
+import { useCanAccessModule } from "@/hooks/useCanAccessModule";
+import { MLNotConnectedBanner } from "@/components/dashboard/MLNotConnectedBanner";
 import { TrialBanner } from "@/components/access/TrialBanner";
 import { PriorityInbox } from "@/components/notifications";
 import { DailyMessageCard } from "@/components/daily-message";
@@ -72,6 +74,8 @@ const Home = () => {
 
   const { activeAccount, sellerId, loading: accountLoading, initialized, refreshAccounts } = useActiveAccount();
   const connectionInfo = useMLConnectionState();
+  const { planCode } = useCanAccessModule();
+  const isZplMode = planCode?.toLowerCase().includes('zpl') ?? false;
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
@@ -491,10 +495,17 @@ const Home = () => {
         <DailyMessageSection userId={user?.id} />
 
         {/* Connection-aware content */}
-        {connectionInfo.state === 'CONNECTED' ? (
+        {(connectionInfo.state === 'CONNECTED' || isZplMode) ? (
           <>
-            {/* Connected status bar */}
-            <MLConnectionCard connectionInfo={connectionInfo} />
+            {/* Connected status bar — only show if actually connected to ML */}
+            {connectionInfo.state === 'CONNECTED' && (
+              <MLConnectionCard connectionInfo={connectionInfo} />
+            )}
+
+            {/* Light banner for ZPL users who aren't connected */}
+            {isZplMode && connectionInfo.state !== 'CONNECTED' && (
+              <MLNotConnectedBanner onConnect={() => navigate("/settings?section=integracoes")} />
+            )}
 
             {/* Priority Inbox - Pending Actions */}
             <PriorityInbox sellerId={sellerId || undefined} />

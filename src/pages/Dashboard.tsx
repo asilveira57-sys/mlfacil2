@@ -8,6 +8,7 @@ import { SalesDashboard } from "@/components/SalesDashboard";
 import { ActivationSpeedometer } from "@/components/dashboard/ActivationSpeedometer";
 import { PlanLimitBanner } from "@/components/access/PlanLimitBanner";
 import { useTenantLimits } from "@/hooks/useTenantLimits";
+import { useCanAccessModule } from "@/hooks/useCanAccessModule";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { WidgetHubGrid } from "@/components/dashboard/widget-hub";
 
@@ -33,6 +34,8 @@ const Dashboard = () => {
 
   const { activeAccount, loading: accountLoading, initialized } = useActiveAccount();
   const connectionInfo = useMLConnectionState();
+  const { planCode } = useCanAccessModule();
+  const isZplMode = planCode?.toLowerCase().includes('zpl') ?? false;
   const feedback = useModuleFeedbackIntegration('dashboard-analises');
 
   useEffect(() => {
@@ -65,7 +68,7 @@ const Dashboard = () => {
   }
 
   const isConnected = connectionInfo.state === 'CONNECTED';
-  const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION';
+  const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION' || isZplMode;
 
   return (
     <PageContainer 

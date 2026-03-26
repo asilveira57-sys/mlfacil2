@@ -5,26 +5,68 @@ import { ChevronLeft, ChevronRight, X, Lock } from 'lucide-react';
 import type { ExplanatoryCard } from '@/hooks/useExplanatoryCards';
 import { cn } from '@/lib/utils';
 
+/** A flat virtual card — either a standalone card or one slide extracted from a carousel */
+interface FlatCard {
+  /** Original card id (for logging) */
+  cardId: string;
+  titulo: string;
+  tipo: 'texto' | 'imagem' | 'video';
+  conteudo: Record<string, unknown>;
+}
+
 interface Props {
   cards: ExplanatoryCard[];
   onComplete: () => void;
   onSkip?: () => void;
-  /** True if at least one card is obrigatório */
   isRequired: boolean;
-  /** Called for each logging event */
   onLog?: (action: string, meta?: Record<string, unknown>) => void;
 }
 
+/**
+ * Flatten cards so that carousel / texto-with-slides expand into individual virtual cards.
+ * This ensures the progress counter and "Concluir" button track every slide.
+ */
+function flattenCards(cards: ExplanatoryCard[]): FlatCard[] {
+  const flat: FlatCard[] = [];
+  for (const card of cards) {
+    const c = card.conteudo as Record<string, unknown>;
+    const slides = Array.isArray(c.slides) ? (c.slides as Record<string, unknown>[]) : null;
+
+    if (slides && slides.length > 0) {
+      // Expand each slide into a virtual card
+      for (const slide of slides) {
+        const tipo = String(slide.tipo ?? 'texto') as FlatCard['tipo'];
+        flat.push({
+          cardId: card.id,
+          titulo: card.titulo,
+          tipo,
+          conteudo: slide,
+        });
+      }
+    } else {
+      flat.push({
+        cardId: card.id,
+        titulo: card.titulo,
+        tipo: card.tipo as FlatCard['tipo'],
+        conteudo: c,
+      });
+    }
+  }
+  return flat;
+}
+
 export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired, onLog }: Props) {
+  const flatCards = useMemo(() => flattenCards(cards), [cards]);
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [viewedIndices, setViewedIndices] = useState<Set<number>>(() => new Set([0]));
-  const card = cards[currentIndex];
-  const isLast = currentIndex === cards.length - 1;
+  const card = flatCards[currentIndex];
+  const isLast = currentIndex === flatCards.length - 1;
   const isFirst = currentIndex === 0;
 
   const allViewed = useMemo(
-    () => cards.length > 0 && viewedIndices.size >= cards.length,
-    [viewedIndices.size, cards.length]
+    () => flatCards.length > 0 && viewedIndices.size >= flatCards.length,
+    [viewedIndices.size, flatCards.length]
   );
 
   const markCurrentViewed = useCallback((idx: number) => {
@@ -32,20 +74,20 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired, on
       if (prev.has(idx)) return prev;
       const next = new Set(prev);
       next.add(idx);
-      onLog?.('card_viewed', { card_index: idx, card_id: cards[idx]?.id });
+      onLog?.('card_viewed', { card_index: idx, card_id: flatCards[idx]?.cardId });
       return next;
     });
-  }, [cards, onLog]);
+  }, [flatCards, onLog]);
 
-  // Log opening on mount (tracked via ref to avoid double-fire in strict mode)
+  // Log opening on mount
   useState(() => {
-    onLog?.('onboarding_opened', { total_cards: cards.length });
+    onLog?.('onboarding_opened', { total_cards: flatCards.length });
   });
 
   const next = useCallback(() => {
     if (isLast) {
       if (!allViewed && isRequired) {
-        onLog?.('complete_blocked', { viewed: viewedIndices.size, total: cards.length });
+        onLog?.('complete_blocked', { viewed: viewedIndices.size, total: flatCards.length });
         return;
       }
       onComplete();
@@ -54,7 +96,7 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired, on
       setCurrentIndex(nextIdx);
       markCurrentViewed(nextIdx);
     }
-  }, [isLast, allViewed, isRequired, onComplete, currentIndex, markCurrentViewed, onLog, viewedIndices.size, cards.length]);
+  }, [isLast, allViewed, isRequired, onComplete, currentIndex, markCurrentViewed, onLog, viewedIndices.size, flatCards.length]);
 
   const prev = useCallback(() => {
     if (!isFirst) {
@@ -87,7 +129,7 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired, on
           <h2 className="text-lg font-semibold">{card.titulo}</h2>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">
-              {currentIndex + 1} / {cards.length}
+              {currentIndex + 1} / {flatCards.length}
             </span>
             {!isRequired && (
               <Button variant="ghost" size="icon" onClick={onSkip}>
@@ -101,20 +143,20 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired, on
         <div className="px-4 pt-3">
           <div className="flex items-center gap-1.5 mb-1">
             <span className="text-xs text-muted-foreground">
-              {viewedIndices.size} de {cards.length} visualizado{cards.length > 1 ? 's' : ''}
+              {viewedIndices.size} de {flatCards.length} visualizado{flatCards.length > 1 ? 's' : ''}
             </span>
           </div>
           <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
             <div
               className="h-full bg-primary rounded-full transition-all duration-300"
-              style={{ width: `${(viewedIndices.size / cards.length) * 100}%` }}
+              style={{ width: `${(viewedIndices.size / flatCards.length) * 100}%` }}
             />
           </div>
         </div>
 
         {/* Content */}
         <div className="p-6">
-          <CardBodyContent card={card} />
+          <FlatCardContent card={card} />
         </div>
 
         {/* Footer */}
@@ -143,9 +185,9 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired, on
         </div>
 
         {/* Dots */}
-        {cards.length > 1 && (
+        {flatCards.length > 1 && (
           <div className="flex justify-center gap-1.5 pb-4">
-            {cards.map((_, i) => (
+            {flatCards.map((_, i) => (
               <button
                 key={i}
                 onClick={() => goToIndex(i)}
@@ -166,21 +208,17 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired, on
   );
 }
 
-// ─── Render card content by type ──────────────────────────────
-function CardBodyContent({ card }: { card: ExplanatoryCard }) {
-  const c = card.conteudo as Record<string, unknown>;
+// ─── Render flat card content by type ──────────────────────────────
+function FlatCardContent({ card }: { card: FlatCard }) {
+  const c = card.conteudo;
 
   switch (card.tipo) {
-    case 'texto': {
-      if (Array.isArray(c.slides)) {
-        return <CarouselContent slides={c.slides as unknown[]} titulo={card.titulo} />;
-      }
+    case 'texto':
       return (
         <div className="prose prose-sm dark:prose-invert max-w-none">
-          <p className="whitespace-pre-wrap">{String(c.texto ?? '')}</p>
+          <p className="whitespace-pre-wrap">{String(c.texto ?? c.conteudo ?? '')}</p>
         </div>
       );
-    }
 
     case 'imagem':
       return (
@@ -218,74 +256,7 @@ function CardBodyContent({ card }: { card: ExplanatoryCard }) {
         </div>
       );
 
-    case 'carrossel':
-      return <CarouselContent slides={(c.slides as unknown[]) ?? []} titulo={card.titulo} />;
-
     default:
       return <p className="text-muted-foreground">Tipo desconhecido.</p>;
   }
-}
-
-function CarouselContent({ slides, titulo }: { slides: unknown[]; titulo: string }) {
-  const [idx, setIdx] = useState(0);
-  const slide = (slides[idx] ?? {}) as Record<string, unknown>;
-  const tipo = String(slide.tipo ?? 'texto');
-
-  return (
-    <div className="space-y-4">
-      <div className="min-h-[200px]">
-        {tipo === 'texto' && (
-          <p className="whitespace-pre-wrap">{String(slide.conteudo ?? '')}</p>
-        )}
-        {tipo === 'imagem' && (
-          <div className="space-y-2">
-            {slide.imagem_url && (
-              <img
-                src={String(slide.imagem_url)}
-                alt={String(slide.descricao ?? titulo)}
-                className="w-full rounded-lg object-contain max-h-[40vh]"
-              />
-            )}
-            {slide.descricao && (
-              <p className="text-sm text-muted-foreground">{String(slide.descricao)}</p>
-            )}
-          </div>
-        )}
-        {tipo === 'video' && slide.video_url && (
-          <div className="aspect-video rounded-lg overflow-hidden bg-black">
-            <iframe
-              src={String(slide.video_url)}
-              className="w-full h-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              title={titulo}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Slide navigation */}
-      <div className="flex items-center justify-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setIdx((i) => Math.max(0, i - 1))}
-          disabled={idx === 0}
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          Slide {idx + 1} / {slides.length}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setIdx((i) => Math.min(slides.length - 1, i + 1))}
-          disabled={idx === slides.length - 1}
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
 }

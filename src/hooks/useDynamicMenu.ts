@@ -57,7 +57,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
       if (m.is_internal_only && !isAdmin) return false;
       if (m.layer === 'admin' && !isAdmin) return false;
       // Plan-based module filtering (complementary — only if config exists)
-      if (hasPlanConfig && !isAdmin && m.route) {
+      if (hasPlanConfig && !isAdmin) {
         if (!planModuleKeys.has(m.key)) return false;
       }
       return true;
@@ -91,6 +91,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
       } else if (!node.parent_module_id) {
         roots.push(node);
       }
+      // Orphan nodes whose parent was filtered out (e.g. ML group removed by plan filter) are dropped
     });
 
     // Prune empty groups
