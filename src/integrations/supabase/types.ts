@@ -15137,6 +15137,142 @@ export type Database = {
         }
         Relationships: []
       }
+      seller_journey_logs: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          event_data: Json | null
+          event_type: string
+          id: string
+          seller_id: string | null
+          user_id: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          event_data?: Json | null
+          event_type: string
+          id?: string
+          seller_id?: string | null
+          user_id: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          event_data?: Json | null
+          event_type?: string
+          id?: string
+          seller_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seller_journey_logs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      seller_journey_snapshots: {
+        Row: {
+          acos: number | null
+          actions_count: number | null
+          ad_revenue: number | null
+          ad_spend: number | null
+          ads_connected: boolean | null
+          auto_promotions_count: number | null
+          avg_ticket: number | null
+          campaigns_count: number | null
+          company_id: string | null
+          created_at: string
+          id: string
+          metadata: Json | null
+          modules_activated: number | null
+          orders_count: number | null
+          period_days: number
+          products_with_sales: number | null
+          products_without_sales: number | null
+          promotions_connected: boolean | null
+          promotions_count: number | null
+          revenue: number | null
+          roas: number | null
+          seller_id: string | null
+          snapshot_date: string
+          snapshot_type: string
+          tacos: number | null
+          total_products: number | null
+          user_id: string
+        }
+        Insert: {
+          acos?: number | null
+          actions_count?: number | null
+          ad_revenue?: number | null
+          ad_spend?: number | null
+          ads_connected?: boolean | null
+          auto_promotions_count?: number | null
+          avg_ticket?: number | null
+          campaigns_count?: number | null
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          modules_activated?: number | null
+          orders_count?: number | null
+          period_days?: number
+          products_with_sales?: number | null
+          products_without_sales?: number | null
+          promotions_connected?: boolean | null
+          promotions_count?: number | null
+          revenue?: number | null
+          roas?: number | null
+          seller_id?: string | null
+          snapshot_date?: string
+          snapshot_type: string
+          tacos?: number | null
+          total_products?: number | null
+          user_id: string
+        }
+        Update: {
+          acos?: number | null
+          actions_count?: number | null
+          ad_revenue?: number | null
+          ad_spend?: number | null
+          ads_connected?: boolean | null
+          auto_promotions_count?: number | null
+          avg_ticket?: number | null
+          campaigns_count?: number | null
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          modules_activated?: number | null
+          orders_count?: number | null
+          period_days?: number
+          products_with_sales?: number | null
+          products_without_sales?: number | null
+          promotions_connected?: boolean | null
+          promotions_count?: number | null
+          revenue?: number | null
+          roas?: number | null
+          seller_id?: string | null
+          snapshot_date?: string
+          snapshot_type?: string
+          tacos?: number | null
+          total_products?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seller_journey_snapshots_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       seller_public_profile_settings: {
         Row: {
           display_company: string | null
