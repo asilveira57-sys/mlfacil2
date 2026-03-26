@@ -54,25 +54,18 @@ export function useAnnouncements() {
     queryFn: async () => {
       if (!userId) return [];
 
-      // Busca seller_id e data de criação do usuário em paralelo
-      const [sellerResult, profileResult] = await Promise.all([
-        activeMarketplaceAccountId
-          ? supabase
-              .from('marketplace_accounts')
-              .select('external_user_id')
-              .eq('id', activeMarketplaceAccountId)
-              .single()
-          : Promise.resolve({ data: null }),
-        supabase
-          .from('profiles')
-          .select('created_at')
-          .eq('id', userId)
-          .single(),
-      ]);
+      // Busca conta ML ativa (source of truth) e dados do seller
+      const mlAccountResult = activeMarketplaceAccountId
+        ? await supabase
+            .from('ml_accounts')
+            .select('ml_user_id, created_at')
+            .eq('id', activeMarketplaceAccountId)
+            .single()
+        : { data: null };
 
-      const activeSellerId = sellerResult.data?.external_user_id ?? null;
-      const userCreatedAt = profileResult.data?.created_at
-        ? new Date(profileResult.data.created_at)
+      const activeSellerId = mlAccountResult.data?.ml_user_id ?? null;
+      const sellerCreatedAt = mlAccountResult.data?.created_at
+        ? new Date(mlAccountResult.data.created_at)
         : null;
 
       // Busca todos os comunicados ativos
@@ -95,21 +88,18 @@ export function useAnnouncements() {
 
         const target = a.target_seller_id;
         if (target) {
-          // Comunicado segmentado → só para o seller alvo
-          // Ex: robô de promoções gera comunicado para 1 seller específico
-          return activeSellerId && target === activeSellerId;
+          // Comunicado segmentado → só para o seller alvo (ml_user_id string)
+          return activeSellerId != null && target === activeSellerId;
         }
 
-        // Comunicado global → só exibe se foi criado DEPOIS do cadastro do usuário
-        // Cliente novo NÃO recebe mensagem antiga
-        if (userCreatedAt) {
-          const announcementDate = a.published_at
-            ? new Date(a.published_at)
-            : new Date(a.created_at);
-          return announcementDate >= userCreatedAt;
-        }
+        // Comunicado global → só exibe se publicado DEPOIS da entrada do seller
+        // Sem conta ativa = fail-closed (não mostra globais retroativos)
+        if (!sellerCreatedAt) return false;
 
-        return true;
+        const announcementDate = a.published_at
+          ? new Date(a.published_at)
+          : new Date(a.created_at);
+        return announcementDate >= sellerCreatedAt;
       });
 
       // Busca leituras do usuário

@@ -308,30 +308,29 @@ Deno.serve(async (req) => {
     // Create notification if items were adhered
     if (adhered > 0) {
       const campaignSummary = [...new Set(approved.filter((_, i) => results[i]?.success).map(a => a.promo.promotion_name || a.promo.promotion_id))];
-      // Buscar o user_id do seller para target_seller_id
-      let targetSellerId: string | null = null;
-      if (mlAccount?.id) {
-        const { data: maData } = await supabase
-          .from('marketplace_accounts')
-          .select('id')
-          .eq('seller_id', sellerId)
-          .limit(1)
-          .maybeSingle();
-        // Usar o seller_id diretamente como target (é o ml_user_id)
-        targetSellerId = sellerId;
-      }
-      try {
-        await supabase.from('mktpfacil_announcements').insert({
-          title: `🤖 Agente aderiu automaticamente a ${adhered} produto${adhered !== 1 ? 's' : ''}`,
-          content: `Campanhas: ${campaignSummary.slice(0, 5).join(', ')}${campaignSummary.length > 5 ? ` e mais ${campaignSummary.length - 5}` : ''}\nTotal aderidos: ${adhered} | Falhas: ${failed} | Ignorados: ${skipped.length}`,
-          priority: 1,
-          is_active: true,
-          plan_target: 'all',
-          target_seller_id: targetSellerId,
-        });
-        log('Notification created');
-      } catch (err) {
-        log('Failed to create notification', String(err));
+      // target_seller_id MUST be set — this is a per-seller notification, never global
+      const targetSellerId = sellerId; // ml_user_id string e.g. "66043362"
+      if (!targetSellerId) {
+        log('ERROR: sellerId is empty, skipping announcement to prevent global leak');
+      } else {
+        try {
+          const { error: annErr } = await supabase.from('mktpfacil_announcements').insert({
+            title: `🤖 Agente aderiu automaticamente a ${adhered} produto${adhered !== 1 ? 's' : ''}`,
+            content: `Campanhas: ${campaignSummary.slice(0, 5).join(', ')}${campaignSummary.length > 5 ? ` e mais ${campaignSummary.length - 5}` : ''}\nTotal aderidos: ${adhered} | Falhas: ${failed} | Ignorados: ${skipped.length}`,
+            priority: 1,
+            is_active: true,
+            plan_target: 'all',
+            target_seller_id: targetSellerId,
+            published_at: new Date().toISOString(),
+          });
+          if (annErr) {
+            log('Failed to create notification: ' + JSON.stringify(annErr));
+          } else {
+            log(`Notification created for seller ${targetSellerId}`);
+          }
+        } catch (err) {
+          log('Failed to create notification', String(err));
+        }
       }
     }
 
