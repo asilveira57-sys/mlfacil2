@@ -11,6 +11,13 @@ import { Loader2, Eye, Pencil, Code } from 'lucide-react';
 import { useEmailTemplates, useEmailCategories } from '@/hooks/useEmailAdmin';
 import type { EmailTemplate } from '@/hooks/useEmailAdmin';
 
+/** Safely coerce variables_schema_json (may be object or array) into string[] */
+function toVarsArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object') return Object.values(raw) as string[];
+  return [];
+}
+
 export function EmailTemplatesTab() {
   const { data: templates, isLoading, updateTemplate, renderPreview } = useEmailTemplates();
   const { data: categories } = useEmailCategories();
@@ -30,7 +37,7 @@ export function EmailTemplatesTab() {
     setPreviewHtml(null);
     setPreviewSubject(null);
     const vars: Record<string, string> = {};
-    for (const v of tpl.variables_schema_json || []) {
+    for (const v of toVarsArray(tpl.variables_schema_json)) {
       vars[v] = '';
     }
     setPreviewVariables(vars);
@@ -66,7 +73,7 @@ export function EmailTemplatesTab() {
 
     // Build sample variables
     const sampleVars: Record<string, string> = {};
-    for (const v of tpl.variables_schema_json || []) {
+    for (const v of toVarsArray(tpl.variables_schema_json)) {
       sampleVars[v] = getSampleValue(v);
     }
 
@@ -214,7 +221,7 @@ export function EmailTemplatesTab() {
               <div className="space-y-2">
                 <Label className="text-xs">Variáveis disponíveis</Label>
                 <div className="flex flex-wrap gap-1">
-                  {(editingTemplate.variables_schema_json || []).map((v) => (
+                  {toVarsArray(editingTemplate.variables_schema_json).map((v) => (
                     <Badge key={v} variant="outline" className="text-[10px]">
                       {'{{' + v + '}}'}
                     </Badge>
