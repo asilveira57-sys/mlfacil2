@@ -1,141 +1,46 @@
-import * as React from 'npm:react@18.3.1'
-import { renderAsync } from 'npm:@react-email/components@0.0.22'
-import { SignupEmail } from '../_shared/email-templates/signup.tsx'
-import { InviteEmail } from '../_shared/email-templates/invite.tsx'
-import { MagicLinkEmail } from '../_shared/email-templates/magic-link.tsx'
-import { RecoveryEmail } from '../_shared/email-templates/recovery.tsx'
-import { EmailChangeEmail } from '../_shared/email-templates/email-change.tsx'
-import { ReauthenticationEmail } from '../_shared/email-templates/reauthentication.tsx'
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-lovable-signature, x-lovable-timestamp, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-lovable-signature, x-lovable-timestamp, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+// Auth event type → email_templates.key mapping
+const EVENT_TO_TEMPLATE_KEY: Record<string, string> = {
+  signup: "confirm_email",
+  recovery: "password_reset",
+  magiclink: "confirm_email",        // reuse confirm_email
+  invite: "confirm_email",           // reuse confirm_email
+  email_change: "confirm_email",     // reuse confirm_email
+  reauthentication: "confirm_email", // reuse confirm_email (token-based)
+};
+
+const SITE_NAME = "MKTP Fácil";
+const FROM_ADDRESS = `MKTP Fácil <noreply@ale.mktpfacil.com>`;
+
+function resolveTemplate(template: string, variables: Record<string, string>): string {
+  let result = template;
+  for (const [key, value] of Object.entries(variables)) {
+    result = result.replaceAll(`{{${key}}}`, value ?? "");
+  }
+  return result;
 }
 
-const EMAIL_SUBJECTS: Record<string, string> = {
-  signup: 'Confirme seu e-mail',
-  invite: 'Você foi convidado para o MKTP Fácil',
-  magiclink: 'Seu link de acesso',
-  recovery: 'Redefinir sua senha',
-  email_change: 'Confirme a alteração de e-mail',
-  reauthentication: 'Seu código de verificação',
-}
-
-const EMAIL_TEMPLATES: Record<string, React.ComponentType<any>> = {
-  signup: SignupEmail,
-  invite: InviteEmail,
-  magiclink: MagicLinkEmail,
-  recovery: RecoveryEmail,
-  email_change: EmailChangeEmail,
-  reauthentication: ReauthenticationEmail,
-}
-
-// Configuration
-const SITE_NAME = "MKTP Fácil"
-const ROOT_DOMAIN = "www.mktpfacil.com"
-const FROM_ADDRESS = `MKTP Fácil <noreply@ale.mktpfacil.com>`
-
-// Sample data for preview mode
-const SAMPLE_PROJECT_URL = "https://mlfacil2.lovable.app"
-const SAMPLE_EMAIL = "user@example.test"
-const SAMPLE_DATA: Record<string, object> = {
-  signup: {
-    siteName: SITE_NAME,
-    siteUrl: SAMPLE_PROJECT_URL,
-    recipient: SAMPLE_EMAIL,
-    confirmationUrl: SAMPLE_PROJECT_URL,
-  },
-  magiclink: {
-    siteName: SITE_NAME,
-    confirmationUrl: SAMPLE_PROJECT_URL,
-  },
-  recovery: {
-    siteName: SITE_NAME,
-    confirmationUrl: SAMPLE_PROJECT_URL,
-  },
-  invite: {
-    siteName: SITE_NAME,
-    siteUrl: SAMPLE_PROJECT_URL,
-    confirmationUrl: SAMPLE_PROJECT_URL,
-  },
-  email_change: {
-    siteName: SITE_NAME,
-    email: SAMPLE_EMAIL,
-    newEmail: SAMPLE_EMAIL,
-    confirmationUrl: SAMPLE_PROJECT_URL,
-  },
-  reauthentication: {
-    token: '123456',
-  },
-}
-
-// Preview endpoint handler
-async function handlePreview(req: Request): Promise<Response> {
-  const previewCorsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, content-type',
-  }
-
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: previewCorsHeaders })
-  }
-
-  const apiKey = Deno.env.get('LOVABLE_API_KEY')
-  const authHeader = req.headers.get('Authorization')
-
-  if (!apiKey || authHeader !== `Bearer ${apiKey}`) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { ...previewCorsHeaders, 'Content-Type': 'application/json' },
-    })
-  }
-
-  let type: string
-  try {
-    const body = await req.json()
-    type = body.type
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON in request body' }), {
-      status: 400,
-      headers: { ...previewCorsHeaders, 'Content-Type': 'application/json' },
-    })
-  }
-
-  const EmailTemplate = EMAIL_TEMPLATES[type]
-  if (!EmailTemplate) {
-    return new Response(JSON.stringify({ error: `Unknown email type: ${type}` }), {
-      status: 400,
-      headers: { ...previewCorsHeaders, 'Content-Type': 'application/json' },
-    })
-  }
-
-  const sampleData = SAMPLE_DATA[type] || {}
-  const html = await renderAsync(React.createElement(EmailTemplate, sampleData))
-
-  return new Response(html, {
-    status: 200,
-    headers: { ...previewCorsHeaders, 'Content-Type': 'text/html; charset=utf-8' },
-  })
-}
-
-// Send email via Resend API
 async function sendViaResend(params: {
-  to: string
-  subject: string
-  html: string
-  text: string
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
 }): Promise<{ id: string }> {
-  const resendApiKey = Deno.env.get('RESEND_API_KEY')
-  if (!resendApiKey) {
-    throw new Error('RESEND_API_KEY not configured')
-  }
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  if (!resendApiKey) throw new Error("RESEND_API_KEY not configured");
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
     headers: {
-      'Authorization': `Bearer ${resendApiKey}`,
-      'Content-Type': 'application/json',
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       from: FROM_ADDRESS,
@@ -144,112 +49,134 @@ async function sendViaResend(params: {
       html: params.html,
       text: params.text,
     }),
-  })
+  });
 
-  const data = await response.json()
-
+  const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.message || `Resend API error: ${response.status}`)
+    throw new Error(data.message || `Resend API error: ${response.status}`);
   }
-
-  return data
+  return data;
 }
 
-// Webhook handler
-async function handleWebhook(req: Request): Promise<Response> {
-  let payload: any
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  let payload: any;
   try {
-    payload = await req.json()
+    payload = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
+    return new Response(JSON.stringify({ error: "Invalid JSON" }), {
       status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   // Support both direct payload and nested data structure
-  const emailType = payload.data?.action_type || payload.action_type
-  const recipientEmail = payload.data?.email || payload.email
-  const confirmationUrl = payload.data?.url || payload.url
-  const token = payload.data?.token || payload.token
-  const newEmail = payload.data?.new_email || payload.new_email
+  const emailType = payload.data?.action_type || payload.action_type;
+  const recipientEmail = payload.data?.email || payload.email;
+  const confirmationUrl = payload.data?.url || payload.url;
+  const token = payload.data?.token || payload.token;
+  const newEmail = payload.data?.new_email || payload.new_email;
 
-  console.log('Received auth event', { emailType, email: recipientEmail })
+  console.log("Received auth event", { emailType, email: recipientEmail });
 
   if (!emailType || !recipientEmail) {
-    return new Response(JSON.stringify({ error: 'Missing action_type or email' }), {
+    return new Response(JSON.stringify({ error: "Missing action_type or email" }), {
       status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
-  const EmailTemplate = EMAIL_TEMPLATES[emailType]
-  if (!EmailTemplate) {
-    console.error('Unknown email type', { emailType })
+  const templateKey = EVENT_TO_TEMPLATE_KEY[emailType];
+  if (!templateKey) {
+    console.error("Unknown email type", { emailType });
     return new Response(JSON.stringify({ error: `Unknown email type: ${emailType}` }), {
       status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
-  const templateProps = {
-    siteName: SITE_NAME,
-    siteUrl: `https://${ROOT_DOMAIN}`,
+  // Fetch template from database
+  const { data: template, error: tplErr } = await supabase
+    .from("email_templates")
+    .select("id, subject, body_html, body_text, variables_schema_json")
+    .eq("key", templateKey)
+    .eq("is_enabled", true)
+    .single();
+
+  if (tplErr || !template) {
+    console.error("Template not found", { templateKey, error: tplErr?.message });
+    return new Response(JSON.stringify({ error: `Template not found: ${templateKey}` }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // Build variables for template resolution
+  const variables: Record<string, string> = {
+    site_name: SITE_NAME,
+    user_name: recipientEmail.split("@")[0],
+    user_email: recipientEmail,
     recipient: recipientEmail,
-    confirmationUrl,
-    token,
-    email: recipientEmail,
-    newEmail,
-  }
+    action_link: confirmationUrl || "",
+    confirmation_url: confirmationUrl || "",
+    token: token || "",
+    new_email: newEmail || "",
+  };
 
-  const html = await renderAsync(React.createElement(EmailTemplate, templateProps))
-  const text = await renderAsync(React.createElement(EmailTemplate, templateProps), {
-    plainText: true,
-  })
+  const resolvedSubject = resolveTemplate(template.subject, variables);
+  const resolvedHtml = resolveTemplate(template.body_html, variables);
+  const resolvedText = resolveTemplate(template.body_text, variables);
 
   try {
     const result = await sendViaResend({
       to: recipientEmail,
-      subject: EMAIL_SUBJECTS[emailType] || 'Notificação',
-      html,
-      text,
-    })
+      subject: resolvedSubject,
+      html: resolvedHtml,
+      text: resolvedText,
+    });
 
-    console.log('Email sent via Resend', { id: result.id, emailType, email: recipientEmail })
+    console.log("Email sent via Resend", { id: result.id, emailType, templateKey, email: recipientEmail });
+
+    // Log to email_logs
+    await supabase.from("email_logs").insert({
+      action: "sent",
+      source_type: "auth_hook",
+      event_key: emailType,
+      email: recipientEmail,
+      template_id: template.id,
+      message: `Auth email sent: ${emailType} → ${templateKey}`,
+      details_json: { resend_id: result.id, template_key: templateKey },
+    });
 
     return new Response(
       JSON.stringify({ success: true, message_id: result.id }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to send email'
-    console.error('Resend API error', { error: message, emailType, email: recipientEmail })
-    return new Response(JSON.stringify({ error: 'Failed to send email' }), {
+    const message = error instanceof Error ? error.message : "Failed to send email";
+    console.error("Resend API error", { error: message, emailType, email: recipientEmail });
+
+    // Log failure
+    await supabase.from("email_logs").insert({
+      action: "error",
+      source_type: "auth_hook",
+      event_key: emailType,
+      email: recipientEmail,
+      template_id: template.id,
+      message: `Auth email failed: ${message}`,
+      details_json: { error: message, template_key: templateKey },
+    });
+
+    return new Response(JSON.stringify({ error: "Failed to send email" }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
-}
-
-Deno.serve(async (req) => {
-  const url = new URL(req.url)
-
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders })
-  }
-
-  if (url.pathname.endsWith('/preview')) {
-    return handlePreview(req)
-  }
-
-  try {
-    return await handleWebhook(req)
-  } catch (error) {
-    console.error('Webhook handler error:', error)
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-  }
-})
+});
