@@ -13064,6 +13064,7 @@ export type Database = {
           tag: string | null
           updated_at: string
           user_id: string | null
+          user_mode: string | null
           whatsapp: string | null
         }
         Insert: {
@@ -13088,6 +13089,7 @@ export type Database = {
           tag?: string | null
           updated_at?: string
           user_id?: string | null
+          user_mode?: string | null
           whatsapp?: string | null
         }
         Update: {
@@ -13112,6 +13114,7 @@ export type Database = {
           tag?: string | null
           updated_at?: string
           user_id?: string | null
+          user_mode?: string | null
           whatsapp?: string | null
         }
         Relationships: []
