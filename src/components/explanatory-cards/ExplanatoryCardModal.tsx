@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Lock } from 'lucide-react';
 import type { ExplanatoryCard } from '@/hooks/useExplanatoryCards';
 import { cn } from '@/lib/utils';
 
@@ -11,27 +11,67 @@ interface Props {
   onSkip?: () => void;
   /** True if at least one card is obrigatório */
   isRequired: boolean;
+  /** Called for each logging event */
+  onLog?: (action: string, meta?: Record<string, unknown>) => void;
 }
 
-export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired }: Props) {
+export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired, onLog }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [viewedIndices, setViewedIndices] = useState<Set<number>>(() => new Set([0]));
   const card = cards[currentIndex];
   const isLast = currentIndex === cards.length - 1;
   const isFirst = currentIndex === 0;
 
+  const allViewed = useMemo(
+    () => cards.length > 0 && viewedIndices.size >= cards.length,
+    [viewedIndices.size, cards.length]
+  );
+
+  const markCurrentViewed = useCallback((idx: number) => {
+    setViewedIndices((prev) => {
+      if (prev.has(idx)) return prev;
+      const next = new Set(prev);
+      next.add(idx);
+      onLog?.('card_viewed', { card_index: idx, card_id: cards[idx]?.id });
+      return next;
+    });
+  }, [cards, onLog]);
+
+  // Log opening on mount (tracked via ref to avoid double-fire in strict mode)
+  useState(() => {
+    onLog?.('onboarding_opened', { total_cards: cards.length });
+  });
+
   const next = useCallback(() => {
     if (isLast) {
+      if (!allViewed && isRequired) {
+        onLog?.('complete_blocked', { viewed: viewedIndices.size, total: cards.length });
+        return;
+      }
       onComplete();
     } else {
-      setCurrentIndex((i) => i + 1);
+      const nextIdx = currentIndex + 1;
+      setCurrentIndex(nextIdx);
+      markCurrentViewed(nextIdx);
     }
-  }, [isLast, onComplete]);
+  }, [isLast, allViewed, isRequired, onComplete, currentIndex, markCurrentViewed, onLog, viewedIndices.size, cards.length]);
 
   const prev = useCallback(() => {
-    if (!isFirst) setCurrentIndex((i) => i - 1);
-  }, [isFirst]);
+    if (!isFirst) {
+      const prevIdx = currentIndex - 1;
+      setCurrentIndex(prevIdx);
+      markCurrentViewed(prevIdx);
+    }
+  }, [isFirst, currentIndex, markCurrentViewed]);
+
+  const goToIndex = useCallback((idx: number) => {
+    setCurrentIndex(idx);
+    markCurrentViewed(idx);
+  }, [markCurrentViewed]);
 
   if (!card) return null;
+
+  const canComplete = isLast && allViewed;
 
   return (
     <Dialog open onOpenChange={() => { if (!isRequired) onSkip?.(); }}>
@@ -57,9 +97,24 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired }: 
           </div>
         </div>
 
+        {/* Progress bar */}
+        <div className="px-4 pt-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="text-xs text-muted-foreground">
+              {viewedIndices.size} de {cards.length} visualizado{cards.length > 1 ? 's' : ''}
+            </span>
+          </div>
+          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-300"
+              style={{ width: `${(viewedIndices.size / cards.length) * 100}%` }}
+            />
+          </div>
+        </div>
+
         {/* Content */}
         <div className="p-6">
-          <CardContent card={card} />
+          <CardBodyContent card={card} />
         </div>
 
         {/* Footer */}
@@ -73,10 +128,17 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired }: 
                 Pular
               </Button>
             )}
-            <Button onClick={next}>
-              {isLast ? 'Concluir' : 'Avançar'}
-              {!isLast && <ChevronRight className="h-4 w-4 ml-1" />}
-            </Button>
+            {isLast ? (
+              <Button onClick={next} disabled={!canComplete}>
+                {!allViewed && <Lock className="h-4 w-4 mr-1" />}
+                Concluir
+              </Button>
+            ) : (
+              <Button onClick={next}>
+                Avançar
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -86,10 +148,14 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired }: 
             {cards.map((_, i) => (
               <button
                 key={i}
-                onClick={() => setCurrentIndex(i)}
+                onClick={() => goToIndex(i)}
                 className={cn(
                   'h-2 rounded-full transition-all',
-                  i === currentIndex ? 'w-6 bg-primary' : 'w-2 bg-muted-foreground/30'
+                  i === currentIndex
+                    ? 'w-6 bg-primary'
+                    : viewedIndices.has(i)
+                      ? 'w-2 bg-primary/50'
+                      : 'w-2 bg-muted-foreground/30'
                 )}
               />
             ))}
@@ -101,12 +167,11 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired }: 
 }
 
 // ─── Render card content by type ──────────────────────────────
-function CardContent({ card }: { card: ExplanatoryCard }) {
+function CardBodyContent({ card }: { card: ExplanatoryCard }) {
   const c = card.conteudo as Record<string, unknown>;
 
   switch (card.tipo) {
     case 'texto': {
-      // Support both { texto: "..." } and { slides: [...] } formats
       if (Array.isArray(c.slides)) {
         return <CarouselContent slides={c.slides as unknown[]} titulo={card.titulo} />;
       }

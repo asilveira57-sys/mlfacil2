@@ -1,6 +1,9 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { BookOpen } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useCurrentUserId } from '@/hooks/useCurrentUserId';
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useModuleCards, useHasViewedModuleCard, useMarkCardViewed } from '@/hooks/useExplanatoryCards';
 import { ExplanatoryCardModal } from './ExplanatoryCardModal';
 
@@ -12,23 +15,47 @@ interface Props {
 /**
  * Wraps a module page. If there are unviewed explanatory cards,
  * shows a blocking modal before the user can access the module.
- * Also renders a "Rever explicação" button.
+ * 
+ * - Required cards: user MUST view ALL cards before "Concluir" is enabled.
+ * - Closing without completing does NOT save — modal reopens next visit.
+ * - "Rever explicação" button allows manual re-open after completion.
  */
 export function ExplanatoryCardGate({ moduleSlug, children }: Props) {
   const { data: cards = [], isLoading: loadingCards } = useModuleCards(moduleSlug);
   const { data: hasViewed, isLoading: loadingView } = useHasViewedModuleCard(moduleSlug);
   const markViewed = useMarkCardViewed();
   const [manualOpen, setManualOpen] = useState(false);
+  const userId = useCurrentUserId();
+  const { activeAccount } = useActiveAccount();
+
+  const logAction = useCallback((action: string, meta?: Record<string, unknown>) => {
+    if (!userId) return;
+    void supabase.from('module_intro_logs').insert({
+      user_id: userId,
+      tenant_id: activeAccount?.companyId ?? null,
+      module_slug: moduleSlug,
+      action,
+      ...(meta ? { meta } : {}),
+    }).then(() => {});
+  }, [userId, activeAccount?.companyId, moduleSlug]);
 
   const handleComplete = useCallback(() => {
     markViewed.mutate(moduleSlug);
-    setManualOpen(false);
-  }, [markViewed, moduleSlug]);
+    logAction('onboarding_completed');
+  }, [markViewed, moduleSlug, logAction]);
 
-  const handleSkip = useCallback(() => {
-    markViewed.mutate(moduleSlug);
-    setManualOpen(false);
-  }, [markViewed, moduleSlug]);
+  const handleReentryLog = useCallback(() => {
+    if (hasViewed) {
+      logAction('module_reentry_after_completion');
+    }
+  }, [hasViewed, logAction]);
+
+  // Log re-entry once when module is accessed after completion
+  useState(() => {
+    if (hasViewed) {
+      handleReentryLog();
+    }
+  });
 
   const isLoading = loadingCards || loadingView;
   const hasCards = cards.length > 0;
@@ -42,8 +69,12 @@ export function ExplanatoryCardGate({ moduleSlug, children }: Props) {
         <ExplanatoryCardModal
           cards={cards}
           onComplete={handleComplete}
-          onSkip={anyRequired ? undefined : handleSkip}
+          onSkip={anyRequired ? undefined : () => {
+            // Non-required: allow skip but don't mark as viewed
+            // Modal will reappear next time
+          }}
           isRequired={anyRequired}
+          onLog={(action, meta) => logAction(action, meta)}
         />
       )}
 
@@ -54,11 +85,20 @@ export function ExplanatoryCardGate({ moduleSlug, children }: Props) {
           onComplete={() => setManualOpen(false)}
           onSkip={() => setManualOpen(false)}
           isRequired={false}
+          onLog={(action, meta) => logAction(`manual_${action}`, meta)}
         />
       )}
 
-      {/* Actual page content */}
-      {children}
+      {/* Actual page content - blocked if onboarding not completed */}
+      {needsShow && anyRequired ? (
+        <div className="container mx-auto p-6 flex items-center justify-center min-h-[60vh]">
+          <p className="text-muted-foreground">
+            Complete o onboarding para acessar este módulo.
+          </p>
+        </div>
+      ) : (
+        children
+      )}
 
       {/* "Rever explicação" button (only if cards exist and user already viewed) */}
       {hasCards && hasViewed && (
