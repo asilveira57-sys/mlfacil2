@@ -57,7 +57,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
       if (m.is_internal_only && !isAdmin) return false;
       if (m.layer === 'admin' && !isAdmin) return false;
       // Plan-based module filtering (complementary — only if config exists)
-      if (hasPlanConfig && !isAdmin && m.route) {
+      if (hasPlanConfig && !isAdmin) {
         if (!planModuleKeys.has(m.key)) return false;
       }
       return true;
