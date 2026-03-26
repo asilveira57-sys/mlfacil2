@@ -20875,6 +20875,7 @@ export type Database = {
           profile_created_at: string
           roles: string[]
           selected_plan_id: string
+          tag: string
           trial_end_at: string
           trial_start_at: string
           trial_status: string
