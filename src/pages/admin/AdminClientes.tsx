@@ -175,13 +175,14 @@ export function AdminClientes() {
               <TableHead>Trial</TableHead>
               <TableHead>Cadastro</TableHead>
               <TableHead>Último Acesso</TableHead>
+              <TableHead>Tag</TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   Nenhum cliente encontrado
                 </TableCell>
               </TableRow>
@@ -271,6 +272,13 @@ export function AdminClientes() {
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
+                      <TableCell>
+                        {client.tag ? (
+                          <Badge variant="secondary" className="text-xs">{client.tag}</Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -353,6 +361,7 @@ export function AdminClientes() {
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
                         </TableCell>
+                        <TableCell />
                         <TableCell />
                       </TableRow>
                     ))}

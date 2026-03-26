@@ -39,6 +39,7 @@ export interface AdminClient {
   // aggregated
   ml_accounts: MlAccountInfo[];
   roles: string[];
+  tag: string | null;
 }
 
 export function useAdminClients() {
