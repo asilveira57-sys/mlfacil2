@@ -20832,6 +20832,8 @@ export type Database = {
           cpf: string
           email: string
           full_name: string
+          last_activity_at: string
+          last_sign_in_at: string
           ml_account_connected: boolean
           ml_accounts: Json
           onboarding_status: string
