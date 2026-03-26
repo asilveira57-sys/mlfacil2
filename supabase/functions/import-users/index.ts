@@ -17,31 +17,30 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Verify caller is admin
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "No auth" }), { status: 401, headers: corsHeaders });
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // Check admin with anon client
-    const anonClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user: caller } } = await anonClient.auth.getUser();
-    if (!caller) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
-    }
-
-    const { data: roleCheck } = await anonClient.rpc("has_role", {
-      _user_id: caller.id,
-      _role: "admin",
-    });
-    if (!roleCheck) {
-      return new Response(JSON.stringify({ error: "Admin only" }), { status: 403, headers: corsHeaders });
+    // Verify caller is admin (via JWT) or service-role
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.replace("Bearer ", "");
+    
+    // If not service role key, check admin role
+    if (token !== serviceKey) {
+      const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const anonClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user: caller } } = await anonClient.auth.getUser();
+      if (!caller) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      }
+      const { data: roleCheck } = await anonClient.rpc("has_role", {
+        _user_id: caller.id,
+        _role: "admin",
+      });
+      if (!roleCheck) {
+        return new Response(JSON.stringify({ error: "Admin only" }), { status: 403, headers: corsHeaders });
+      }
     }
 
     // Admin client for user creation
