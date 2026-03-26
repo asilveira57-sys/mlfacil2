@@ -27,11 +27,27 @@ interface OnboardingState {
 const STORAGE_KEY = "mktp_onboarding_v2";
 
 function loadState(): OnboardingState {
+  const initial: OnboardingState = { step: "welcome", userName: "", companyName: "", companyId: null, planChoice: null };
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
-  } catch {}
-  return { step: "welcome", userName: "", companyName: "", companyId: null, planChoice: null };
+    if (stored) {
+      const parsed = JSON.parse(stored) as OnboardingState;
+      const step = parsed.step;
+      // Validate consistency: advanced steps require previous data to be filled
+      const advancedSteps: OnboardingStep[] = ["connect", "importing", "done"];
+      if (advancedSteps.includes(step)) {
+        if (!parsed.userName?.trim() || !parsed.companyName?.trim() || !parsed.planChoice) {
+          console.info("[PrimeiroAcesso] Stale/inconsistent localStorage state detected, resetting to welcome");
+          localStorage.removeItem(STORAGE_KEY);
+          return initial;
+        }
+      }
+      return parsed;
+    }
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+  return initial;
 }
 
 function saveState(s: OnboardingState) {
