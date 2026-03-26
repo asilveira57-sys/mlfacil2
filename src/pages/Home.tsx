@@ -22,6 +22,8 @@ import { DashboardKpiCards } from "@/components/dashboard/DashboardKpiCards";
 import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActions";
 import { MLConnectionCard } from "@/components/dashboard/MLConnectionCard";
 import { useMLConnectionState } from "@/hooks/useMLConnectionState";
+import { useCanAccessModule } from "@/hooks/useCanAccessModule";
+import { MLNotConnectedBanner } from "@/components/dashboard/MLNotConnectedBanner";
 import { TrialBanner } from "@/components/access/TrialBanner";
 import { PriorityInbox } from "@/components/notifications";
 import { DailyMessageCard } from "@/components/daily-message";
@@ -72,6 +74,8 @@ const Home = () => {
 
   const { activeAccount, sellerId, loading: accountLoading, initialized, refreshAccounts } = useActiveAccount();
   const connectionInfo = useMLConnectionState();
+  const { planCode } = useCanAccessModule();
+  const isZplMode = planCode?.toLowerCase().includes('zpl') ?? false;
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
