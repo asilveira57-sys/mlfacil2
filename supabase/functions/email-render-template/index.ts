@@ -75,7 +75,8 @@ serve(async (req) => {
     }
 
     // Validate variables against schema
-    const schema = (template.variables_schema_json as string[]) || [];
+    const rawSchema = template.variables_schema_json;
+    const schema: string[] = Array.isArray(rawSchema) ? rawSchema : (rawSchema && typeof rawSchema === 'object' ? Object.values(rawSchema) : []);
     const vars = variables || {};
     
     // Fill missing variables with placeholder
