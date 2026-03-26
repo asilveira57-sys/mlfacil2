@@ -1,83 +1,72 @@
 
 
-## Plano: Adicionar "Último Acesso" na lista de clientes com expansão por conta ML
+## Plano: Corrigir cards obrigatórios + experiência ZPL sem ML
 
-### Fonte de dados
+### 3 problemas identificados
 
-Já existe infraestrutura pronta:
-- `auth.users.last_sign_in_at` — último login do usuário (nível conta principal)
-- `ml_accounts.created_at` — data de integração de cada conta ML
-- `user_module_usage.last_seen_at` — último acesso por módulo (pode ser usado para pegar o MAX global por user)
+---
 
-### Implementação
+### Problema 1 — Cards com carrossel permitem "Concluir" sem ver todos os slides
 
-#### 1. Migração SQL — Atualizar `admin_get_clients_overview()`
+**Causa raiz:** O modal conta **cards** como unidade de visualização, não **slides**. Um card tipo `carrossel` com 6 slides conta como "1 de 1 visualizado" — `Concluir` fica habilitado imediatamente.
 
-Adicionar dois campos novos ao retorno:
-- `last_sign_in_at` (de `auth.users`) — último acesso do cliente
-- Enriquecer `ml_accounts` com `created_at` (data de integração) por subconta
+**Solução:** Quando um card é do tipo `carrossel` ou `texto` com `slides`, expandir ("flatten") os slides em cards virtuais dentro do modal. Assim o contador mostra "1 de 6", "2 de 6", etc., e `Concluir` só habilita após ver todos os 6 slides.
 
-```sql
--- No subselect de ml_accounts, adicionar created_at:
-jsonb_build_object(
-  'id', ma.id,
-  'nickname', ma.nickname,
-  'ml_user_id', ma.ml_user_id,
-  'connection_status', ma.connection_status,
-  'is_active', ma.is_active,
-  'created_at', ma.created_at   -- <-- NOVO
-)
+**Arquivo:** `src/components/explanatory-cards/ExplanatoryCardModal.tsx`
 
--- No SELECT principal, adicionar:
-au.last_sign_in_at   -- <-- NOVO campo no RETURNS TABLE
-```
+Alterações:
+- No início do componente, criar `flatCards`: se um card tem `conteudo.slides` (tipo carrossel ou texto com slides), expandir cada slide como um item individual com título herdado
+- O progresso, dots e navegação usam `flatCards` em vez de `cards`
+- `allViewed` passa a exigir que todos os `flatCards` sejam visualizados
+- O botão "Concluir" permanece desabilitado até `allViewed === true`
 
-Também adicionar um campo agregado `last_activity_at` usando `MAX(last_seen_at)` da tabela `user_module_usage` para capturar o último acesso real ao sistema (não apenas login).
+---
 
-#### 2. Hook `useAdminClients.ts`
+### Problema 2 — Página Início (Home) mostra "Conectar Mercado Livre" para ZPL
 
-Adicionar ao type:
-```typescript
-interface MlAccountInfo {
-  // existentes...
-  created_at: string | null;  // data de integração
-}
+**Causa raiz:** `src/pages/Home.tsx` (rota `/inicio`) sempre renderiza `MLConnectionCard` quando `connectionInfo.state !== 'CONNECTED'`, mesmo para usuários ZPL que não precisam de ML.
 
-interface AdminClient {
-  // existentes...
-  last_sign_in_at: string | null;   // último login
-  last_activity_at: string | null;  // último acesso real
-}
-```
+**Solução:** Verificar `user_mode` ou o plano do usuário. Se for ZPL (sem ML), não exibir o card de conexão ML e mostrar conteúdo útil (Daily Message, Quick Actions, etc.).
 
-#### 3. Frontend `AdminClientes.tsx`
+**Arquivo:** `src/pages/Home.tsx`
 
-**Coluna "Último Acesso"** na tabela principal:
-- Exibir `last_activity_at` (preferência) ou `last_sign_in_at` como fallback
-- Formato: `dd/MM/yyyy HH:mm`
+Alterações:
+- Importar `useUserAccessState` para checar `mlConnected` e o plano selecionado
+- Se o plano for ZPL (`planCode` contém 'zpl' ou `user_mode === 'semi_restrito'` sem ML), renderizar o conteúdo sem o `MLConnectionCard`
+- Manter `DailyMessageSection`, `DashboardQuickActions` visíveis para ZPL
 
-**Expansão por subconta (clientes com múltiplas contas ML)**:
-- Ao clicar na linha de um cliente com 2+ contas ML, expandir linhas agrupadas mostrando:
-  - Nickname da conta
-  - Status de conexão (bolinha colorida)
-  - Data de integração (`created_at` da ml_account)
-  - Último acesso (usando `user_module_usage` filtrado por seller_id = ml_account.id)
+---
 
-Para o último acesso por subconta, adicionar ao subselect de `ml_accounts` na function SQL:
-```sql
-(SELECT MAX(umu.last_seen_at) FROM user_module_usage umu WHERE umu.seller_id = ma.id) as last_activity_at
-```
+### Problema 3 — Sidebar mostra módulos ML para usuários ZPL
+
+**Causa raiz:** O `useDynamicMenu` já filtra por `plan_modules` (linha 60-62), então se o plano ZPL tem apenas 12 módulos configurados, os módulos ML não deveriam aparecer. Porém, o grupo pai "Mercado Livre" pode estar aparecendo mesmo sem filhos visíveis, ou o `hasPlanConfig` está `false` (fail-open).
+
+**Solução:** Verificar que a filtragem por plano está funcionando. Adicionalmente, garantir que grupos-pai sem filhos visíveis sejam podados (já existe lógica de prune, mas pode não estar cobrindo o cenário).
+
+**Arquivo:** `src/hooks/useDynamicMenu.ts`
+
+Alterações:
+- Adicionar log de debug temporário para verificar `hasPlanConfig` e `planModuleKeys`
+- Se `hasPlanConfig` for `false` para ZPL, investigar e corrigir o lookup na `useCanAccessModule`
+
+**Arquivo:** `src/pages/Dashboard.tsx`
+
+Alterações:
+- Mesmo tratamento do Home: se ZPL, mostrar `MLNotConnectedBanner` leve ou simplesmente não mostrar nada relacionado a ML
+
+---
 
 ### Arquivos modificados
 
 | Arquivo | Ação |
 |---|---|
-| Nova migração SQL | Recriar `admin_get_clients_overview()` com campos novos |
-| `src/hooks/useAdminClients.ts` | Adicionar types |
-| `src/pages/admin/AdminClientes.tsx` | Coluna "Último Acesso" + expansão por subconta |
+| `src/components/explanatory-cards/ExplanatoryCardModal.tsx` | Flatten slides de carrossel em cards virtuais para progresso correto |
+| `src/pages/Home.tsx` | Não exibir MLConnectionCard para ZPL |
+| `src/pages/Dashboard.tsx` | Não exibir MLConnectionCard para ZPL |
+| `src/hooks/useDynamicMenu.ts` | Verificar/corrigir filtragem de módulos ML para plano ZPL |
 
-### Resultado
-- Coluna "Último Acesso" visível na lista de clientes
-- Clientes com múltiplas contas ML podem ser expandidos para ver data de integração e último acesso por subconta
-- Dados reais, sem mock
+### Resultado esperado
+- Cards com 6 slides exigem visualização de todos antes de "Concluir"
+- Usuário ZPL não vê "Conectar Mercado Livre" na Home nem no Dashboard
+- Sidebar mostra apenas módulos permitidos pelo plano ZPL
 
