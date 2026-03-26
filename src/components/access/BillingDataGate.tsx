@@ -3,7 +3,11 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { FileText, ArrowRight, Building2, CheckCircle2 } from 'lucide-react';
-import { useUserAccess } from '@/contexts/UserAccessContext';
+import { useContext } from 'react';
+
+// Import context directly to avoid the throwing version
+import React from 'react';
+import { useUserAccessState } from '@/hooks/useUserAccessState';
 
 /**
  * BillingDataGate — blocks access after payment until fiscal data is complete.
@@ -12,7 +16,9 @@ import { useUserAccess } from '@/contexts/UserAccessContext';
 export function BillingDataGate() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { flags, loading, isAuthenticated } = useUserAccess();
+  
+  // Use the hook directly instead of context to avoid crash when provider is not available
+  const { flags, loading, isAuthenticated } = useUserAccessState();
 
   // Allow access to settings page (where billing data is filled)
   const isOnSettingsPage = location.pathname === '/settings';
