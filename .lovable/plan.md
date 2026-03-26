@@ -1,37 +1,74 @@
 
 
-## Diagnóstico: Por que os e-mails ainda saem pelo Lovable
+## Plano: Rotear auth-email-hook pelos templates do banco de dados + Resend
 
-O problema não está no código da edge function — ela já usa o Resend corretamente. O problema é que **o sistema de autenticação não está chamando a sua edge function**. Confirmações:
+### Situação atual
+- Você tem 15 templates no banco (`email_templates`) com variáveis `{{}}`, gerenciados pela rota `/admin/emails`
+- O `email-worker-send` já envia via Resend lendo da fila `email_queue`
+- O `email-enqueue-event` já resolve variáveis e enfileira e-mails
+- O `auth-email-hook` atual usa templates React Email hardcoded — **não usa seus templates do banco**
 
-- `auth-email-hook` tem **zero logs** (nunca foi invocado)
-- **Nenhum domínio de e-mail** está configurado no workspace Lovable
+### O que será feito
 
-### Por que isso acontece
+**Reescrever `auth-email-hook/index.ts`** para:
 
-Para que o sistema de autenticação use sua edge function customizada (`auth-email-hook`), é necessário que um **domínio de e-mail Lovable** esteja configurado e com DNS verificado. Sem isso, o sistema ignora o hook e usa o e-mail padrão (`auth.lovable.cloud`).
+1. **Receber o evento de autenticação** (signup, recovery, magiclink, invite, email_change, reauthentication)
+2. **Mapear o tipo de evento para o `key` do template no banco:**
+   - `signup` → `confirm_email`
+   - `recovery` → `password_reset`
+   - `magiclink` → template de magic link (se existir)
+   - `invite` → template de convite (se existir)
+3. **Buscar o template do banco** (`email_templates` por `key`)
+4. **Resolver variáveis** `{{confirmation_url}}`, `{{site_name}}`, `{{recipient}}`, `{{token}}` etc.
+5. **Enviar diretamente via API do Resend** (sem enfileirar, pois auth precisa ser imediato)
+6. **Registrar log** na tabela `email_logs`
+7. **Remover dependências** de React Email, `@lovable.dev/webhooks-js`, e os templates TSX de `_shared/email-templates/`
 
-A verificação de DNS do Lovable exige **registros NS para subdomínio** — e a Hostinger não suporta isso.
+### Mapeamento de eventos → templates
 
-### Solução: Migrar DNS para Cloudflare (gratuito)
+```text
+Evento Auth         →  Template Key (banco)
+─────────────────────────────────────────
+signup              →  confirm_email
+recovery            →  password_reset
+magiclink           →  (a definir ou reusar confirm_email)
+invite              →  (a definir)
+email_change        →  (a definir)
+reauthentication    →  (a definir)
+```
 
-O Cloudflare suporta registros NS para subdomínios. Com ele:
+### Variáveis disponíveis para os templates
 
-1. **Criar conta gratuita no Cloudflare** e adicionar `mktpfacil.com`
-2. **Atualizar os nameservers** na Hostinger para apontar para o Cloudflare
-3. **Recriar todos os registros DNS existentes** no Cloudflare (ele importa automaticamente na maioria dos casos)
-4. **Adicionar os registros do Resend** (TXT, CNAME, MX) para `ale.mktpfacil.com` no Cloudflare
-5. **Configurar domínio de e-mail Lovable** — o Cloudflare suporta os registros NS necessários
-6. **Registrar o hook de autenticação** — com o domínio verificado, o sistema passa a chamar `auth-email-hook`, que envia via Resend
+Os templates do banco poderão usar estas variáveis:
+- `{{confirmation_url}}` — link de confirmação/reset
+- `{{site_name}}` — "MKTP Fácil"
+- `{{recipient}}` — e-mail do destinatário
+- `{{token}}` — código OTP (reauthentication)
 
-### Resultado esperado
+### Arquivos modificados
 
-- O sistema de autenticação chama `auth-email-hook`
-- A edge function renderiza os templates em português e envia via **Resend**
-- E-mails saem de `noreply@ale.mktpfacil.com`
-- Templates visuais personalizados são mantidos
+| Arquivo | Ação |
+|---------|------|
+| `supabase/functions/auth-email-hook/index.ts` | Reescrever: buscar template do banco, resolver variáveis, enviar via Resend |
+| `supabase/functions/auth-email-hook/deno.json` | Simplificar (remover JSX config) |
+| `supabase/functions/_shared/email-templates/*.tsx` | Manter (não deletar), mas não serão mais usados pelo hook |
 
-### Nota importante
+### Fluxo final
 
-Sem migrar o DNS para um provedor que suporte registros NS para subdomínios (como Cloudflare), não há como ativar o hook customizado dentro do Lovable Cloud. A Hostinger é o bloqueio atual.
+```text
+Supabase Auth → auth-email-hook
+  → Busca template por key no banco (email_templates)
+  → Resolve {{variáveis}}
+  → Envia via Resend API (RESEND_API_KEY)
+  → Registra log em email_logs
+  → Remetente: MKTP Fácil <noreply@ale.mktpfacil.com>
+```
+
+### Pré-requisitos
+
+- Confirmar quais templates do banco cobrem quais eventos (dos 6 tipos de auth, você tem `confirm_email` e `password_reset` — precisamos definir os demais ou criar novos)
+- `RESEND_API_KEY` já configurada
+
+### Deploy
+- Redeployar `auth-email-hook` após as alterações
 
