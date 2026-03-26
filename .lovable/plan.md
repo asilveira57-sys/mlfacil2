@@ -1,59 +1,83 @@
 
-## Plano de correção definitiva (Canal Oficial) — retroativo + segmentação por seller
 
-### Diagnóstico confirmado (raiz do problema)
-1. **Há anúncios antigos ativos no banco** (inclusive o do robô e “Teste plataforma”), por isso continuam aparecendo.
-2. O hook `useAnnouncements` está buscando seller em **`marketplace_accounts`** (tabela vazia no projeto), então o seller ativo fica `null`.
-3. O corte temporal hoje usa **data de criação do usuário** (`profiles.created_at`), mas a regra correta é por **entrada do seller** (conta ML ativa).
-4. `target_seller_id` está como **UUID**, porém o seller do ML é string (`ml_user_id`), causando inconsistência na segmentação.
+## Plano: Adicionar "Último Acesso" na lista de clientes com expansão por conta ML
 
----
+### Fonte de dados
 
-### O que vou implementar
+Já existe infraestrutura pronta:
+- `auth.users.last_sign_in_at` — último login do usuário (nível conta principal)
+- `ml_accounts.created_at` — data de integração de cada conta ML
+- `user_module_usage.last_seen_at` — último acesso por módulo (pode ser usado para pegar o MAX global por user)
 
-#### 1) Ajuste de dados e schema (migração)
-- Alterar `mktpfacil_announcements.target_seller_id` de **UUID → TEXT**.
-- Criar índice para filtro por `target_seller_id`.
-- Executar limpeza de legado:
-  - desativar anúncios antigos de teste/robô já existentes (os que estão causando o problema agora).
-- Adicionar validação no banco: comunicado automático do robô sem `target_seller_id` não pode ser salvo.
+### Implementação
 
-#### 2) Correção do emissor do robô (promoções)
-Arquivo: `supabase/functions/promotion-agent-run/index.ts`
-- Remover lookup morto de `marketplace_accounts`.
-- Garantir insert com `target_seller_id = seller_id` (ML user id em texto).
-- Garantir `published_at` explícito e log de erro detalhado se falhar insert.
+#### 1. Migração SQL — Atualizar `admin_get_clients_overview()`
 
-#### 3) Correção do filtro no Canal Oficial (frontend)
-Arquivo: `src/hooks/useOfficialChannel.ts`
-- Trocar fonte da conta ativa:
-  - de `marketplace_accounts` para **`ml_accounts`** (id ativo do `user_context`).
-- Regra nova de visibilidade:
-  - **Segmentado** (`target_seller_id`): só aparece se `target_seller_id === ml_user_id` da conta ativa.
-  - **Global** (sem target): só aparece se `published_at >= ml_accounts.created_at` da conta ativa.
-- Fallback seguro:
-  - se não houver conta ativa válida, não exibir comunicado global retroativo (fail-closed).
-- Manter filtro de expiração (`expires_at`).
+Adicionar dois campos novos ao retorno:
+- `last_sign_in_at` (de `auth.users`) — último acesso do cliente
+- Enriquecer `ml_accounts` com `created_at` (data de integração) por subconta
 
-#### 4) Verificação end-to-end obrigatória
-- Cenário A: seller novo (conta criada hoje) **não** vê mensagens antigas.
-- Cenário B: comunicado do robô para seller X **não** aparece para seller Y.
-- Cenário C: comunicado novo global aparece apenas para sellers cuja entrada é anterior/compatível com `published_at`.
-- Conferir badge (bolinha vermelha) coerente após os filtros.
+```sql
+-- No subselect de ml_accounts, adicionar created_at:
+jsonb_build_object(
+  'id', ma.id,
+  'nickname', ma.nickname,
+  'ml_user_id', ma.ml_user_id,
+  'connection_status', ma.connection_status,
+  'is_active', ma.is_active,
+  'created_at', ma.created_at   -- <-- NOVO
+)
 
----
+-- No SELECT principal, adicionar:
+au.last_sign_in_at   -- <-- NOVO campo no RETURNS TABLE
+```
 
-## Detalhes técnicos
-- Arquivos principais:
-  - `src/hooks/useOfficialChannel.ts`
-  - `supabase/functions/promotion-agent-run/index.ts`
-  - nova migração SQL em `supabase/migrations/*`
-- Critério de corte temporal passará de `profiles.created_at` para `ml_accounts.created_at` (seller-context).
-- A limpeza de legado elimina imediatamente os registros que hoje estão “vazando” para usuários indevidos.
+Também adicionar um campo agregado `last_activity_at` usando `MAX(last_seen_at)` da tabela `user_module_usage` para capturar o último acesso real ao sistema (não apenas login).
 
----
+#### 2. Hook `useAdminClients.ts`
 
-### Resultado esperado
-- Fim definitivo de mensagem retroativa para seller novo.
-- Fim do vazamento global de mensagem do robô.
-- Canal Oficial passa a respeitar contexto de seller corretamente, sem spam de notificações antigas.
+Adicionar ao type:
+```typescript
+interface MlAccountInfo {
+  // existentes...
+  created_at: string | null;  // data de integração
+}
+
+interface AdminClient {
+  // existentes...
+  last_sign_in_at: string | null;   // último login
+  last_activity_at: string | null;  // último acesso real
+}
+```
+
+#### 3. Frontend `AdminClientes.tsx`
+
+**Coluna "Último Acesso"** na tabela principal:
+- Exibir `last_activity_at` (preferência) ou `last_sign_in_at` como fallback
+- Formato: `dd/MM/yyyy HH:mm`
+
+**Expansão por subconta (clientes com múltiplas contas ML)**:
+- Ao clicar na linha de um cliente com 2+ contas ML, expandir linhas agrupadas mostrando:
+  - Nickname da conta
+  - Status de conexão (bolinha colorida)
+  - Data de integração (`created_at` da ml_account)
+  - Último acesso (usando `user_module_usage` filtrado por seller_id = ml_account.id)
+
+Para o último acesso por subconta, adicionar ao subselect de `ml_accounts` na function SQL:
+```sql
+(SELECT MAX(umu.last_seen_at) FROM user_module_usage umu WHERE umu.seller_id = ma.id) as last_activity_at
+```
+
+### Arquivos modificados
+
+| Arquivo | Ação |
+|---|---|
+| Nova migração SQL | Recriar `admin_get_clients_overview()` com campos novos |
+| `src/hooks/useAdminClients.ts` | Adicionar types |
+| `src/pages/admin/AdminClientes.tsx` | Coluna "Último Acesso" + expansão por subconta |
+
+### Resultado
+- Coluna "Último Acesso" visível na lista de clientes
+- Clientes com múltiplas contas ML podem ser expandidos para ver data de integração e último acesso por subconta
+- Dados reais, sem mock
+
