@@ -75,7 +75,33 @@ export function useUserAccess(): UserAccessContextValue {
   const context = useContext(UserAccessContext);
   
   if (context === undefined) {
-    throw new Error('useUserAccess must be used within a UserAccessProvider');
+    // Return safe defaults instead of throwing — prevents crash during
+    // React concurrent-mode error recovery or when provider unmounts temporarily.
+    return {
+      status: null,
+      state: null,
+      flags: null,
+      selectedPlan: null,
+      loading: true,
+      error: null,
+      refetch: async () => {},
+      selectPlan: async () => false,
+      updateOnboarding: async () => false,
+      isAuthenticated: false,
+      requiresOnboarding: false,
+      trialActive: false,
+      trialExpired: false,
+      requiresPayment: false,
+      canImportSales: false,
+      canPrintLabels: false,
+      mlConnected: false,
+      mlIsOwner: false,
+      mlApiAccessAllowed: false,
+      mlApiAccessReason: null,
+      mlApiAccessMessage: null,
+      billingComplete: false,
+      requiresBilling: false,
+    };
   }
   
   return context;
