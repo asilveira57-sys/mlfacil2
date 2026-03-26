@@ -34,6 +34,8 @@ const Dashboard = () => {
 
   const { activeAccount, loading: accountLoading, initialized } = useActiveAccount();
   const connectionInfo = useMLConnectionState();
+  const { planCode } = useCanAccessModule();
+  const isZplMode = planCode?.toLowerCase().includes('zpl') ?? false;
   const feedback = useModuleFeedbackIntegration('dashboard-analises');
 
   useEffect(() => {
@@ -66,6 +68,7 @@ const Dashboard = () => {
   }
 
   const isConnected = connectionInfo.state === 'CONNECTED';
+  const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION' || isZplMode;
   const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION';
 
   return (
