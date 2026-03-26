@@ -1,70 +1,59 @@
 
+## Plano de correção definitiva (Canal Oficial) — retroativo + segmentação por seller
 
-## Plano: Corrigir sequência do onboarding após confirmação de e-mail
+### Diagnóstico confirmado (raiz do problema)
+1. **Há anúncios antigos ativos no banco** (inclusive o do robô e “Teste plataforma”), por isso continuam aparecendo.
+2. O hook `useAnnouncements` está buscando seller em **`marketplace_accounts`** (tabela vazia no projeto), então o seller ativo fica `null`.
+3. O corte temporal hoje usa **data de criação do usuário** (`profiles.created_at`), mas a regra correta é por **entrada do seller** (conta ML ativa).
+4. `target_seller_id` está como **UUID**, porém o seller do ML é string (`ml_user_id`), causando inconsistência na segmentação.
 
-### Problema
-Após confirmar o e-mail, o usuário vê a tela "Conectar conta do Mercado Livre" (step `connect`) em vez de começar pela tela de boas-vindas. Isso acontece porque o `localStorage` (`mktp_onboarding_v2`) guarda o estado de uma sessão anterior incompleta, e o `PrimeiroAcesso` carrega esse estado cegamente sem validar.
+---
 
-### Causa raiz
-- `loadState()` (linha 29-35) lê do `localStorage` sem verificar se o progresso salvo é válido para a sessão atual
-- Se o usuário abandonou o onboarding no passo "connect" e depois confirmou o e-mail, ao voltar ele cai direto no "connect" pulando welcome → name → company → plan
+### O que vou implementar
 
-### Correção (2 arquivos)
+#### 1) Ajuste de dados e schema (migração)
+- Alterar `mktpfacil_announcements.target_seller_id` de **UUID → TEXT**.
+- Criar índice para filtro por `target_seller_id`.
+- Executar limpeza de legado:
+  - desativar anúncios antigos de teste/robô já existentes (os que estão causando o problema agora).
+- Adicionar validação no banco: comunicado automático do robô sem `target_seller_id` não pode ser salvo.
 
-**1. `src/pages/PrimeiroAcesso.tsx` — Validar estado do localStorage**
+#### 2) Correção do emissor do robô (promoções)
+Arquivo: `supabase/functions/promotion-agent-run/index.ts`
+- Remover lookup morto de `marketplace_accounts`.
+- Garantir insert com `target_seller_id = seller_id` (ML user id em texto).
+- Garantir `published_at` explícito e log de erro detalhado se falhar insert.
 
-Na função `loadState()`, adicionar validação: se os dados obrigatórios do passo atual não existem, resetar para o início.
+#### 3) Correção do filtro no Canal Oficial (frontend)
+Arquivo: `src/hooks/useOfficialChannel.ts`
+- Trocar fonte da conta ativa:
+  - de `marketplace_accounts` para **`ml_accounts`** (id ativo do `user_context`).
+- Regra nova de visibilidade:
+  - **Segmentado** (`target_seller_id`): só aparece se `target_seller_id === ml_user_id` da conta ativa.
+  - **Global** (sem target): só aparece se `published_at >= ml_accounts.created_at` da conta ativa.
+- Fallback seguro:
+  - se não houver conta ativa válida, não exibir comunicado global retroativo (fail-closed).
+- Manter filtro de expiração (`expires_at`).
 
-```text
-Fluxo de validação:
-  step == "connect" ou posterior?
-    → userName vazio? → reset para "welcome"
-    → companyName vazio? → reset para "company"
-    → planChoice nulo? → reset para "plan"
-```
+#### 4) Verificação end-to-end obrigatória
+- Cenário A: seller novo (conta criada hoje) **não** vê mensagens antigas.
+- Cenário B: comunicado do robô para seller X **não** aparece para seller Y.
+- Cenário C: comunicado novo global aparece apenas para sellers cuja entrada é anterior/compatível com `published_at`.
+- Conferir badge (bolinha vermelha) coerente após os filtros.
 
-Também adicionar: ao montar o componente, se `requiresOnboarding === true` e é a primeira visita (sem dados preenchidos), forçar step `"welcome"`.
+---
 
-**2. `src/pages/PrimeiroAcesso.tsx` — Race condition no redirect (linhas 85-93)**
+## Detalhes técnicos
+- Arquivos principais:
+  - `src/hooks/useOfficialChannel.ts`
+  - `supabase/functions/promotion-agent-run/index.ts`
+  - nova migração SQL em `supabase/migrations/*`
+- Critério de corte temporal passará de `profiles.created_at` para `ml_accounts.created_at` (seller-context).
+- A limpeza de legado elimina imediatamente os registros que hoje estão “vazando” para usuários indevidos.
 
-Reforçar a proteção: só redirecionar para `/dashboard` se `state.step === "welcome"` (estado virgem). Em qualquer outro passo ativo, o usuário deve completar o fluxo explicitamente.
-
-### Detalhes técnicos
-
-Modificar `loadState()`:
-```typescript
-function loadState(): OnboardingState {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      // Validar consistência: se está em passo avançado sem dados anteriores, resetar
-      const step = parsed.step as OnboardingStep;
-      const advancedSteps: OnboardingStep[] = ["connect", "importing", "done"];
-      if (advancedSteps.includes(step)) {
-        if (!parsed.userName?.trim() || !parsed.companyName?.trim() || !parsed.planChoice) {
-          // Estado inconsistente — resetar
-          localStorage.removeItem(STORAGE_KEY);
-          return { step: "welcome", userName: "", companyName: "", companyId: null, planChoice: null };
-        }
-      }
-      return parsed;
-    }
-  } catch {}
-  return { step: "welcome", userName: "", companyName: "", companyId: null, planChoice: null };
-}
-```
-
-Modificar redirect (linha 86-93): manter como está, já está correto (bloqueia redirect durante importing/done).
-
-### Arquivos modificados
-
-| Arquivo | Ação |
-|---|---|
-| `src/pages/PrimeiroAcesso.tsx` | Validar localStorage no `loadState()` |
+---
 
 ### Resultado esperado
-- Novo usuário confirma e-mail → vê tela "Bem-vindo ao MKTP Fácil" (step welcome)
-- Fluxo linear: welcome → name → company → plan → connect → importing → done
-- Sem pulos de etapa por estado stale do localStorage
-
+- Fim definitivo de mensagem retroativa para seller novo.
+- Fim do vazamento global de mensagem do robô.
+- Canal Oficial passa a respeitar contexto de seller corretamente, sem spam de notificações antigas.
