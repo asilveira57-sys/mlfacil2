@@ -13061,6 +13061,7 @@ export type Database = {
           linkedin_url: string | null
           other_url: string | null
           photo_url: string | null
+          tag: string | null
           updated_at: string
           user_id: string | null
           whatsapp: string | null
@@ -13084,6 +13085,7 @@ export type Database = {
           linkedin_url?: string | null
           other_url?: string | null
           photo_url?: string | null
+          tag?: string | null
           updated_at?: string
           user_id?: string | null
           whatsapp?: string | null
@@ -13107,6 +13109,7 @@ export type Database = {
           linkedin_url?: string | null
           other_url?: string | null
           photo_url?: string | null
+          tag?: string | null
           updated_at?: string
           user_id?: string | null
           whatsapp?: string | null
@@ -19284,6 +19287,36 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      user_import_logs: {
+        Row: {
+          batch_id: string | null
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          reason: string | null
+          status: string
+        }
+        Insert: {
+          batch_id?: string | null
+          created_at?: string
+          email: string
+          full_name?: string | null
+          id?: string
+          reason?: string | null
+          status: string
+        }
+        Update: {
+          batch_id?: string | null
+          created_at?: string
+          email?: string
+          full_name?: string | null
+          id?: string
+          reason?: string | null
+          status?: string
         }
         Relationships: []
       }
