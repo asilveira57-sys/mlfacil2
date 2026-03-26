@@ -221,7 +221,7 @@ export function EmailTemplatesTab() {
               <div className="space-y-2">
                 <Label className="text-xs">Variáveis disponíveis</Label>
                 <div className="flex flex-wrap gap-1">
-                  {(editingTemplate.variables_schema_json || []).map((v) => (
+                  {toVarsArray(editingTemplate.variables_schema_json).map((v) => (
                     <Badge key={v} variant="outline" className="text-[10px]">
                       {'{{' + v + '}}'}
                     </Badge>
