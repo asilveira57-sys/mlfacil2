@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
@@ -344,6 +344,33 @@ function FieldGroup({ label, id, children }: { label: string; id: string; childr
 }
 
 function VerifyEmailState({ email, t }: { email: string; t: any }) {
+  const [countdown, setCountdown] = useState(30);
+  const [resending, setResending] = useState(false);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [countdown]);
+
+  const handleResend = useCallback(async () => {
+    if (!email || countdown > 0) return;
+    setResending(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+      });
+      if (error) throw error;
+      toast.success('E-mail de verificação reenviado!');
+      setCountdown(30);
+    } catch (err: any) {
+      toast.error(`Erro ao reenviar: ${err.message}`);
+    } finally {
+      setResending(false);
+    }
+  }, [email, countdown]);
+
   return (
     <div className="text-center space-y-4 py-6">
       <div className="flex justify-center">
@@ -356,6 +383,34 @@ function VerifyEmailState({ email, t }: { email: string; t: any }) {
         {t("auth:verify_email_description")}
       </p>
       {email && <p className="text-sm font-medium text-foreground">{email}</p>}
+      
+      <div className="pt-2">
+        {countdown > 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Reenviar em <span className="font-mono font-semibold text-foreground">{countdown}s</span>
+          </p>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleResend}
+            disabled={resending}
+          >
+            {resending ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                Reenviando...
+              </>
+            ) : (
+              <>
+                <MailCheck className="h-4 w-4 mr-1" />
+                Reenviar e-mail de verificação
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+
       <Link to="/auth" className="text-sm text-primary hover:underline mt-4 inline-block">
         Ir para o login
       </Link>

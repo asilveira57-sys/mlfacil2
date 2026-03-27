@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useAdminClients, useDeleteClient, type AdminClient } from '@/hooks/useAdminClients';
+import { supabase } from '@/integrations/supabase/client';
 import { useAdminTrialManagement } from '@/hooks/useAdmin';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -19,7 +20,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
-  Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock,
+  Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -291,6 +292,21 @@ export function AdminClientes() {
                               <Eye className="h-4 w-4 mr-2" /> Ver detalhes
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const { data, error } = await supabase.functions.invoke('admin-resend-verification', {
+                                  body: { target_user_id: client.user_id, email: client.email },
+                                });
+                                if (error) throw error;
+                                if (data?.error) throw new Error(data.error);
+                                toast.success(data?.message || 'E-mail de verificação reenviado');
+                              } catch (err: any) {
+                                toast.error(`Erro: ${err.message}`);
+                              }
+                            }}>
+                              <Send className="h-4 w-4 mr-2" /> Reenviar verificação
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => { setTrialClient(client); setTrialDays('7'); setTrialOpen(true); }}>
                               <CalendarPlus className="h-4 w-4 mr-2" /> Ajustar trial
                             </DropdownMenuItem>
