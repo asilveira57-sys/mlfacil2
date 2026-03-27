@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Send, CheckCircle2, XCircle } from 'lucide-react';
 import { useEmailProviderSettings } from '@/hooks/useEmailAdmin';
+import { toast } from 'sonner';
 
 export function EmailProviderTab() {
   const { data: provider, isLoading, upsertProvider, testProvider } = useEmailProviderSettings();
