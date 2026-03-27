@@ -20,7 +20,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
-  Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send,
+  Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send, Link2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -306,6 +306,26 @@ export function AdminClientes() {
                               }
                             }}>
                               <Send className="h-4 w-4 mr-2" /> Reenviar verificação
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const { data, error } = await supabase.functions.invoke('admin-resend-verification', {
+                                  body: { target_user_id: client.user_id, email: client.email },
+                                });
+                                if (error) throw error;
+                                if (data?.error) throw new Error(data.error);
+                                if (data?.verification_link) {
+                                  await navigator.clipboard.writeText(data.verification_link);
+                                  toast.success('Link de verificação copiado!');
+                                } else {
+                                  toast.info(data?.message || 'Usuário já confirmou o e-mail');
+                                }
+                              } catch (err: any) {
+                                toast.error(`Erro: ${err.message}`);
+                              }
+                            }}>
+                              <Link2 className="h-4 w-4 mr-2" /> Copiar link de verificação
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => { setTrialClient(client); setTrialDays('7'); setTrialOpen(true); }}>
                               <CalendarPlus className="h-4 w-4 mr-2" /> Ajustar trial

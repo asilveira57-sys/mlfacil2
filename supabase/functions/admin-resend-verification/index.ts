@@ -32,7 +32,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Admin only" }), { status: 403, headers: corsHeaders });
     }
 
-    const { target_user_id, email } = await req.json();
+    const body = await req.json();
+    const { target_user_id, email } = body;
     if (!target_user_id && !email) {
       return new Response(JSON.stringify({ error: "target_user_id or email required" }), { status: 400, headers: corsHeaders });
     }
@@ -54,15 +55,12 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Email not found for user" }), { status: 404, headers: corsHeaders });
     }
 
-    // Generate a new magic link / invite for the user to confirm email
-    // We use admin.generateLink to create a signup confirmation link
     const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
       type: "signup",
       email: targetEmail,
     });
 
     if (linkError) {
-      // If user already confirmed, try magiclink instead
       if (linkError.message?.includes("already confirmed") || linkError.message?.includes("already registered")) {
         return new Response(
           JSON.stringify({ success: true, message: "Usuário já confirmou o e-mail" }),
@@ -72,8 +70,14 @@ Deno.serve(async (req) => {
       throw linkError;
     }
 
+    const verificationLink = linkData?.properties?.action_link || null;
+
     return new Response(
-      JSON.stringify({ success: true, message: "Link de verificação gerado e enviado" }),
+      JSON.stringify({ 
+        success: true, 
+        message: "Link de verificação gerado e enviado",
+        ...(verificationLink ? { verification_link: verificationLink } : {}),
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
