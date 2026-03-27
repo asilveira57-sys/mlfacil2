@@ -20,13 +20,22 @@ export function TrialExpiredPaywall() {
   
   const { trialExpired, flags, selectedPlan, loading, isAuthenticated } = contextValue;
 
-  // Don't show on pages where user needs to browse/pay freely
-  const isOnExcludedPage = ['/planos', '/settings', '/auth', '/contato'].some(
-    p => location.pathname.startsWith(p)
-  );
+  // Don't show if user has an active subscription/payment
+  const hasActiveSubscription = (flags as any)?.has_active_subscription === true;
 
-  // Don't show if not authenticated, trial not expired, or on excluded pages
-  if (!isAuthenticated || !trialExpired || loading || isOnExcludedPage) {
+  // Don't show on public or excluded pages
+  const isOnExcludedPage = [
+    '/planos', '/settings', '/auth', '/contato',
+    '/home', '/blog', '/suporte', '/central-de-ajuda',
+    '/termos-de-uso', '/politica-de-privacidade', '/politica-de-cookies',
+    '/lgpd', '/status', '/criar-acesso', '/primeiro-acesso',
+  ].some(p => location.pathname.startsWith(p));
+  
+  // Also exclude exact root path (landing page)
+  const isLandingPage = location.pathname === '/';
+
+  // Don't show if not authenticated, trial not expired, has active sub, or on excluded pages
+  if (!isAuthenticated || !trialExpired || hasActiveSubscription || loading || isOnExcludedPage || isLandingPage) {
     return null;
   }
 
