@@ -10,14 +10,18 @@ const corsHeaders = {
 const EVENT_TO_TEMPLATE_KEY: Record<string, string> = {
   signup: "confirm_email",
   recovery: "password_reset",
-  magiclink: "confirm_email",        // reuse confirm_email
-  invite: "confirm_email",           // reuse confirm_email
-  email_change: "confirm_email",     // reuse confirm_email
-  reauthentication: "confirm_email", // reuse confirm_email (token-based)
+  magiclink: "confirm_email",
+  invite: "confirm_email",
+  email_change: "confirm_email",
+  reauthentication: "confirm_email",
 };
 
 const SITE_NAME = "MKTP Fácil";
-const FROM_ADDRESS = `MKTP Fácil <noreply@ale.mktpfacil.com>`;
+
+// Verified sending domain - must match what's configured in the email provider
+const VERIFIED_SENDER_DOMAIN = "notify.notifica.mktpfacil.com";
+const DEFAULT_FROM_NAME = "MKTP Fácil";
+const DEFAULT_FROM_EMAIL = `noreply@${VERIFIED_SENDER_DOMAIN}`;
 
 function resolveTemplate(template: string, variables: Record<string, string>): string {
   let result = template;
@@ -27,7 +31,34 @@ function resolveTemplate(template: string, variables: Record<string, string>): s
   return result;
 }
 
+async function getFromAddress(supabase: any): Promise<{ fromName: string; fromEmail: string }> {
+  try {
+    const { data: providerSettings } = await supabase
+      .from("email_provider_settings")
+      .select("from_name, from_email, is_enabled")
+      .limit(1)
+      .single();
+
+    if (providerSettings?.is_enabled && providerSettings.from_email) {
+      // Validate that the configured email uses the verified domain
+      const configuredDomain = providerSettings.from_email.split("@")[1];
+      if (configuredDomain === VERIFIED_SENDER_DOMAIN) {
+        return {
+          fromName: providerSettings.from_name || DEFAULT_FROM_NAME,
+          fromEmail: providerSettings.from_email,
+        };
+      }
+      console.warn(`Configured from_email domain '${configuredDomain}' doesn't match verified domain '${VERIFIED_SENDER_DOMAIN}'. Using default.`);
+    }
+  } catch (e) {
+    console.warn("Could not fetch provider settings, using defaults", e.message);
+  }
+
+  return { fromName: DEFAULT_FROM_NAME, fromEmail: DEFAULT_FROM_EMAIL };
+}
+
 async function sendViaResend(params: {
+  from: string;
   to: string;
   subject: string;
   html: string;
@@ -43,7 +74,7 @@ async function sendViaResend(params: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: FROM_ADDRESS,
+      from: params.from,
       to: [params.to],
       subject: params.subject,
       html: params.html,
@@ -118,6 +149,12 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Resolve sender address from provider settings (validated against verified domain)
+  const { fromName, fromEmail } = await getFromAddress(supabase);
+  const fromHeader = `${fromName} <${fromEmail}>`;
+
+  console.log("Using sender", { fromName, domain: fromEmail.split("@")[1] });
+
   // Build variables for template resolution
   const variables: Record<string, string> = {
     site_name: SITE_NAME,
@@ -136,13 +173,14 @@ Deno.serve(async (req) => {
 
   try {
     const result = await sendViaResend({
+      from: fromHeader,
       to: recipientEmail,
       subject: resolvedSubject,
       html: resolvedHtml,
       text: resolvedText,
     });
 
-    console.log("Email sent via Resend", { id: result.id, emailType, templateKey, email: recipientEmail });
+    console.log("Email sent via Resend", { id: result.id, emailType, templateKey, email: recipientEmail, sender: fromEmail });
 
     // Log to email_logs
     await supabase.from("email_logs").insert({
@@ -152,7 +190,7 @@ Deno.serve(async (req) => {
       email: recipientEmail,
       template_id: template.id,
       message: `Auth email sent: ${emailType} → ${templateKey}`,
-      details_json: { resend_id: result.id, template_key: templateKey },
+      details_json: { resend_id: result.id, template_key: templateKey, sender_domain: fromEmail.split("@")[1] },
     });
 
     return new Response(
@@ -161,7 +199,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to send email";
-    console.error("Resend API error", { error: message, emailType, email: recipientEmail });
+    console.error("Resend API error", { error: message, emailType, email: recipientEmail, sender: fromEmail });
 
     // Log failure
     await supabase.from("email_logs").insert({
@@ -171,7 +209,7 @@ Deno.serve(async (req) => {
       email: recipientEmail,
       template_id: template.id,
       message: `Auth email failed: ${message}`,
-      details_json: { error: message, template_key: templateKey },
+      details_json: { error: message, template_key: templateKey, sender_domain: fromEmail.split("@")[1] },
     });
 
     return new Response(JSON.stringify({ error: "Failed to send email" }), {
