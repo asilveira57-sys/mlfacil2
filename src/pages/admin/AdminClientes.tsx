@@ -89,6 +89,17 @@ export function AdminClientes() {
     });
   }, [clients, search, statusFilter]);
 
+  // Reset page when filters change
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginatedClients = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
+
+  // Reset to page 1 when filters change
+  const handleSearchChange = (val: string) => { setSearch(val); setCurrentPage(1); };
+  const handleStatusChange = (val: string) => { setStatusFilter(val); setCurrentPage(1); };
+
   const handleDelete = () => {
     if (!clientToDelete) return;
     deleteClient.mutate(clientToDelete.user_id, {
