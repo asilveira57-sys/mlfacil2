@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useAdminClients, useDeleteClient, type AdminClient } from '@/hooks/useAdminClients';
+import { supabase } from '@/integrations/supabase/client';
 import { useAdminTrialManagement } from '@/hooks/useAdmin';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -19,7 +20,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
-  Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock,
+  Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
