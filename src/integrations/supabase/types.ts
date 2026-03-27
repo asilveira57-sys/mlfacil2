@@ -21427,19 +21427,33 @@ export type Database = {
         Args: { p_notification_id: string }
         Returns: undefined
       }
-      rpc_activate_entitlement: {
-        Args: {
-          p_addon_code?: string
-          p_auto_renew?: boolean
-          p_entitlement_type: string
-          p_external_reference?: string
-          p_offer_code?: string
-          p_payment_id?: string
-          p_tenant_id: string
-          p_tier_code?: string
-        }
-        Returns: Json
-      }
+      rpc_activate_entitlement:
+        | {
+            Args: {
+              p_addon_code?: string
+              p_auto_renew?: boolean
+              p_entitlement_type: string
+              p_external_reference?: string
+              p_offer_code?: string
+              p_payment_id?: string
+              p_tenant_id: string
+              p_tier_code?: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_addon_code?: string
+              p_auto_renew?: boolean
+              p_entitlement_type: string
+              p_external_reference?: string
+              p_offer_code?: string
+              p_payment_id?: string
+              p_tenant_id: string
+              p_tier_code?: string
+            }
+            Returns: Json
+          }
       rpc_activate_subscription: {
         Args: {
           p_mp_subscription_id?: string
