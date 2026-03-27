@@ -159,11 +159,11 @@ export function AdminClientes() {
           <Input
             placeholder="Buscar por nome, email ou empresa..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={handleStatusChange}>
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
@@ -194,14 +194,14 @@ export function AdminClientes() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? (
+            {paginatedClients.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   Nenhum cliente encontrado
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((client) => {
+              paginatedClients.map((client) => {
                 const days = daysRemaining(client.trial_end_at);
                 const isExpanded = expandedRows.has(client.user_id);
                 const hasMultipleAccounts = client.ml_accounts.length > 1;
