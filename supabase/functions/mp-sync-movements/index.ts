@@ -153,14 +153,22 @@ serve(async (req) => {
 
     console.log(`[mp-sync-movements] Fetched ${totalFetched} movements`);
 
-    // Upsert in batches of 100
+    // Upsert in batches of 100 — deduplicate by mp_movement_id first
     let processedRecords = 0;
     let failedRecords = 0;
     const batchSize = 100;
     const syncedAt = new Date().toISOString();
 
-    for (let i = 0; i < movements.length; i += batchSize) {
-      const batch = movements.slice(i, i + batchSize);
+    // Deduplicate: keep last occurrence per movement id
+    const deduped = new Map<string, Record<string, unknown>>();
+    for (const m of movements) {
+      deduped.set(String(m.id), m);
+    }
+    const uniqueMovements = Array.from(deduped.values());
+    console.log(`[mp-sync-movements] Deduped ${movements.length} → ${uniqueMovements.length} unique`);
+
+    for (let i = 0; i < uniqueMovements.length; i += batchSize) {
+      const batch = uniqueMovements.slice(i, i + batchSize);
       const rows = batch.map((m: Record<string, unknown>) => ({
         user_id: account.user_id,
         finance_account_id,
