@@ -292,6 +292,21 @@ export function AdminClientes() {
                               <Eye className="h-4 w-4 mr-2" /> Ver detalhes
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const { data, error } = await supabase.functions.invoke('admin-resend-verification', {
+                                  body: { target_user_id: client.user_id, email: client.email },
+                                });
+                                if (error) throw error;
+                                if (data?.error) throw new Error(data.error);
+                                toast.success(data?.message || 'E-mail de verificação reenviado');
+                              } catch (err: any) {
+                                toast.error(`Erro: ${err.message}`);
+                              }
+                            }}>
+                              <Send className="h-4 w-4 mr-2" /> Reenviar verificação
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => { setTrialClient(client); setTrialDays('7'); setTrialOpen(true); }}>
                               <CalendarPlus className="h-4 w-4 mr-2" /> Ajustar trial
                             </DropdownMenuItem>
