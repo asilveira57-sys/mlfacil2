@@ -32,7 +32,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Admin only" }), { status: 403, headers: corsHeaders });
     }
 
-    const { target_user_id, email } = await req.json();
+    const body = await req.json();
+    const { target_user_id, email } = body;
     if (!target_user_id && !email) {
       return new Response(JSON.stringify({ error: "target_user_id or email required" }), { status: 400, headers: corsHeaders });
     }
@@ -53,10 +54,6 @@ Deno.serve(async (req) => {
     if (!targetEmail) {
       return new Response(JSON.stringify({ error: "Email not found for user" }), { status: 404, headers: corsHeaders });
     }
-
-    // Generate a new magic link / invite for the user to confirm email
-    // We use admin.generateLink to create a signup confirmation link
-    const { return_link } = await req.json().catch(() => ({})) || {};
 
     const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
       type: "signup",
