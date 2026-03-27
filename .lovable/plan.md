@@ -1,58 +1,93 @@
 
 
-## Plano: Corrigir cards obrigatórios + experiência ZPL sem ML
+## Plano: Corrigir reconhecimento de pagamento pelo sistema
 
-### 3 problemas identificados
+### Diagnóstico
 
----
+O pagamento do boleto foi processado com sucesso. Os dados confirmam:
 
-### Problema 1 — Cards com carrossel permitem "Concluir" sem ver todos os slides
+- **`tenant_payments`**: registro existe, status `approved`, payment_id `150910495973`, valor R$ 49,90
+- **`tenant_entitlements`**: entitlement `active` com `last_payment_id = 150910495973`, período até 2026-05-24
+- **`user_access_state`**: `payment_status = 'trial'`, `trial_status = 'active'`, `trial_end_at = 2026-03-21` (expirado)
+- **Webhook logs**: nenhum log encontrado — o webhook pode não ter sido invocado pelo Mercado Pago, ou foi invocado mas os logs expiraram
 
-**Causa raiz:** O modal conta **cards** como unidade de visualização, não **slides**. Um card tipo `carrossel` com 6 slides conta como "1 de 1 visualizado" — `Concluir` fica habilitado imediatamente.
+### Causa raiz
 
-**Solução:** Quando um card é do tipo `carrossel` ou `texto` com `slides`, expandir ("flatten") os slides em cards virtuais dentro do modal. Assim o contador mostra "1 de 6", "2 de 6", etc., e `Concluir` só habilita após ver todos os 6 slides.
+A função `rpc_activate_entitlement` cria o registro em `tenant_entitlements` corretamente, mas **não atualiza `user_access_state.payment_status`** de `trial` para `active`.
 
-**Arquivo:** `src/components/explanatory-cards/ExplanatoryCardModal.tsx`
+O sistema (`get_user_feature_flags`) lê **apenas `user_access_state`** para determinar acesso. Ele nunca consulta `tenant_entitlements`. Resultado: o entitlement existe mas o sistema ignora.
 
-Alterações:
-- No início do componente, criar `flatCards`: se um card tem `conteudo.slides` (tipo carrossel ou texto com slides), expandir cada slide como um item individual com título herdado
-- O progresso, dots e navegação usam `flatCards` em vez de `cards`
-- `allViewed` passa a exigir que todos os `flatCards` sejam visualizados
-- O botão "Concluir" permanece desabilitado até `allViewed === true`
-
----
-
-### Problema 2 — Página Início (Home) mostra "Conectar Mercado Livre" para ZPL
-
-**Causa raiz:** `src/pages/Home.tsx` (rota `/inicio`) sempre renderiza `MLConnectionCard` quando `connectionInfo.state !== 'CONNECTED'`, mesmo para usuários ZPL que não precisam de ML.
-
-**Solução:** Verificar `user_mode` ou o plano do usuário. Se for ZPL (sem ML), não exibir o card de conexão ML e mostrar conteúdo útil (Daily Message, Quick Actions, etc.).
-
-**Arquivo:** `src/pages/Home.tsx`
-
-Alterações:
-- Importar `useUserAccessState` para checar `mlConnected` e o plano selecionado
-- Se o plano for ZPL (`planCode` contém 'zpl' ou `user_mode === 'semi_restrito'` sem ML), renderizar o conteúdo sem o `MLConnectionCard`
-- Manter `DailyMessageSection`, `DashboardQuickActions` visíveis para ZPL
+### Solução (2 partes)
 
 ---
 
-### Problema 3 — Sidebar mostra módulos ML para usuários ZPL
+**Parte 1 — Corrigir `rpc_activate_entitlement` (migração SQL)**
 
-**Causa raiz:** O `useDynamicMenu` já filtra por `plan_modules` (linha 60-62), então se o plano ZPL tem apenas 12 módulos configurados, os módulos ML não deveriam aparecer. Porém, o grupo pai "Mercado Livre" pode estar aparecendo mesmo sem filhos visíveis, ou o `hasPlanConfig` está `false` (fail-open).
+Adicionar ao final da função, antes do RETURN:
 
-**Solução:** Verificar que a filtragem por plano está funcionando. Adicionalmente, garantir que grupos-pai sem filhos visíveis sejam podados (já existe lógica de prune, mas pode não estar cobrindo o cenário).
+```sql
+-- Atualizar user_access_state para todos os membros do tenant
+UPDATE user_access_state 
+SET payment_status = 'active',
+    trial_status = 'expired',
+    active_subscription_id = v_entitlement_id::text,
+    updated_at = now()
+WHERE user_id IN (
+  SELECT user_id FROM tenant_members WHERE tenant_id = p_tenant_id
+);
 
-**Arquivo:** `src/hooks/useDynamicMenu.ts`
+-- Fallback: se tenant_id é o próprio user_id (sem tenant_members)
+UPDATE user_access_state
+SET payment_status = 'active',
+    trial_status = 'expired', 
+    active_subscription_id = v_entitlement_id::text,
+    updated_at = now()
+WHERE user_id = p_tenant_id::uuid
+  AND payment_status != 'active';
+```
 
-Alterações:
-- Adicionar log de debug temporário para verificar `hasPlanConfig` e `planModuleKeys`
-- Se `hasPlanConfig` for `false` para ZPL, investigar e corrigir o lookup na `useCanAccessModule`
+Isso garante que qualquer pagamento futuro atualize automaticamente o estado do usuário.
 
-**Arquivo:** `src/pages/Dashboard.tsx`
+---
 
-Alterações:
-- Mesmo tratamento do Home: se ZPL, mostrar `MLNotConnectedBanner` leve ou simplesmente não mostrar nada relacionado a ML
+**Parte 2 — Corrigir o cliente Alex (dados atuais)**
+
+Migração que corrige o registro atual:
+
+```sql
+UPDATE user_access_state
+SET payment_status = 'active',
+    trial_status = 'expired',
+    active_subscription_id = '7bef07f2-da3f-4119-a79f-67a0ebb992e5',
+    updated_at = now()
+WHERE user_id = 'f984a017-5275-43ff-aeef-59fbb3be0e57';
+```
+
+---
+
+**Parte 3 — Adicionar fallback em `get_user_feature_flags`**
+
+Atualizar a função para que, se `payment_status` não é `active` mas existe um `tenant_entitlement` ativo, auto-corrija e considere como ativo:
+
+```sql
+-- Após obter v_state, verificar tenant_entitlements como fallback
+IF v_state.payment_status != 'active' THEN
+  PERFORM 1 FROM tenant_entitlements te
+  JOIN tenant_members tm ON tm.tenant_id = te.tenant_id
+  WHERE tm.user_id = p_user_id
+    AND te.entitlement_type = 'tier'
+    AND te.status = 'active'
+    AND te.current_period_end > now();
+  
+  IF FOUND THEN
+    UPDATE user_access_state 
+    SET payment_status = 'active', trial_status = 'expired', updated_at = now()
+    WHERE user_id = p_user_id;
+    -- Reload state
+    SELECT * INTO v_state FROM user_access_state WHERE user_id = p_user_id;
+  END IF;
+END IF;
+```
 
 ---
 
@@ -60,13 +95,10 @@ Alterações:
 
 | Arquivo | Ação |
 |---|---|
-| `src/components/explanatory-cards/ExplanatoryCardModal.tsx` | Flatten slides de carrossel em cards virtuais para progresso correto |
-| `src/pages/Home.tsx` | Não exibir MLConnectionCard para ZPL |
-| `src/pages/Dashboard.tsx` | Não exibir MLConnectionCard para ZPL |
-| `src/hooks/useDynamicMenu.ts` | Verificar/corrigir filtragem de módulos ML para plano ZPL |
+| Nova migração SQL | Corrigir `rpc_activate_entitlement` + fix Alex + fallback em `get_user_feature_flags` |
 
-### Resultado esperado
-- Cards com 6 slides exigem visualização de todos antes de "Concluir"
-- Usuário ZPL não vê "Conectar Mercado Livre" na Home nem no Dashboard
-- Sidebar mostra apenas módulos permitidos pelo plano ZPL
+### Resultado
+- Pagamento do Alex reconhecido imediatamente
+- Pagamentos futuros via webhook atualizam `user_access_state` automaticamente
+- Fallback de auto-correção impede que entitlements válidos fiquem invisíveis
 
