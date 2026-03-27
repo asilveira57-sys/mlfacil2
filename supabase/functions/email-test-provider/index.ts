@@ -81,8 +81,16 @@ serve(async (req) => {
       );
     }
 
+    const VERIFIED_SENDER_DOMAIN = "notify.notifica.mktpfacil.com";
     const fromName = providerSettings?.from_name || "MKTP Fácil";
-    const fromEmail = providerSettings?.from_email || "noreply@mktpfacil.com";
+    let fromEmail = providerSettings?.from_email || `noreply@${VERIFIED_SENDER_DOMAIN}`;
+    
+    // Validate sender domain matches verified domain
+    const configuredDomain = fromEmail.split("@")[1];
+    if (configuredDomain !== VERIFIED_SENDER_DOMAIN) {
+      console.warn(`Configured from_email domain '${configuredDomain}' doesn't match verified domain. Using default.`);
+      fromEmail = `noreply@${VERIFIED_SENDER_DOMAIN}`;
+    }
 
     // Send test email via Resend
     const resendResp = await fetch("https://api.resend.com/emails", {

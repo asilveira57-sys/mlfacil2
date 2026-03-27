@@ -75,7 +75,9 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: "Link de verificação gerado e enviado",
+        message: verificationLink 
+          ? "Link de verificação gerado. Use o botão 'Copiar Link' para enviar manualmente ao cliente." 
+          : "Verificação processada",
         ...(verificationLink ? { verification_link: verificationLink } : {}),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

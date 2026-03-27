@@ -26,12 +26,18 @@ export function EmailProviderTab() {
     setInitialized(true);
   }
 
+  const VERIFIED_DOMAIN = 'notify.notifica.mktpfacil.com';
+
   const handleSave = () => {
+    if (fromEmail && !fromEmail.endsWith(`@${VERIFIED_DOMAIN}`)) {
+      toast.error(`O e-mail do remetente deve usar o domínio verificado: @${VERIFIED_DOMAIN}`);
+      return;
+    }
     upsertProvider.mutate({
       provider_type: 'RESEND' as any,
       is_enabled: isEnabled,
       from_name: fromName,
-      from_email: fromEmail,
+      from_email: fromEmail || `noreply@${VERIFIED_DOMAIN}`,
       reply_to_email: replyTo || null,
     });
   };
