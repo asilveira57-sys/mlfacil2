@@ -56,13 +56,14 @@ Deno.serve(async (req) => {
 
     // Generate a new magic link / invite for the user to confirm email
     // We use admin.generateLink to create a signup confirmation link
+    const { return_link } = await req.json().catch(() => ({})) || {};
+
     const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
       type: "signup",
       email: targetEmail,
     });
 
     if (linkError) {
-      // If user already confirmed, try magiclink instead
       if (linkError.message?.includes("already confirmed") || linkError.message?.includes("already registered")) {
         return new Response(
           JSON.stringify({ success: true, message: "Usuário já confirmou o e-mail" }),
@@ -72,8 +73,14 @@ Deno.serve(async (req) => {
       throw linkError;
     }
 
+    const verificationLink = linkData?.properties?.action_link || null;
+
     return new Response(
-      JSON.stringify({ success: true, message: "Link de verificação gerado e enviado" }),
+      JSON.stringify({ 
+        success: true, 
+        message: "Link de verificação gerado e enviado",
+        ...(verificationLink ? { verification_link: verificationLink } : {}),
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
