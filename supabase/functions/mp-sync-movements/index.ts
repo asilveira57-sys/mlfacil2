@@ -24,19 +24,15 @@ async function fetchAllMovements(
   let hasMore = true;
 
   while (hasMore) {
-    // MP Account movements endpoint
-    const url = new URL(`https://api.mercadopago.com/v1/account/bank_report/search`);
-    
-    // Fallback to the mercadopago_account/movements endpoint
-    const movUrl = new URL(`https://api.mercadolibre.com/mercadopago_account/movements/search`);
-    movUrl.searchParams.set('access_token', accessToken);
+    // Use the official Mercado Pago payments/search endpoint
+    const movUrl = new URL(`https://api.mercadopago.com/v1/payments/search`);
     movUrl.searchParams.set('offset', offset.toString());
     movUrl.searchParams.set('limit', limit.toString());
+    movUrl.searchParams.set('sort', 'date_created');
+    movUrl.searchParams.set('criteria', 'desc');
     movUrl.searchParams.set('range', 'date_created');
     movUrl.searchParams.set('begin_date', dateFrom);
     movUrl.searchParams.set('end_date', dateTo);
-    movUrl.searchParams.set('sort', 'date_created');
-    movUrl.searchParams.set('criteria', 'desc');
 
     console.log(`[mp-sync-movements] Fetching offset=${offset}`);
 
@@ -56,6 +52,11 @@ async function fetchAllMovements(
       // Treat 404 or empty-data errors as "no movements" instead of throwing
       if (res.status === 404 || res.status === 400) {
         console.info('[mp-sync-movements] No movements available from MP API, returning empty');
+        return { movements: [], totalFetched: 0 };
+      }
+      // Also handle 403 gracefully - legacy endpoint blocked
+      if (res.status === 403) {
+        console.warn('[mp-sync-movements] 403 Forbidden - endpoint may require different permissions');
         return { movements: [], totalFetched: 0 };
       }
       throw new Error(`MP API error ${res.status}: ${errText}`);
