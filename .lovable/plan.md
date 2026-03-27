@@ -1,104 +1,52 @@
 
+Objetivo: corrigir definitivamente o envio de e-mails de confirmação/cadastro e recuperação de senha, e eliminar a inconsistência entre domínio de envio e configuração atual.
 
-## Plano: Corrigir reconhecimento de pagamento pelo sistema
+Diagnóstico (já confirmado no código e logs):
+- Problema é geral (não é só de 1 cliente).
+- O domínio de e-mail no Cloud está verificado (`notify.notifica.mktpfacil.com`), então DNS/Cloudflare está OK.
+- O hook de autenticação está enviando com remetente hardcoded `noreply@ale.mktpfacil.com`, e os logs mostram erro 500 por domínio não verificado.
+- O módulo de teste/admin também está com remetente inconsistente (`noreplay@mktpfacil.com` / domínio não verificado), gerando 403.
+- Resultado: tela mostra “e-mail enviado”, mas entrega falha no provedor.
 
-### Diagnóstico
+Plano de implementação
 
-O pagamento do boleto foi processado com sucesso. Os dados confirmam:
+1) Corrigir o ponto crítico (auth) para parar a falha de recuperação/confirmação
+- Refatorar `supabase/functions/auth-email-hook/index.ts` para remover remetente hardcoded inválido.
+- Passar a resolver remetente por configuração central válida do projeto (domínio de envio ativo no Cloud).
+- Manter o mapeamento existente de templates (`confirm_email`, `password_reset`) para não quebrar fluxo atual.
+- Melhorar log de erro/sucesso com contexto do remetente usado (sem expor segredo), para facilitar suporte futuro.
 
-- **`tenant_payments`**: registro existe, status `approved`, payment_id `150910495973`, valor R$ 49,90
-- **`tenant_entitlements`**: entitlement `active` com `last_payment_id = 150910495973`, período até 2026-05-24
-- **`user_access_state`**: `payment_status = 'trial'`, `trial_status = 'active'`, `trial_end_at = 2026-03-21` (expirado)
-- **Webhook logs**: nenhum log encontrado — o webhook pode não ter sido invocado pelo Mercado Pago, ou foi invocado mas os logs expiraram
+2) Unificar remetente no módulo de e-mail administrativo
+- Ajustar `supabase/functions/email-test-provider/index.ts` e `supabase/functions/email-worker-send/index.ts` para usar o mesmo padrão de remetente válido.
+- Corrigir fallback default de remetente e evitar typo (`noreplay`).
+- Garantir que o teste no Admin reflita exatamente o mesmo domínio aceito no ambiente atual.
 
-### Causa raiz
+3) Blindar configuração para não voltar a quebrar
+- Em `src/components/admin/email/EmailProviderTab.tsx` e hook relacionado, adicionar validação de domínio no campo “from_email”.
+- Exibir erro claro ao salvar quando o domínio do remetente não estiver no domínio de envio ativo do projeto.
+- Impedir persistência de configuração inválida que volta a causar 403/500.
 
-A função `rpc_activate_entitlement` cria o registro em `tenant_entitlements` corretamente, mas **não atualiza `user_access_state.payment_status`** de `trial` para `active`.
+4) Ajuste de suporte no Admin (transparência)
+- Revisar `supabase/functions/admin-resend-verification/index.ts` para mensagem de retorno consistente com o comportamento real (gerar link e permitir cópia/uso manual).
+- Evita falso positivo de “enviado” quando o objetivo foi apenas gerar link.
 
-O sistema (`get_user_feature_flags`) lê **apenas `user_access_state`** para determinar acesso. Ele nunca consulta `tenant_entitlements`. Resultado: o entitlement existe mas o sistema ignora.
+5) Validação fim a fim (obrigatória)
+- Teste 1: “Esqueci minha senha” → receber e-mail real em inbox.
+- Teste 2: novo cadastro → receber confirmação de conta.
+- Teste 3: Admin > E-mail > “Enviar teste” → sucesso sem erro de domínio.
+- Teste 4: Admin > Clientes > ações de verificação (reenviar/copiar link) funcionando conforme esperado.
+- Teste 5: verificar logs de função sem novos erros de domínio não verificado.
 
-### Solução (2 partes)
+Arquivos principais a ajustar
+- `supabase/functions/auth-email-hook/index.ts`
+- `supabase/functions/email-test-provider/index.ts`
+- `supabase/functions/email-worker-send/index.ts`
+- `src/components/admin/email/EmailProviderTab.tsx`
+- `src/hooks/useEmailAdmin.ts`
+- `supabase/functions/admin-resend-verification/index.ts` (mensagem/semântica de retorno)
 
----
-
-**Parte 1 — Corrigir `rpc_activate_entitlement` (migração SQL)**
-
-Adicionar ao final da função, antes do RETURN:
-
-```sql
--- Atualizar user_access_state para todos os membros do tenant
-UPDATE user_access_state 
-SET payment_status = 'active',
-    trial_status = 'expired',
-    active_subscription_id = v_entitlement_id::text,
-    updated_at = now()
-WHERE user_id IN (
-  SELECT user_id FROM tenant_members WHERE tenant_id = p_tenant_id
-);
-
--- Fallback: se tenant_id é o próprio user_id (sem tenant_members)
-UPDATE user_access_state
-SET payment_status = 'active',
-    trial_status = 'expired', 
-    active_subscription_id = v_entitlement_id::text,
-    updated_at = now()
-WHERE user_id = p_tenant_id::uuid
-  AND payment_status != 'active';
-```
-
-Isso garante que qualquer pagamento futuro atualize automaticamente o estado do usuário.
-
----
-
-**Parte 2 — Corrigir o cliente Alex (dados atuais)**
-
-Migração que corrige o registro atual:
-
-```sql
-UPDATE user_access_state
-SET payment_status = 'active',
-    trial_status = 'expired',
-    active_subscription_id = '7bef07f2-da3f-4119-a79f-67a0ebb992e5',
-    updated_at = now()
-WHERE user_id = 'f984a017-5275-43ff-aeef-59fbb3be0e57';
-```
-
----
-
-**Parte 3 — Adicionar fallback em `get_user_feature_flags`**
-
-Atualizar a função para que, se `payment_status` não é `active` mas existe um `tenant_entitlement` ativo, auto-corrija e considere como ativo:
-
-```sql
--- Após obter v_state, verificar tenant_entitlements como fallback
-IF v_state.payment_status != 'active' THEN
-  PERFORM 1 FROM tenant_entitlements te
-  JOIN tenant_members tm ON tm.tenant_id = te.tenant_id
-  WHERE tm.user_id = p_user_id
-    AND te.entitlement_type = 'tier'
-    AND te.status = 'active'
-    AND te.current_period_end > now();
-  
-  IF FOUND THEN
-    UPDATE user_access_state 
-    SET payment_status = 'active', trial_status = 'expired', updated_at = now()
-    WHERE user_id = p_user_id;
-    -- Reload state
-    SELECT * INTO v_state FROM user_access_state WHERE user_id = p_user_id;
-  END IF;
-END IF;
-```
-
----
-
-### Arquivos modificados
-
-| Arquivo | Ação |
-|---|---|
-| Nova migração SQL | Corrigir `rpc_activate_entitlement` + fix Alex + fallback em `get_user_feature_flags` |
-
-### Resultado
-- Pagamento do Alex reconhecido imediatamente
-- Pagamentos futuros via webhook atualizam `user_access_state` automaticamente
-- Fallback de auto-correção impede que entitlements válidos fiquem invisíveis
-
+Resultado esperado
+- Recuperação de senha e confirmação de cadastro voltam a entregar e-mail.
+- Fluxo deixa de depender de remetente inválido/hardcoded.
+- Configuração passa a ser consistente e validada, evitando regressão.
+- Diagnóstico futuro fica simples via logs padronizados.
