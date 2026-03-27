@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,10 +29,10 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { useWebhookLogs, type WebhookLogData } from '@/hooks/useAdmin';
+import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
-// Placeholder types for payment data
 interface SubscriptionData {
   id: string;
   mp_preapproval_id: string;
@@ -53,11 +54,52 @@ interface PaymentData {
 export function AdminPayments() {
   const { data: webhooks, isLoading: webhooksLoading } = useWebhookLogs();
   
-  // For now, use empty arrays since tables may not be in types
-  const subscriptions: SubscriptionData[] = [];
-  const payments: PaymentData[] = [];
-  const subsLoading = false;
-  const paymentsLoading = false;
+  // Fetch real payments from tenant_payments
+  const { data: rawPayments = [], isLoading: paymentsLoading } = useQuery({
+    queryKey: ['admin', 'tenant-payments'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tenant_payments')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Fetch subscriptions from tenant_entitlements
+  const { data: rawSubs = [], isLoading: subsLoading } = useQuery({
+    queryKey: ['admin', 'tenant-entitlements'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('tenant_entitlements')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Map to display types
+  const payments: PaymentData[] = rawPayments.map((p: any) => ({
+    id: p.id,
+    mp_payment_id: p.payment_id || '—',
+    user_id: p.tenant_id || '—',
+    amount: p.amount_brl || 0,
+    status: p.status || 'unknown',
+    created_at: p.created_at,
+  }));
+
+  const subscriptions: SubscriptionData[] = rawSubs.map((s: any) => ({
+    id: s.id,
+    mp_preapproval_id: s.last_payment_id || '—',
+    user_id: s.tenant_id || '—',
+    plan_id: s.tier_code || s.addon_code || null,
+    status: s.status || 'unknown',
+    created_at: s.created_at,
+  }));
 
   const [detailDialog, setDetailDialog] = useState<{ open: boolean; data: unknown }>({
     open: false,
