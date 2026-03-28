@@ -18,6 +18,29 @@ export function FreightRulesetsTab() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [generatingGlobal, setGeneratingGlobal] = useState(false);
+
+  const handleGenerateGlobalTable = async () => {
+    setGeneratingGlobal(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('freight-global-table-sync');
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast({
+        title: 'Tabela oficial gerada com sucesso!',
+        description: `${data.rule_lines} regras criadas (${data.queries_ok} consultas à API).`,
+      });
+      refetch();
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao gerar tabela oficial',
+        description: err.message || 'Erro desconhecido',
+        variant: 'destructive',
+      });
+    } finally {
+      setGeneratingGlobal(false);
+    }
+  };
 
   const handleSaveFromApi = async (results: any[], meta: any) => {
     try {
