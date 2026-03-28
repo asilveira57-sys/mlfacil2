@@ -243,6 +243,8 @@ function processShippingResponse(
 ) {
   const options = data?.options || [];
   let added = 0;
+
+  // Common case: API returns options[]
   for (const opt of options) {
     if (opt.list_cost === null && opt.cost === null) continue;
     results.push({
@@ -255,6 +257,66 @@ function processShippingResponse(
       free_shipping: !!opt.free_shipping,
       discount_rate: opt.list_cost && opt.cost ? 1 - (opt.cost / opt.list_cost) : 0,
       currency_id: opt.currency_id || "BRL",
+    });
+    added++;
+  }
+
+  if (added > 0) {
+    return added;
+  }
+
+  // Fallback: API can return coverage object without options[]
+  const coverage = data?.coverage;
+  if (coverage) {
+    const regions = [
+      coverage.all_country,
+      coverage.local,
+      coverage.national,
+      coverage,
+    ].filter(Boolean);
+
+    for (const region of regions) {
+      const listCost = region?.list_cost ?? region?.cost ?? null;
+      if (listCost === null) continue;
+
+      const discountRate = region?.discount?.rate ?? 0;
+      const subsidizedCost = listCost * (1 - discountRate);
+      const freeShipping = data?.free_shipping === true || listCost === 0;
+
+      results.push({
+        listing_type,
+        logistic_type: "me2",
+        weight,
+        price,
+        list_cost: listCost,
+        cost: subsidizedCost,
+        free_shipping: freeShipping,
+        discount_rate: discountRate,
+        currency_id: region?.currency_id || data?.currency_id || "BRL",
+      });
+      added++;
+      break;
+    }
+  }
+
+  if (added > 0) {
+    return added;
+  }
+
+  // Last fallback: direct response payload with list_cost/cost
+  const directListCost = data?.list_cost ?? data?.cost ?? null;
+  if (directListCost !== null) {
+    const directDiscount = data?.discount?.rate ?? 0;
+    results.push({
+      listing_type,
+      logistic_type: data?.logistic_type || "me2",
+      weight,
+      price,
+      list_cost: directListCost,
+      cost: directListCost * (1 - directDiscount),
+      free_shipping: data?.free_shipping === true || directListCost === 0,
+      discount_rate: directDiscount,
+      currency_id: data?.currency_id || "BRL",
     });
     added++;
   }
