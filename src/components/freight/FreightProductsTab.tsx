@@ -10,9 +10,14 @@ import {
 import { 
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Package, Search, RefreshCw, Calculator, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Package, Search, RefreshCw, Calculator, AlertCircle, CheckCircle2, Pencil, Loader2 } from 'lucide-react';
 import { CopyMlbId } from '@/components/ui/CopyMlbId';
 import { useFreightProducts, type FreightProduct } from '@/hooks/useFreightProducts';
+import { FreightProductEditDialog } from './FreightProductEditDialog';
+import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Pagination, PaginationContent, PaginationItem, PaginationLink,
   PaginationNext, PaginationPrevious,
@@ -35,7 +40,7 @@ function StatusBadge({ source }: { source: string | null }) {
   return (
     <Badge variant="outline" className="gap-1 text-success border-success/30">
       <CheckCircle2 className="h-3 w-3" />
-      OK
+      {source === 'manual' ? 'Manual' : 'OK'}
     </Badge>
   );
 }
@@ -53,8 +58,15 @@ export function FreightProductsTab() {
   const [dimensionStatus, setDimensionStatus] = useState('all');
   const [freightProfile, setFreightProfile] = useState('all');
   const [page, setPage] = useState(1);
+  const [editProduct, setEditProduct] = useState<FreightProduct | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [calculatingId, setCalculatingId] = useState<string | null>(null);
+  const [massCalculating, setMassCalculating] = useState(false);
 
-  // Debounce search
+  const { sellerId } = useActiveAccount();
+  const queryClient = useQueryClient();
+
   const [timer, setTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const handleSearch = (val: string) => {
     setSearch(val);
@@ -80,6 +92,92 @@ export function FreightProductsTab() {
     return products.slice(start, start + PAGE_SIZE);
   }, [products, page]);
 
+  const handleSyncDimensions = async () => {
+    if (!sellerId) return;
+    setSyncing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('freight-sync-dimensions', {
+        body: { seller_id: sellerId },
+      });
+      if (error) throw error;
+      toast.success(`Dimensões atualizadas: ${data?.updated || 0} produtos`);
+      queryClient.invalidateQueries({ queryKey: ['freight-products'] });
+    } catch (err: any) {
+      toast.error('Erro ao sincronizar dimensões: ' + (err.message || 'Erro'));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleCalculate = async (product: FreightProduct) => {
+    if (!product.weight_kg && !product.height_cm) {
+      toast.error('Produto sem dimensões. Edite ou sincronize primeiro.');
+      return;
+    }
+    setCalculatingId(product.id);
+    try {
+      const { data, error } = await supabase.functions.invoke('pricing-engine', {
+        body: {
+          action: 'validate',
+          marketplace: 'ML',
+          sale_price: product.price || 0,
+          quantity: 1,
+          inputs: {
+            weight_kg: product.weight_kg,
+            height_cm: product.height_cm,
+            width_cm: product.width_cm,
+            length_cm: product.length_cm,
+          },
+        },
+      });
+      if (error) throw error;
+
+      const freightCost = data?.result?.shipping_cost_estimated || data?.result?.breakeven_price || null;
+      if (freightCost) {
+        await supabase
+          .from('meli_listings_cache')
+          .update({
+            expected_freight_cost: freightCost,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', product.id);
+        toast.success(`Frete calculado: R$ ${Number(freightCost).toFixed(2)}`);
+        queryClient.invalidateQueries({ queryKey: ['freight-products'] });
+      } else {
+        toast.info('Cálculo concluído, mas sem valor de frete disponível na tabela.');
+      }
+    } catch (err: any) {
+      toast.error('Erro ao calcular: ' + (err.message || 'Erro'));
+    } finally {
+      setCalculatingId(null);
+    }
+  };
+
+  const handleMassRecalculate = async () => {
+    if (!sellerId) return;
+    setMassCalculating(true);
+    try {
+      // Step 1: Sync dimensions from ML
+      toast.info('Passo 1/2: Sincronizando dimensões do ML...');
+      await supabase.functions.invoke('freight-sync-dimensions', {
+        body: { seller_id: sellerId },
+      });
+
+      // Step 2: Notify user
+      toast.success('Dimensões sincronizadas. Cálculo de frete em massa disponível após próxima atualização.');
+      queryClient.invalidateQueries({ queryKey: ['freight-products'] });
+    } catch (err: any) {
+      toast.error('Erro: ' + (err.message || 'Erro'));
+    } finally {
+      setMassCalculating(false);
+    }
+  };
+
+  const handleEdit = (product: FreightProduct) => {
+    setEditProduct(product);
+    setEditOpen(true);
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -100,13 +198,13 @@ export function FreightProductsTab() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4" />
-            Atualizar
+          <Button variant="outline" className="gap-2" onClick={handleSyncDimensions} disabled={syncing}>
+            {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {syncing ? 'Sincronizando...' : 'Atualizar Dimensões'}
           </Button>
-          <Button className="gap-2">
-            <Calculator className="h-4 w-4" />
-            Recalcular em Massa
+          <Button className="gap-2" onClick={handleMassRecalculate} disabled={massCalculating}>
+            {massCalculating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
+            {massCalculating ? 'Processando...' : 'Recalcular em Massa'}
           </Button>
         </div>
       </div>
@@ -220,8 +318,22 @@ export function FreightProductsTab() {
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex justify-center gap-1">
-                          <Button variant="ghost" size="sm">Editar</Button>
-                          <Button variant="ghost" size="sm">Calcular</Button>
+                          <Button variant="ghost" size="sm" className="gap-1" onClick={() => handleEdit(product)}>
+                            <Pencil className="h-3 w-3" />
+                            Editar
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1"
+                            disabled={calculatingId === product.id}
+                            onClick={() => handleCalculate(product)}
+                          >
+                            {calculatingId === product.id
+                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              : <Calculator className="h-3 w-3" />}
+                            Calcular
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -229,7 +341,6 @@ export function FreightProductsTab() {
                 </TableBody>
               </Table>
 
-              {/* Pagination */}
               {totalPages > 1 && (
                 <div className="mt-4">
                   <Pagination>
@@ -277,6 +388,13 @@ export function FreightProductsTab() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Dialog */}
+      <FreightProductEditDialog
+        product={editProduct}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+      />
     </div>
   );
 }
