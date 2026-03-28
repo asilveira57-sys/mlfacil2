@@ -5483,6 +5483,7 @@ export type Database = {
           created_by: string | null
           description: string | null
           id: string
+          is_global: boolean
           marketplace: string
           name: string
           status: string
@@ -5496,6 +5497,7 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          is_global?: boolean
           marketplace?: string
           name: string
           status?: string
@@ -5509,6 +5511,7 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          is_global?: boolean
           marketplace?: string
           name?: string
           status?: string

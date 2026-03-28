@@ -193,7 +193,6 @@ export function FreightProductsTab() {
     }
     setCalculatingId(product.id);
     try {
-      // Use local FreightEngine for instant calculation
       const productDims: ProductDimensions = {
         weight_kg: product.weight_kg,
         height_cm: product.height_cm,
@@ -203,15 +202,16 @@ export function FreightProductsTab() {
         dimensions_source: (product.dimensions_source as any) || 'none',
       };
 
-      // Fetch active ruleset
+      // Fetch global active ruleset first, then any active ruleset
       const { data: rulesets } = await supabase
         .from('freight_rulesets')
         .select('*')
         .eq('status', 'active')
+        .order('is_global', { ascending: false })
         .limit(1);
 
       if (!rulesets || rulesets.length === 0) {
-        toast.error('Nenhuma tabela de frete ativa. Configure na aba "Tabela de Frete".');
+        toast.error('Nenhuma tabela de frete ativa. Gere a tabela oficial na aba "Tabela de Frete".');
         return;
       }
 
@@ -227,11 +227,15 @@ export function FreightProductsTab() {
         return;
       }
 
+      // Map listing_type_id from ML to ad_type used in rules
+      const adType = product.logistic_type === 'fulfillment' ? 'premium'
+        : product.listing_type_id === 'gold_pro' ? 'premium' : 'classic';
+
       const context: FreightContext = {
         ruleset: ruleset as FreightRuleset,
         ruleLines: ruleLines as FreightRuleLine[],
-        logistic_mode: product.logistic_type || product.shipping_mode || 'ME2',
-        ad_type: 'classic',
+        logistic_mode: product.logistic_type || product.shipping_mode || 'drop_off',
+        ad_type: adType as 'classic' | 'premium',
         item_price: product.price || 0,
       };
 
@@ -263,7 +267,90 @@ export function FreightProductsTab() {
         body: { seller_id: sellerId },
       });
 
-      toast.success('Dimensões sincronizadas. Cálculo de frete em massa disponível após próxima atualização.');
+      // Step 2: Calculate freight for all products with dimensions
+      toast.info('Passo 2/2: Calculando frete esperado...');
+
+      const { data: rulesets } = await supabase
+        .from('freight_rulesets')
+        .select('*')
+        .eq('status', 'active')
+        .order('is_global', { ascending: false })
+        .limit(1);
+
+      if (!rulesets || rulesets.length === 0) {
+        toast.warning('Dimensões sincronizadas, mas sem tabela de frete ativa para calcular.');
+        queryClient.invalidateQueries({ queryKey: ['freight-products'] });
+        return;
+      }
+
+      const ruleset = rulesets[0];
+      const { data: ruleLines } = await supabase
+        .from('freight_rule_lines')
+        .select('*')
+        .eq('ruleset_id', ruleset.id)
+        .order('sort_order', { ascending: true });
+
+      if (!ruleLines || ruleLines.length === 0) {
+        toast.warning('Dimensões sincronizadas, mas tabela de frete sem regras.');
+        queryClient.invalidateQueries({ queryKey: ['freight-products'] });
+        return;
+      }
+
+      // Fetch all products with dimensions for this seller
+      const { data: allProducts } = await supabase
+        .from('meli_listings_cache')
+        .select('id, weight_kg, height_cm, width_cm, length_cm, freight_profile, dimensions_source, price, logistic_type, shipping_mode, listing_type_id')
+        .eq('seller_id', sellerId)
+        .not('weight_kg', 'is', null);
+
+      if (!allProducts || allProducts.length === 0) {
+        toast.success('Dimensões sincronizadas. Nenhum produto com peso para calcular.');
+        queryClient.invalidateQueries({ queryKey: ['freight-products'] });
+        return;
+      }
+
+      let calculated = 0;
+      // Process in batches of 50
+      for (let i = 0; i < allProducts.length; i += 50) {
+        const batch = allProducts.slice(i, i + 50);
+        const updates: { id: string; expected_freight_cost: number }[] = [];
+
+        for (const p of batch) {
+          const dims: ProductDimensions = {
+            weight_kg: p.weight_kg,
+            height_cm: p.height_cm,
+            width_cm: p.width_cm,
+            length_cm: p.length_cm,
+            freight_profile: (p.freight_profile as 'A' | 'B' | 'C') || 'B',
+            dimensions_source: (p.dimensions_source as any) || 'none',
+          };
+
+          const adType = p.logistic_type === 'fulfillment' ? 'premium'
+            : p.listing_type_id === 'gold_pro' ? 'premium' : 'classic';
+
+          const ctx: FreightContext = {
+            ruleset: ruleset as FreightRuleset,
+            ruleLines: ruleLines as FreightRuleLine[],
+            logistic_mode: p.logistic_type || p.shipping_mode || 'drop_off',
+            ad_type: adType as 'classic' | 'premium',
+            item_price: p.price || 0,
+          };
+
+          const result = calculateFreight(dims, ctx);
+          updates.push({ id: p.id, expected_freight_cost: result.expected_shipping_cost });
+        }
+
+        // Update each product
+        for (const u of updates) {
+          await supabase
+            .from('meli_listings_cache')
+            .update({ expected_freight_cost: u.expected_freight_cost, updated_at: new Date().toISOString() })
+            .eq('id', u.id);
+          calculated++;
+        }
+      }
+
+      toast.success(`Frete calculado para ${calculated} produtos!`);
       queryClient.invalidateQueries({ queryKey: ['freight-products'] });
     } catch (err: any) {
       toast.error('Erro: ' + (err.message || 'Erro'));

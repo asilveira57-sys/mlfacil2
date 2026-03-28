@@ -113,7 +113,8 @@ function getEffectiveDimensionsSum(product: ProductDimensions): number {
  */
 function matchesWeight(rule: FreightRuleLine, weight: number): boolean {
   if (weight < rule.weight_min) return false;
-  if (rule.weight_max !== null && weight > rule.weight_max) return false;
+  // If weight_max is null, this rule covers everything >= weight_min
+  if (rule.weight_max !== null && weight >= rule.weight_max) return false;
   return true;
 }
 
@@ -122,7 +123,8 @@ function matchesWeight(rule: FreightRuleLine, weight: number): boolean {
  */
 function matchesPriceBand(rule: FreightRuleLine, price: number): boolean {
   if (price < rule.price_band_min) return false;
-  if (rule.price_band_max !== null && price > rule.price_band_max) return false;
+  // If price_band_max is null, this rule covers everything >= price_band_min
+  if (rule.price_band_max !== null && price >= rule.price_band_max) return false;
   return true;
 }
 

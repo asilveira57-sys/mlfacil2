@@ -20,6 +20,7 @@ export interface FreightProduct {
   expected_freight_cost: number | null;
   logistic_type: string | null;
   shipping_mode: string | null;
+  listing_type_id: string | null;
 }
 
 export interface UseFreightProductsFilters {
@@ -28,7 +29,7 @@ export interface UseFreightProductsFilters {
   freightProfile: string;  // 'all' | 'A' | 'B' | 'C'
 }
 
-const SELECT_FIELDS = 'id,item_id,title,sku,thumbnail,price,status,weight_kg,height_cm,width_cm,length_cm,dimensions_source,freight_profile,expected_freight_cost,logistic_type,shipping_mode';
+const SELECT_FIELDS = 'id,item_id,title,sku,thumbnail,price,status,weight_kg,height_cm,width_cm,length_cm,dimensions_source,freight_profile,expected_freight_cost,logistic_type,shipping_mode,listing_type_id';
 
 export function useFreightProducts(filters: UseFreightProductsFilters) {
   const { sellerId } = useActiveAccount();

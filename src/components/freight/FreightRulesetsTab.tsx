@@ -4,12 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useFreightRulesets } from '@/hooks/useFreightRulesets';
-import { Table2, Plus, Check, Calendar, FileText, Search, PenLine } from 'lucide-react';
+import { Table2, Plus, Check, Calendar, FileText, Search, PenLine, Globe, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { FreightApiQueryDialog } from './FreightApiQueryDialog';
 import { FreightCreateDialog } from './FreightCreateDialog';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 export function FreightRulesetsTab() {
   const { rulesets, activeRuleset, loading, setActiveRulesetId, createRuleset, refetch } = useFreightRulesets();
@@ -17,6 +18,29 @@ export function FreightRulesetsTab() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [generatingGlobal, setGeneratingGlobal] = useState(false);
+
+  const handleGenerateGlobalTable = async () => {
+    setGeneratingGlobal(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('freight-global-table-sync');
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast({
+        title: 'Tabela oficial gerada com sucesso!',
+        description: `${data.rule_lines} regras criadas (${data.queries_ok} consultas à API).`,
+      });
+      refetch();
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao gerar tabela oficial',
+        description: err.message || 'Erro desconhecido',
+        variant: 'destructive',
+      });
+    } finally {
+      setGeneratingGlobal(false);
+    }
+  };
 
   const handleSaveFromApi = async (results: any[], meta: any) => {
     try {
@@ -87,11 +111,15 @@ export function FreightRulesetsTab() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button className="gap-2" onClick={handleGenerateGlobalTable} disabled={generatingGlobal}>
+            {generatingGlobal ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+            {generatingGlobal ? 'Gerando...' : 'Gerar Tabela Oficial'}
+          </Button>
           <Button variant="outline" className="gap-2" onClick={() => setApiDialogOpen(true)}>
             <Search className="h-4 w-4" />
             Consultar API ML
           </Button>
-          <Button className="gap-2" onClick={() => setCreateDialogOpen(true)}>
+          <Button variant="outline" className="gap-2" onClick={() => setCreateDialogOpen(true)}>
             <PenLine className="h-4 w-4" />
             Cadastrar Manual
           </Button>
@@ -134,6 +162,12 @@ export function FreightRulesetsTab() {
                         <Badge variant="default" className="gap-1">
                           <Check className="h-3 w-3" />
                           Ativa
+                        </Badge>
+                      )}
+                      {(ruleset as any).is_global && (
+                        <Badge variant="outline" className="gap-1 border-blue-500/50 text-blue-600">
+                          <Globe className="h-3 w-3" />
+                          Oficial
                         </Badge>
                       )}
                       <Badge variant={ruleset.status === 'active' ? 'secondary' : 'outline'}>
