@@ -229,7 +229,7 @@ export function FreightProductsTab() {
 
       // Map listing_type_id from ML to ad_type used in rules
       const adType = product.logistic_type === 'fulfillment' ? 'premium'
-        : (product as any).listing_type_id === 'gold_pro' ? 'premium' : 'classic';
+        : product.listing_type_id === 'gold_pro' ? 'premium' : 'classic';
 
       const context: FreightContext = {
         ruleset: ruleset as FreightRuleset,
