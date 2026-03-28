@@ -1,64 +1,57 @@
 
 
-## Plano: Corrigir Gestão de Frete — carregar dimensões + ativar Editar/Calcular
+## Plano: Corrigir módulo de Gestão de Frete — peso, cálculo e ordenação
 
-### Diagnóstico
+### Problemas identificados
 
-1. **Dados vazios**: O `radiography-collector` sincroniza os anúncios para `meli_listings_cache`, mas **não solicita o campo `attributes`** na chamada à API do ML. Sem `attributes`, não há como extrair `SELLER_PACKAGE_HEIGHT/WIDTH/LENGTH/WEIGHT`. As colunas `weight_kg`, `height_cm`, `width_cm`, `length_cm` existem na tabela mas ficam sempre `null`.
+1. **Peso exibido em gramas, não em kg**: A API do ML retorna peso em gramas no campo `SELLER_PACKAGE_WEIGHT` (ex: `1055`). O `freight-sync-dimensions` armazena esse valor direto como `weight_kg` sem dividir por 1000. Resultado: "1055 kg" quando deveria ser "1,055 kg".
 
-2. **Botões Editar/Calcular**: Não têm `onClick` — são `<Button>` sem ação nenhuma.
+2. **Botão "Calcular" dá erro**: O `FreightProductsTab` chama `supabase.functions.invoke('pricing-engine', { body: { action: 'validate', ... } })`. Porém o `pricing-engine` lê a ação da **URL** (`url.pathname.split('/').pop()`), não do body. Sem `/validate` no path, a action resolve como `pricing-engine` e retorna 404 "Ação não encontrada".
 
-3. **Frete esperado**: Depende do cálculo via `pricing-engine`, que por sua vez depende das dimensões. Sem input, sem resultado.
+3. **Produtos sem dimensões**: Alguns anúncios no ML simplesmente não têm atributos `SELLER_PACKAGE_*` cadastrados (é responsabilidade do vendedor). Não é bug — é dado ausente na origem.
+
+4. **Sem ordenação nas colunas**: Os cabeçalhos da tabela não são clicáveis para ordenar por peso, dimensões, perfil, frete esperado etc.
+
+5. **Frete esperado não carrega automaticamente**: Mesmo com dimensões e tabela de frete cadastrada, o frete esperado não é calculado proativamente.
 
 ---
 
 ### Implementação
 
-#### 1. Enriquecer o `radiography-collector` para capturar dimensões
+#### Etapa 1 — Corrigir unidade de peso (gramas → kg)
+- No `freight-sync-dimensions/index.ts` e no `radiography-collector/index.ts`, ao extrair `SELLER_PACKAGE_WEIGHT`, dividir por 1000 se o valor for > 50 (heurística: ML retorna em gramas).
+- Criar migração para corrigir dados já salvos: `UPDATE meli_listings_cache SET weight_kg = weight_kg / 1000 WHERE weight_kg > 50 AND dimensions_source = 'ml_api'`.
 
-- Adicionar `attributes` na lista de campos do multiget (`?attributes=...`)
-- Após receber cada item, extrair dimensões de `SELLER_PACKAGE_*` / `PACKAGE_*` (usando lógica já existente em `ad-item-snapshot`)
-- Popular `weight_kg`, `height_cm`, `width_cm`, `length_cm`, `dimensions_source` no upsert para `meli_listings_cache`
-- `dimensions_source` = `'ml_api'` quando encontrado, manter `'none'` quando ausente
+#### Etapa 2 — Corrigir botão "Calcular"
+- No `FreightProductsTab.tsx`, alterar a chamada de `supabase.functions.invoke('pricing-engine', { body })` para usar o formato correto com path: `supabase.functions.invoke('pricing-engine/validate', { body })`.
+- Garantir que o body inclui `workspace_id` (campo obrigatório do `handleValidate`).
 
-#### 2. Criar edge function `freight-sync-dimensions` (sync sob demanda)
+#### Etapa 3 — Calcular frete esperado usando a tabela de frete local
+- Em vez de depender do `pricing-engine` (que é um simulador completo), usar o `FreightEngine` (já existente em `src/lib/freightEngine.ts`) diretamente no frontend para calcular o frete esperado com base na tabela ativa + peso/dimensões do produto.
+- Isso torna o cálculo instantâneo, sem chamada de edge function.
 
-- Nova function leve que faz multiget de items em lotes de 20, extrai dimensões e atualiza `meli_listings_cache`
-- Usada pelo botão "Atualizar" na aba Produtos e pelo "Recalcular em Massa"
-- Controle de rate limit com sleep entre lotes
+#### Etapa 4 — Ordenação em todas as colunas
+- Adicionar estado de ordenação (`sortField`, `sortDirection`) ao `FreightProductsTab`.
+- Cabeçalhos clicáveis com indicador visual (seta ↑↓).
+- Colunas ordenáveis: Peso, Dimensões (soma), Perfil, Status, Frete Esperado, Título.
 
-#### 3. Implementar dialog de edição manual (botão "Editar")
-
-- Criar `FreightProductEditDialog.tsx` com campos: peso (kg), altura (cm), largura (cm), comprimento (cm), perfil de frete (A/B/C)
-- Ao salvar, faz `update` direto em `meli_listings_cache` e seta `dimensions_source = 'manual'`
-- Invalidar cache do react-query
-
-#### 4. Implementar ação "Calcular" (botão)
-
-- Chamar o `pricing-engine` (já existente) para o item individual, passando peso/dimensões atuais
-- Atualizar `expected_freight_cost` no cache local e no banco
-- Mostrar toast com resultado
-
-#### 5. Conectar botão "Recalcular em Massa"
-
-- Chamar `freight-sync-dimensions` para atualizar dimensões do ML
-- Em seguida, chamar `pricing-engine` em lote para atualizar `expected_freight_cost`
+#### Etapa 5 — Indicação clara de "sem dados na origem"
+- Para produtos sem dimensões após sync, mostrar tooltip explicando que o ML não tem esses dados cadastrados.
 
 ---
 
-### Arquivos
+### Arquivos modificados
 
 | Arquivo | Ação |
 |---|---|
-| `supabase/functions/radiography-collector/index.ts` | Adicionar `attributes` ao multiget + popular dimensões |
-| `supabase/functions/freight-sync-dimensions/index.ts` | Nova function de sync sob demanda |
-| `src/components/freight/FreightProductEditDialog.tsx` | Novo dialog de edição manual |
-| `src/components/freight/FreightProductsTab.tsx` | Conectar Editar (dialog) e Calcular (pricing-engine) |
-| `src/hooks/useFreightProducts.ts` | Adicionar mutation de update |
+| `supabase/functions/freight-sync-dimensions/index.ts` | Dividir peso por 1000 |
+| `supabase/functions/radiography-collector/index.ts` | Idem |
+| Migração SQL | Corrigir pesos já salvos |
+| `src/components/freight/FreightProductsTab.tsx` | Fix calcular, ordenação, cálculo local via FreightEngine |
 
-### Resultado esperado
-- Ao sincronizar, dimensões do ML preenchem a tabela automaticamente
-- Editar permite ajuste manual de peso/dimensões por produto
-- Calcular retorna o frete esperado usando o motor existente
-- Status muda de "Sem dados" para "OK" ou "Estimado" conforme a fonte
+### Resultado
+- Peso exibido corretamente em kg
+- Botão "Calcular" funciona usando o motor local de frete
+- Todas as colunas ordenáveis por clique no cabeçalho
+- Dados já salvos corrigidos via migração
 
