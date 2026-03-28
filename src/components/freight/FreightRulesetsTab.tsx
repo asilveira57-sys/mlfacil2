@@ -12,7 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useUserRole } from '@/hooks/useUserRole';
 
 export function FreightRulesetsTab() {
-  const { rulesets, activeRuleset, loading, setActiveRulesetId, createRuleset, refetch } = useFreightRulesets();
+  const { rulesets, activeRuleset, loading, setActiveRulesetId, refetch } = useFreightRulesets();
   const { isAdmin, loading: roleLoading } = useUserRole();
   const { toast } = useToast();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -107,7 +107,7 @@ export function FreightRulesetsTab() {
                         </Badge>
                       )}
                       {(ruleset as any).is_global && (
-                        <Badge variant="outline" className="gap-1 border-blue-500/50 text-blue-600">
+                        <Badge variant="outline" className="gap-1 border-primary/40 text-primary">
                           <Globe className="h-3 w-3" />
                           Oficial
                         </Badge>
