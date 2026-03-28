@@ -111,11 +111,15 @@ export function FreightRulesetsTab() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button className="gap-2" onClick={handleGenerateGlobalTable} disabled={generatingGlobal}>
+            {generatingGlobal ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+            {generatingGlobal ? 'Gerando...' : 'Gerar Tabela Oficial'}
+          </Button>
           <Button variant="outline" className="gap-2" onClick={() => setApiDialogOpen(true)}>
             <Search className="h-4 w-4" />
             Consultar API ML
           </Button>
-          <Button className="gap-2" onClick={() => setCreateDialogOpen(true)}>
+          <Button variant="outline" className="gap-2" onClick={() => setCreateDialogOpen(true)}>
             <PenLine className="h-4 w-4" />
             Cadastrar Manual
           </Button>
