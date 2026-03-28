@@ -164,6 +164,12 @@ export function FreightRulesetsTab() {
                           Ativa
                         </Badge>
                       )}
+                      {(ruleset as any).is_global && (
+                        <Badge variant="outline" className="gap-1 border-blue-500/50 text-blue-600">
+                          <Globe className="h-3 w-3" />
+                          Oficial
+                        </Badge>
+                      )}
                       <Badge variant={ruleset.status === 'active' ? 'secondary' : 'outline'}>
                         {ruleset.status === 'active' ? 'Publicada' : ruleset.status}
                       </Badge>
