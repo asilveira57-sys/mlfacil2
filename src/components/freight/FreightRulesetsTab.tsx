@@ -4,12 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useFreightRulesets } from '@/hooks/useFreightRulesets';
-import { Table2, Plus, Check, Calendar, FileText, Search, PenLine } from 'lucide-react';
+import { Table2, Plus, Check, Calendar, FileText, Search, PenLine, Globe, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { FreightApiQueryDialog } from './FreightApiQueryDialog';
 import { FreightCreateDialog } from './FreightCreateDialog';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 export function FreightRulesetsTab() {
   const { rulesets, activeRuleset, loading, setActiveRulesetId, createRuleset, refetch } = useFreightRulesets();
