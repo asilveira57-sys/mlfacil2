@@ -8,10 +8,7 @@ const corsHeaders = {
 const WEIGHTS = [0.3, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30];
 const PRICES = [50, 79, 120, 200, 350, 500, 750, 1000, 2000, 5000];
 const LISTING_TYPES = ["gold_pro", "gold_special"];
-const ADMIN_EMAILS = (Deno.env.get("ADMIN_EMAILS") || "")
-  .split(",")
-  .map((e) => e.trim().toLowerCase())
-  .filter(Boolean);
+
 
 function weightToDimensions(weightKg: number): string {
   if (weightKg <= 0.5) return `5x15x20,${Math.round(weightKg * 1000)}`;
@@ -38,19 +35,19 @@ async function verifyAdminRequest(req: Request, supabase: ReturnType<typeof crea
   }
 
   const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user?.email) {
+  if (error || !user) {
     return { ok: false, status: 401, body: { error: "Unauthorized" } };
   }
 
-  if (ADMIN_EMAILS.length === 0) {
-    return {
-      ok: false,
-      status: 500,
-      body: { error: "ADMIN_EMAILS não configurado" },
-    };
-  }
+  // Check admin role from user_roles table
+  const { data: roleData } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .eq("role", "admin")
+    .maybeSingle();
 
-  if (!ADMIN_EMAILS.includes(user.email.toLowerCase())) {
+  if (!roleData) {
     return {
       ok: false,
       status: 403,
