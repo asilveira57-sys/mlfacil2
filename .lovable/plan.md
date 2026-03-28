@@ -1,52 +1,73 @@
 
-Objetivo: corrigir definitivamente o envio de e-mails de confirmação/cadastro e recuperação de senha, e eliminar a inconsistência entre domínio de envio e configuração atual.
+## Plano de ação (urgente): corrigir “sem plano ativo” + histórico financeiro + liberar conta teste
 
-Diagnóstico (já confirmado no código e logs):
-- Problema é geral (não é só de 1 cliente).
-- O domínio de e-mail no Cloud está verificado (`notify.notifica.mktpfacil.com`), então DNS/Cloudflare está OK.
-- O hook de autenticação está enviando com remetente hardcoded `noreply@ale.mktpfacil.com`, e os logs mostram erro 500 por domínio não verificado.
-- O módulo de teste/admin também está com remetente inconsistente (`noreplay@mktpfacil.com` / domínio não verificado), gerando 403.
-- Resultado: tela mostra “e-mail enviado”, mas entrega falha no provedor.
+### Diagnóstico confirmado
+1. **Erro geral no cálculo de acesso**: a RPC de status do usuário está quebrando para parte dos usuários por comparação inválida entre tipos (`uuid` vs `text`) dentro de `get_user_feature_flags`.  
+   - Efeito: o frontend recebe falha no status e passa a mostrar estados errados (ex.: “nenhum plano ativo”, ativação presa em 80%).
+2. **Inconsistência de elegibilidade financeira**: existe usuário com direito ativo em `tenant_entitlements`, mas a verificação de acesso de API usa outra fonte e pode continuar bloqueando.
+3. **Histórico de faturamento incompleto no app**: na área de Configurações/Faturamento ainda predomina tela de dados fiscais, sem timeline consolidada de pedido/pagamento/aprovação/nota.
 
-Plano de implementação
+---
 
-1) Corrigir o ponto crítico (auth) para parar a falha de recuperação/confirmação
-- Refatorar `supabase/functions/auth-email-hook/index.ts` para remover remetente hardcoded inválido.
-- Passar a resolver remetente por configuração central válida do projeto (domínio de envio ativo no Cloud).
-- Manter o mapeamento existente de templates (`confirm_email`, `password_reset`) para não quebrar fluxo atual.
-- Melhorar log de erro/sucesso com contexto do remetente usado (sem expor segredo), para facilitar suporte futuro.
+### Implementação proposta
 
-2) Unificar remetente no módulo de e-mail administrativo
-- Ajustar `supabase/functions/email-test-provider/index.ts` e `supabase/functions/email-worker-send/index.ts` para usar o mesmo padrão de remetente válido.
-- Corrigir fallback default de remetente e evitar typo (`noreplay`).
-- Garantir que o teste no Admin reflita exatamente o mesmo domínio aceito no ambiente atual.
+#### Etapa 1 — Hotfix crítico do status de acesso (prioridade máxima)
+- Criar migração para corrigir `get_user_feature_flags`:
+  - remover comparação inválida de tipos (`tenant_id = p_user_id::text`);
+  - manter checagem por vínculo real de tenant;
+  - garantir fallback sem exceção.
+- Ajustar também a verificação de acesso financeiro para considerar entitlement ativo como fonte válida.
+- Objetivo: eliminar imediatamente o falso “sem plano ativo” e normalizar flags no frontend.
 
-3) Blindar configuração para não voltar a quebrar
-- Em `src/components/admin/email/EmailProviderTab.tsx` e hook relacionado, adicionar validação de domínio no campo “from_email”.
-- Exibir erro claro ao salvar quando o domínio do remetente não estiver no domínio de envio ativo do projeto.
-- Impedir persistência de configuração inválida que volta a causar 403/500.
+#### Etapa 2 — Reconciliar estados já afetados
+- Adicionar backfill em migração para atualizar `user_access_state` de usuários que já têm entitlement ativo, mas ainda estão com estado antigo/bloqueado.
+- Resultado esperado: correção retroativa sem depender de novo webhook.
 
-4) Ajuste de suporte no Admin (transparência)
-- Revisar `supabase/functions/admin-resend-verification/index.ts` para mensagem de retorno consistente com o comportamento real (gerar link e permitir cópia/uso manual).
-- Evita falso positivo de “enviado” quando o objetivo foi apenas gerar link.
+#### Etapa 3 — Liberar a conta principal de teste (1000 dias)
+- Inserir entitlement manual de longa duração (1000 dias) para o tenant da conta principal logada (Deconex VV), com status `active` e trilha de auditoria.
+- Sincronizar `user_access_state` correspondente para refletir acesso liberado imediatamente.
+- Sem alterar regra de rotina/batch; apenas acesso da conta teste.
 
-5) Validação fim a fim (obrigatória)
-- Teste 1: “Esqueci minha senha” → receber e-mail real em inbox.
-- Teste 2: novo cadastro → receber confirmação de conta.
-- Teste 3: Admin > E-mail > “Enviar teste” → sucesso sem erro de domínio.
-- Teste 4: Admin > Clientes > ações de verificação (reenviar/copiar link) funcionando conforme esperado.
-- Teste 5: verificar logs de função sem novos erros de domínio não verificado.
+#### Etapa 4 — Corrigir “Ativação do Sistema” presa em 80%
+- Ajustar exibição do `ActivationSpeedometer` para não usar flag quebrada em caso de estado inconsistente temporário.
+- Após hotfix de status, validar que “Ativar módulos” conclui corretamente para usuário com onboarding completo.
 
-Arquivos principais a ajustar
-- `supabase/functions/auth-email-hook/index.ts`
-- `supabase/functions/email-test-provider/index.ts`
-- `supabase/functions/email-worker-send/index.ts`
-- `src/components/admin/email/EmailProviderTab.tsx`
-- `src/hooks/useEmailAdmin.ts`
-- `supabase/functions/admin-resend-verification/index.ts` (mensagem/semântica de retorno)
+#### Etapa 5 — Criar menu/área de Histórico financeiro no Faturamento
+- Em `Configurações > Faturamento`, incluir subtabs:
+  1) **Dados fiscais** (já existente)  
+  2) **Histórico de pedidos e pagamentos**  
+  3) **Notas fiscais de serviço**
+- Popular histórico com dados reais (pedido, método, valor, status, data de aprovação, referência de pagamento, período de cobertura do plano).
 
-Resultado esperado
-- Recuperação de senha e confirmação de cadastro voltam a entregar e-mail.
-- Fluxo deixa de depender de remetente inválido/hardcoded.
-- Configuração passa a ser consistente e validada, evitando regressão.
-- Diagnóstico futuro fica simples via logs padronizados.
+#### Etapa 6 — Nota fiscal de serviço (download)
+- No bloco “Notas fiscais de serviço”, listar documentos disponíveis e botão de download.
+- Quando não houver documento, mostrar estado vazio claro e instrução de próximos passos.
+- Preparar estrutura para anexação futura da NFS-e no mesmo fluxo.
+
+#### Etapa 7 — Validação ponta a ponta
+- Validar com 2 perfis:
+  1) usuário com pagamento aprovado/entitlement ativo;
+  2) conta principal teste com entitlement manual de 1000 dias.
+- Confirmar:
+  - não aparece falso “sem plano ativo”;
+  - dashboard carrega sem bloqueio indevido;
+  - ativação não fica travada em 80%;
+  - histórico de pagamentos e notas aparece no Faturamento.
+
+---
+
+## Arquivos-alvo (previstos)
+- **Migração SQL nova** (correção de funções + backfill + concessão teste 1000 dias)
+- `src/components/dashboard/ActivationSpeedometer.tsx`
+- `src/components/settings/SettingsBilling.tsx`
+- `src/components/settings/SettingsPlan.tsx` (se necessário para unificar histórico)
+- `src/hooks` (novo hook de histórico financeiro, ex.: `useBillingHistory.ts`)
+
+---
+
+## Detalhes técnicos (resumo)
+- Corrigir função de flags para evitar erro de tipo e garantir cálculo resiliente de `has_active_subscription/requires_payment`.
+- Reconciliar cache de acesso (`user_access_state`) com direitos ativos já existentes.
+- Implementar concessão manual controlada de entitlement para conta teste (1000 dias), auditável.
+- Expor no frontend um histórico financeiro completo e navegável, separado da configuração fiscal.
+- Não mexer na rotina/batch de sincronização para evitar sobrecarga; apenas destravar estado e visibilidade de dados.
