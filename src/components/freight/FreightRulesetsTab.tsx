@@ -4,20 +4,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useFreightRulesets } from '@/hooks/useFreightRulesets';
-import { Table2, Plus, Check, Calendar, FileText, Search, PenLine, Globe, Loader2 } from 'lucide-react';
+import { Table2, Check, Calendar, FileText, Globe, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { FreightApiQueryDialog } from './FreightApiQueryDialog';
-import { FreightCreateDialog } from './FreightCreateDialog';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { useUserRole } from '@/hooks/useUserRole';
 
 export function FreightRulesetsTab() {
   const { rulesets, activeRuleset, loading, setActiveRulesetId, createRuleset, refetch } = useFreightRulesets();
+  const { isAdmin, loading: roleLoading } = useUserRole();
   const { toast } = useToast();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [apiDialogOpen, setApiDialogOpen] = useState(false);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [generatingGlobal, setGeneratingGlobal] = useState(false);
 
   const handleGenerateGlobalTable = async () => {
@@ -42,56 +40,6 @@ export function FreightRulesetsTab() {
     }
   };
 
-  const handleSaveFromApi = async (results: any[], meta: any) => {
-    try {
-      const validResults = results.filter(r => r.list_cost !== null);
-      if (validResults.length === 0) {
-        toast({ title: 'Nenhum resultado válido para salvar', variant: 'destructive' });
-        return;
-      }
-
-      const name = `Tabela ML API - ${meta.listing_type_id} - ${meta.logistic_type} - ${new Date().toLocaleDateString('pt-BR')}`;
-      
-      await createRuleset(
-        {
-          name,
-          description: `Gerada via API ML. Categoria: ${meta.category_id || 'todas'}. ${meta.successful}/${meta.total_queries} consultas.`,
-          marketplace: 'mercadolivre',
-          country: 'BR',
-          status: 'active',
-          valid_from: new Date().toISOString().split('T')[0],
-          valid_until: null,
-        },
-        validResults.map((r, i) => ({
-          logistic_mode: r.logistic_type,
-          ad_type: r.listing_type,
-          weight_min: r.weight,
-          weight_max: null,
-          price_band_min: r.price,
-          price_band_max: null,
-          seller_pays_value: r.free_shipping ? 0 : (r.list_cost ?? 0),
-          seller_pays_formula: null,
-          dimensions_limit_policy: null,
-          dimensions_limit_value: null,
-          subsidy_type: r.free_shipping ? 'full' as const : 'none' as const,
-          subsidy_value: r.free_shipping ? (r.list_cost ?? 0) : 0,
-          is_free_shipping: r.free_shipping,
-          notes: r.discount_rate ? `Desconto: ${(r.discount_rate * 100).toFixed(0)}%` : null,
-          sort_order: i,
-        }))
-      );
-
-      toast({ title: 'Tabela salva com sucesso!' });
-      setApiDialogOpen(false);
-    } catch (err) {
-      toast({
-        title: 'Erro ao salvar tabela',
-        description: err instanceof Error ? err.message : 'Erro desconhecido',
-        variant: 'destructive',
-      });
-    }
-  };
-
   if (loading) {
     return (
       <div className="space-y-4">
@@ -110,20 +58,18 @@ export function FreightRulesetsTab() {
             Versões da tabela de frete oficial. Selecione a versão ativa para cálculos.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button className="gap-2" onClick={handleGenerateGlobalTable} disabled={generatingGlobal}>
-            {generatingGlobal ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
-            {generatingGlobal ? 'Gerando...' : 'Gerar Tabela Oficial'}
-          </Button>
-          <Button variant="outline" className="gap-2" onClick={() => setApiDialogOpen(true)}>
-            <Search className="h-4 w-4" />
-            Consultar API ML
-          </Button>
-          <Button variant="outline" className="gap-2" onClick={() => setCreateDialogOpen(true)}>
-            <PenLine className="h-4 w-4" />
-            Cadastrar Manual
-          </Button>
-        </div>
+        {!roleLoading && (
+          <div className="flex gap-2">
+            {isAdmin ? (
+              <Button className="gap-2" onClick={handleGenerateGlobalTable} disabled={generatingGlobal}>
+                {generatingGlobal ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+                {generatingGlobal ? 'Gerando...' : 'Gerar Tabela Oficial'}
+              </Button>
+            ) : (
+              <Badge variant="outline">Somente administrador pode gerar tabela</Badge>
+            )}
+          </div>
+        )}
       </div>
 
       {rulesets.length === 0 ? (
@@ -132,18 +78,14 @@ export function FreightRulesetsTab() {
             <Table2 className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="font-medium mb-2">Nenhuma tabela de frete cadastrada</h3>
             <p className="text-sm text-muted-foreground mb-4 text-center max-w-md">
-              Consulte a tabela oficial direto da API do Mercado Livre, ou cadastre manualmente.
+              A tabela oficial é gerada via API do Mercado Livre pelo administrador.
             </p>
-            <div className="flex gap-2">
-              <Button variant="outline" className="gap-2" onClick={() => setApiDialogOpen(true)}>
-                <Search className="h-4 w-4" />
-                Consultar API
+            {isAdmin && (
+              <Button className="gap-2" onClick={handleGenerateGlobalTable} disabled={generatingGlobal}>
+                {generatingGlobal ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+                {generatingGlobal ? 'Gerando...' : 'Gerar Tabela Oficial'}
               </Button>
-              <Button className="gap-2" onClick={() => setCreateDialogOpen(true)}>
-                <PenLine className="h-4 w-4" />
-                Cadastrar Manual
-              </Button>
-            </div>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -224,17 +166,6 @@ export function FreightRulesetsTab() {
         </div>
       )}
 
-      {/* Dialogs */}
-      <FreightApiQueryDialog
-        open={apiDialogOpen}
-        onOpenChange={setApiDialogOpen}
-        onSaveAsRuleset={handleSaveFromApi}
-      />
-      <FreightCreateDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-        onCreated={refetch}
-      />
     </div>
   );
 }
