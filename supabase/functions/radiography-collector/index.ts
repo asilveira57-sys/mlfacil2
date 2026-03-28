@@ -478,7 +478,9 @@ async function handleSync(supabase: any, sellerId: string, startTime: number) {
             }
             return null;
           };
-          const weight_kg = getAttrNum(['SELLER_PACKAGE_WEIGHT', 'PACKAGE_WEIGHT', 'WEIGHT']);
+          const rawWeight = getAttrNum(['SELLER_PACKAGE_WEIGHT', 'PACKAGE_WEIGHT', 'WEIGHT']);
+          // ML returns weight in grams — convert to kg
+          const weight_kg = rawWeight !== null && rawWeight > 50 ? rawWeight / 1000 : rawWeight;
           const height_cm = getAttrNum(['SELLER_PACKAGE_HEIGHT', 'PACKAGE_HEIGHT', 'HEIGHT']);
           const width_cm = getAttrNum(['SELLER_PACKAGE_WIDTH', 'PACKAGE_WIDTH', 'WIDTH']);
           const length_cm = getAttrNum(['SELLER_PACKAGE_LENGTH', 'PACKAGE_LENGTH', 'LENGTH', 'DEPTH']);
