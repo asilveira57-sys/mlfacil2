@@ -8,7 +8,58 @@ const corsHeaders = {
 const WEIGHTS = [0.3, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30];
 const PRICES = [50, 79, 120, 200, 350, 500, 750, 1000, 2000, 5000];
 const LISTING_TYPES = ["gold_pro", "gold_special"];
-const LOGISTIC_TYPES = ["drop_off", "xd_drop_off", "fulfillment"];
+const ADMIN_EMAILS = (Deno.env.get("ADMIN_EMAILS") || "")
+  .split(",")
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
+function weightToDimensions(weightKg: number): string {
+  if (weightKg <= 0.5) return `5x15x20,${Math.round(weightKg * 1000)}`;
+  if (weightKg <= 5) return `10x25x35,${Math.round(weightKg * 1000)}`;
+  return `20x40x50,${Math.round(weightKg * 1000)}`;
+}
+
+type AdminCheckResult =
+  | { ok: true }
+  | { ok: false; status: number; body: Record<string, unknown> };
+
+async function verifyAdminRequest(req: Request, supabase: ReturnType<typeof createClient>, serviceKey: string): Promise<AdminCheckResult> {
+  const authHeader = req.headers.get("Authorization");
+
+  if (!authHeader) {
+    return { ok: false, status: 401, body: { error: "Unauthorized" } };
+  }
+
+  const token = authHeader.replace("Bearer ", "").trim();
+
+  // Allow trusted internal calls using service role token
+  if (token && token === serviceKey) {
+    return { ok: true };
+  }
+
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user?.email) {
+    return { ok: false, status: 401, body: { error: "Unauthorized" } };
+  }
+
+  if (ADMIN_EMAILS.length === 0) {
+    return {
+      ok: false,
+      status: 500,
+      body: { error: "ADMIN_EMAILS não configurado" },
+    };
+  }
+
+  if (!ADMIN_EMAILS.includes(user.email.toLowerCase())) {
+    return {
+      ok: false,
+      status: 403,
+      body: { error: "Forbidden", detail: "Apenas administradores podem gerar a tabela oficial" },
+    };
+  }
+
+  return { ok: true };
+}
 
 interface ShippingOption {
   list_cost: number | null;
@@ -28,6 +79,14 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
+    const adminCheck = await verifyAdminRequest(req, supabase, serviceKey);
+    if (!adminCheck.ok) {
+      return new Response(
+        JSON.stringify(adminCheck.body),
+        { status: adminCheck.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Get any active ML account to use as proxy for API queries
     const { data: accounts } = await supabase
       .from("ml_accounts")
@@ -35,6 +94,8 @@ Deno.serve(async (req) => {
       .eq("is_connected", true)
       .eq("is_active", true)
       .not("access_token", "is", null)
+      .eq("connection_status", "connected")
+      .order("updated_at", { ascending: false })
       .limit(1);
 
     if (!accounts || accounts.length === 0) {
@@ -54,17 +115,13 @@ Deno.serve(async (req) => {
       for (const weight of WEIGHTS) {
         for (const price of PRICES) {
           try {
-            const weightG = Math.round(weight * 1000);
-            const dims = weight <= 1 ? { height: 10, width: 15, length: 20 }
-              : weight <= 5 ? { height: 15, width: 25, length: 30 }
-              : weight <= 15 ? { height: 20, width: 30, length: 40 }
-              : { height: 30, width: 40, length: 60 };
-
-            const url = `https://api.mercadolibre.com/users/${seller_id}/shipping_options?` +
-              `item_price=${price}&weight=${weightG}&` +
-              `dimensions=${dims.height}x${dims.width}x${dims.length}&` +
-              `listing_type_id=${listing_type}&` +
-              `free_method=0`;
+            const params = new URLSearchParams({
+              dimensions: weightToDimensions(weight),
+              item_price: String(price),
+              listing_type_id: listing_type,
+              mode: "me2",
+            });
+            const url = `https://api.mercadolibre.com/users/${seller_id}/shipping_options/free?${params.toString()}`;
 
             const resp = await fetch(url, {
               headers: { Authorization: `Bearer ${access_token}` },
@@ -72,24 +129,37 @@ Deno.serve(async (req) => {
 
             if (resp.status === 429) {
               // Rate limit — wait and retry once
-              await new Promise(r => setTimeout(r, 2000));
+              await new Promise(r => setTimeout(r, 1500));
               const retry = await fetch(url, {
                 headers: { Authorization: `Bearer ${access_token}` },
               });
-              if (!retry.ok) { queriesFail++; continue; }
+              if (!retry.ok) {
+                queriesFail++;
+                if (queriesFail <= 5) {
+                  const errText = await retry.text();
+                  console.warn("[freight-global-table-sync] Retry error:", retry.status, errText.slice(0, 500));
+                }
+                continue;
+              }
               const data = await retry.json();
-              processShippingResponse(data, listing_type, weight, price, results);
-              queriesOk++;
+              const added = processShippingResponse(data, listing_type, weight, price, results);
+              if (added > 0) queriesOk++;
+              else queriesFail++;
             } else if (resp.ok) {
               const data = await resp.json();
-              processShippingResponse(data, listing_type, weight, price, results);
-              queriesOk++;
+              const added = processShippingResponse(data, listing_type, weight, price, results);
+              if (added > 0) queriesOk++;
+              else queriesFail++;
             } else {
               queriesFail++;
+              if (queriesFail <= 5) {
+                const errText = await resp.text();
+                console.warn("[freight-global-table-sync] API error:", resp.status, errText.slice(0, 500));
+              }
             }
 
             // Small delay to avoid rate limits
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 120));
           } catch {
             queriesFail++;
           }
@@ -99,7 +169,7 @@ Deno.serve(async (req) => {
 
     if (results.length === 0) {
       return new Response(
-        JSON.stringify({ error: "Nenhum resultado obtido da API", queries_ok: queriesOk, queries_fail: queriesFail }),
+        JSON.stringify({ error: "Nenhum resultado obtido da API", queries_ok: queriesOk, queries_fail: queriesFail, hint: "Verifique permissões da conta ML e validade do token" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -172,6 +242,9 @@ function processShippingResponse(
   results: any[]
 ) {
   const options = data?.options || [];
+  let added = 0;
+
+  // Common case: API returns options[]
   for (const opt of options) {
     if (opt.list_cost === null && opt.cost === null) continue;
     results.push({
@@ -185,7 +258,70 @@ function processShippingResponse(
       discount_rate: opt.list_cost && opt.cost ? 1 - (opt.cost / opt.list_cost) : 0,
       currency_id: opt.currency_id || "BRL",
     });
+    added++;
   }
+
+  if (added > 0) {
+    return added;
+  }
+
+  // Fallback: API can return coverage object without options[]
+  const coverage = data?.coverage;
+  if (coverage) {
+    const regions = [
+      coverage.all_country,
+      coverage.local,
+      coverage.national,
+      coverage,
+    ].filter(Boolean);
+
+    for (const region of regions) {
+      const listCost = region?.list_cost ?? region?.cost ?? null;
+      if (listCost === null) continue;
+
+      const discountRate = region?.discount?.rate ?? 0;
+      const subsidizedCost = listCost * (1 - discountRate);
+      const freeShipping = data?.free_shipping === true || listCost === 0;
+
+      results.push({
+        listing_type,
+        logistic_type: "me2",
+        weight,
+        price,
+        list_cost: listCost,
+        cost: subsidizedCost,
+        free_shipping: freeShipping,
+        discount_rate: discountRate,
+        currency_id: region?.currency_id || data?.currency_id || "BRL",
+      });
+      added++;
+      break;
+    }
+  }
+
+  if (added > 0) {
+    return added;
+  }
+
+  // Last fallback: direct response payload with list_cost/cost
+  const directListCost = data?.list_cost ?? data?.cost ?? null;
+  if (directListCost !== null) {
+    const directDiscount = data?.discount?.rate ?? 0;
+    results.push({
+      listing_type,
+      logistic_type: data?.logistic_type || "me2",
+      weight,
+      price,
+      list_cost: directListCost,
+      cost: directListCost * (1 - directDiscount),
+      free_shipping: data?.free_shipping === true || directListCost === 0,
+      discount_rate: directDiscount,
+      currency_id: data?.currency_id || "BRL",
+    });
+    added++;
+  }
+
+  return added;
 }
 
 function buildRangeRules(results: any[], rulesetId: string) {
