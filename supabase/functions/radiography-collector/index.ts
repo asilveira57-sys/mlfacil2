@@ -450,7 +450,7 @@ async function handleSync(supabase: any, sellerId: string, startTime: number) {
 
       try {
         const detResp = await fetch(
-          `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,permalink,thumbnail,catalog_product_id,category_id,currency_id,condition,listing_type_id,status,health,price,original_price,available_quantity,sold_quantity,shipping,seller_custom_field,variations`,
+          `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,permalink,thumbnail,catalog_product_id,category_id,currency_id,condition,listing_type_id,status,health,price,original_price,available_quantity,sold_quantity,shipping,seller_custom_field,variations,attributes`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
@@ -466,7 +466,25 @@ async function handleSync(supabase: any, sellerId: string, startTime: number) {
         for (const item of detailsData) {
           if (item.code !== 200 || !item.body) { failed++; continue; }
           const b = item.body;
-          const baseData = {
+          // Extract package dimensions from attributes
+          const attrs = Array.isArray(b.attributes) ? b.attributes : [];
+          const getAttrNum = (ids: string[]) => {
+            for (const aid of ids) {
+              const attr = attrs.find((a: any) => a.id === aid);
+              if (attr?.value_name) {
+                const num = parseFloat(String(attr.value_name).replace(',', '.'));
+                if (!isNaN(num) && num > 0) return num;
+              }
+            }
+            return null;
+          };
+          const weight_kg = getAttrNum(['SELLER_PACKAGE_WEIGHT', 'PACKAGE_WEIGHT', 'WEIGHT']);
+          const height_cm = getAttrNum(['SELLER_PACKAGE_HEIGHT', 'PACKAGE_HEIGHT', 'HEIGHT']);
+          const width_cm = getAttrNum(['SELLER_PACKAGE_WIDTH', 'PACKAGE_WIDTH', 'WIDTH']);
+          const length_cm = getAttrNum(['SELLER_PACKAGE_LENGTH', 'PACKAGE_LENGTH', 'LENGTH', 'DEPTH']);
+          const hasDims = weight_kg !== null || height_cm !== null || width_cm !== null || length_cm !== null;
+
+          const baseData: any = {
             user_id: userId, seller_id: sellerId, item_id: b.id,
             title: b.title, title_short: b.title?.substring(0, 50),
             permalink: b.permalink, thumbnail: b.thumbnail,
@@ -479,6 +497,15 @@ async function handleSync(supabase: any, sellerId: string, startTime: number) {
             last_sync_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           };
+
+          // Only overwrite dimensions if we got data from ML AND current source is not 'manual'
+          if (hasDims) {
+            baseData.weight_kg = weight_kg;
+            baseData.height_cm = height_cm;
+            baseData.width_cm = width_cm;
+            baseData.length_cm = length_cm;
+            baseData.dimensions_source = 'ml_api';
+          }
 
           if (b.variations && b.variations.length > 0) {
             for (const v of b.variations) {
