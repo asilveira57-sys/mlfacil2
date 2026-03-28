@@ -31,8 +31,10 @@ Deno.serve(async (req) => {
     // Get any active ML account to use as proxy for API queries
     const { data: accounts } = await supabase
       .from("ml_accounts")
-      .select("seller_id, access_token")
-      .eq("status", "connected")
+      .select("seller_id:ml_user_id, access_token")
+      .eq("is_connected", true)
+      .eq("is_active", true)
+      .not("access_token", "is", null)
       .limit(1);
 
     if (!accounts || accounts.length === 0) {
