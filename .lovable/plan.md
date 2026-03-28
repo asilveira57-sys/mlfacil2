@@ -1,73 +1,64 @@
 
-## Plano de ação (urgente): corrigir “sem plano ativo” + histórico financeiro + liberar conta teste
 
-### Diagnóstico confirmado
-1. **Erro geral no cálculo de acesso**: a RPC de status do usuário está quebrando para parte dos usuários por comparação inválida entre tipos (`uuid` vs `text`) dentro de `get_user_feature_flags`.  
-   - Efeito: o frontend recebe falha no status e passa a mostrar estados errados (ex.: “nenhum plano ativo”, ativação presa em 80%).
-2. **Inconsistência de elegibilidade financeira**: existe usuário com direito ativo em `tenant_entitlements`, mas a verificação de acesso de API usa outra fonte e pode continuar bloqueando.
-3. **Histórico de faturamento incompleto no app**: na área de Configurações/Faturamento ainda predomina tela de dados fiscais, sem timeline consolidada de pedido/pagamento/aprovação/nota.
+## Plano: Corrigir Gestão de Frete — carregar dimensões + ativar Editar/Calcular
 
----
+### Diagnóstico
 
-### Implementação proposta
+1. **Dados vazios**: O `radiography-collector` sincroniza os anúncios para `meli_listings_cache`, mas **não solicita o campo `attributes`** na chamada à API do ML. Sem `attributes`, não há como extrair `SELLER_PACKAGE_HEIGHT/WIDTH/LENGTH/WEIGHT`. As colunas `weight_kg`, `height_cm`, `width_cm`, `length_cm` existem na tabela mas ficam sempre `null`.
 
-#### Etapa 1 — Hotfix crítico do status de acesso (prioridade máxima)
-- Criar migração para corrigir `get_user_feature_flags`:
-  - remover comparação inválida de tipos (`tenant_id = p_user_id::text`);
-  - manter checagem por vínculo real de tenant;
-  - garantir fallback sem exceção.
-- Ajustar também a verificação de acesso financeiro para considerar entitlement ativo como fonte válida.
-- Objetivo: eliminar imediatamente o falso “sem plano ativo” e normalizar flags no frontend.
+2. **Botões Editar/Calcular**: Não têm `onClick` — são `<Button>` sem ação nenhuma.
 
-#### Etapa 2 — Reconciliar estados já afetados
-- Adicionar backfill em migração para atualizar `user_access_state` de usuários que já têm entitlement ativo, mas ainda estão com estado antigo/bloqueado.
-- Resultado esperado: correção retroativa sem depender de novo webhook.
-
-#### Etapa 3 — Liberar a conta principal de teste (1000 dias)
-- Inserir entitlement manual de longa duração (1000 dias) para o tenant da conta principal logada (Deconex VV), com status `active` e trilha de auditoria.
-- Sincronizar `user_access_state` correspondente para refletir acesso liberado imediatamente.
-- Sem alterar regra de rotina/batch; apenas acesso da conta teste.
-
-#### Etapa 4 — Corrigir “Ativação do Sistema” presa em 80%
-- Ajustar exibição do `ActivationSpeedometer` para não usar flag quebrada em caso de estado inconsistente temporário.
-- Após hotfix de status, validar que “Ativar módulos” conclui corretamente para usuário com onboarding completo.
-
-#### Etapa 5 — Criar menu/área de Histórico financeiro no Faturamento
-- Em `Configurações > Faturamento`, incluir subtabs:
-  1) **Dados fiscais** (já existente)  
-  2) **Histórico de pedidos e pagamentos**  
-  3) **Notas fiscais de serviço**
-- Popular histórico com dados reais (pedido, método, valor, status, data de aprovação, referência de pagamento, período de cobertura do plano).
-
-#### Etapa 6 — Nota fiscal de serviço (download)
-- No bloco “Notas fiscais de serviço”, listar documentos disponíveis e botão de download.
-- Quando não houver documento, mostrar estado vazio claro e instrução de próximos passos.
-- Preparar estrutura para anexação futura da NFS-e no mesmo fluxo.
-
-#### Etapa 7 — Validação ponta a ponta
-- Validar com 2 perfis:
-  1) usuário com pagamento aprovado/entitlement ativo;
-  2) conta principal teste com entitlement manual de 1000 dias.
-- Confirmar:
-  - não aparece falso “sem plano ativo”;
-  - dashboard carrega sem bloqueio indevido;
-  - ativação não fica travada em 80%;
-  - histórico de pagamentos e notas aparece no Faturamento.
+3. **Frete esperado**: Depende do cálculo via `pricing-engine`, que por sua vez depende das dimensões. Sem input, sem resultado.
 
 ---
 
-## Arquivos-alvo (previstos)
-- **Migração SQL nova** (correção de funções + backfill + concessão teste 1000 dias)
-- `src/components/dashboard/ActivationSpeedometer.tsx`
-- `src/components/settings/SettingsBilling.tsx`
-- `src/components/settings/SettingsPlan.tsx` (se necessário para unificar histórico)
-- `src/hooks` (novo hook de histórico financeiro, ex.: `useBillingHistory.ts`)
+### Implementação
+
+#### 1. Enriquecer o `radiography-collector` para capturar dimensões
+
+- Adicionar `attributes` na lista de campos do multiget (`?attributes=...`)
+- Após receber cada item, extrair dimensões de `SELLER_PACKAGE_*` / `PACKAGE_*` (usando lógica já existente em `ad-item-snapshot`)
+- Popular `weight_kg`, `height_cm`, `width_cm`, `length_cm`, `dimensions_source` no upsert para `meli_listings_cache`
+- `dimensions_source` = `'ml_api'` quando encontrado, manter `'none'` quando ausente
+
+#### 2. Criar edge function `freight-sync-dimensions` (sync sob demanda)
+
+- Nova function leve que faz multiget de items em lotes de 20, extrai dimensões e atualiza `meli_listings_cache`
+- Usada pelo botão "Atualizar" na aba Produtos e pelo "Recalcular em Massa"
+- Controle de rate limit com sleep entre lotes
+
+#### 3. Implementar dialog de edição manual (botão "Editar")
+
+- Criar `FreightProductEditDialog.tsx` com campos: peso (kg), altura (cm), largura (cm), comprimento (cm), perfil de frete (A/B/C)
+- Ao salvar, faz `update` direto em `meli_listings_cache` e seta `dimensions_source = 'manual'`
+- Invalidar cache do react-query
+
+#### 4. Implementar ação "Calcular" (botão)
+
+- Chamar o `pricing-engine` (já existente) para o item individual, passando peso/dimensões atuais
+- Atualizar `expected_freight_cost` no cache local e no banco
+- Mostrar toast com resultado
+
+#### 5. Conectar botão "Recalcular em Massa"
+
+- Chamar `freight-sync-dimensions` para atualizar dimensões do ML
+- Em seguida, chamar `pricing-engine` em lote para atualizar `expected_freight_cost`
 
 ---
 
-## Detalhes técnicos (resumo)
-- Corrigir função de flags para evitar erro de tipo e garantir cálculo resiliente de `has_active_subscription/requires_payment`.
-- Reconciliar cache de acesso (`user_access_state`) com direitos ativos já existentes.
-- Implementar concessão manual controlada de entitlement para conta teste (1000 dias), auditável.
-- Expor no frontend um histórico financeiro completo e navegável, separado da configuração fiscal.
-- Não mexer na rotina/batch de sincronização para evitar sobrecarga; apenas destravar estado e visibilidade de dados.
+### Arquivos
+
+| Arquivo | Ação |
+|---|---|
+| `supabase/functions/radiography-collector/index.ts` | Adicionar `attributes` ao multiget + popular dimensões |
+| `supabase/functions/freight-sync-dimensions/index.ts` | Nova function de sync sob demanda |
+| `src/components/freight/FreightProductEditDialog.tsx` | Novo dialog de edição manual |
+| `src/components/freight/FreightProductsTab.tsx` | Conectar Editar (dialog) e Calcular (pricing-engine) |
+| `src/hooks/useFreightProducts.ts` | Adicionar mutation de update |
+
+### Resultado esperado
+- Ao sincronizar, dimensões do ML preenchem a tabela automaticamente
+- Editar permite ajuste manual de peso/dimensões por produto
+- Calcular retorna o frete esperado usando o motor existente
+- Status muda de "Sem dados" para "OK" ou "Estimado" conforme a fonte
+
