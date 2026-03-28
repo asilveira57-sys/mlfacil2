@@ -69,8 +69,12 @@ function extractDimensions(attrs: any[]) {
     }
     return null;
   };
+  // ML returns weight in grams — convert to kg
+  let rawWeight = getAttrNum(['SELLER_PACKAGE_WEIGHT', 'PACKAGE_WEIGHT', 'WEIGHT']);
+  const weight_kg = rawWeight !== null && rawWeight > 50 ? rawWeight / 1000 : rawWeight;
+
   return {
-    weight_kg: getAttrNum(['SELLER_PACKAGE_WEIGHT', 'PACKAGE_WEIGHT', 'WEIGHT']),
+    weight_kg,
     height_cm: getAttrNum(['SELLER_PACKAGE_HEIGHT', 'PACKAGE_HEIGHT', 'HEIGHT']),
     width_cm: getAttrNum(['SELLER_PACKAGE_WIDTH', 'PACKAGE_WIDTH', 'WIDTH']),
     length_cm: getAttrNum(['SELLER_PACKAGE_LENGTH', 'PACKAGE_LENGTH', 'LENGTH', 'DEPTH']),

@@ -10,7 +10,10 @@ import {
 import { 
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Package, Search, RefreshCw, Calculator, AlertCircle, CheckCircle2, Pencil, Loader2 } from 'lucide-react';
+import {
+  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Package, Search, RefreshCw, Calculator, AlertCircle, CheckCircle2, Pencil, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Info } from 'lucide-react';
 import { CopyMlbId } from '@/components/ui/CopyMlbId';
 import { useFreightProducts, type FreightProduct } from '@/hooks/useFreightProducts';
 import { FreightProductEditDialog } from './FreightProductEditDialog';
@@ -22,16 +25,55 @@ import {
   Pagination, PaginationContent, PaginationItem, PaginationLink,
   PaginationNext, PaginationPrevious,
 } from '@/components/ui/pagination';
+import { calculateFreight, type ProductDimensions, type FreightContext, type FreightRuleLine, type FreightRuleset } from '@/lib/freightEngine';
 
 const PAGE_SIZE = 25;
+
+type SortField = 'title' | 'weight_kg' | 'dimensions' | 'freight_profile' | 'dimensions_source' | 'expected_freight_cost' | 'price';
+type SortDir = 'asc' | 'desc';
+
+function getDimensionsSum(p: FreightProduct): number {
+  if (p.height_cm && p.width_cm && p.length_cm) {
+    return p.height_cm + p.width_cm + p.length_cm;
+  }
+  return 0;
+}
+
+function sortProducts(products: FreightProduct[], field: SortField, dir: SortDir): FreightProduct[] {
+  return [...products].sort((a, b) => {
+    let va: number | string = 0;
+    let vb: number | string = 0;
+    switch (field) {
+      case 'title': va = a.title?.toLowerCase() || ''; vb = b.title?.toLowerCase() || ''; break;
+      case 'weight_kg': va = a.weight_kg || 0; vb = b.weight_kg || 0; break;
+      case 'dimensions': va = getDimensionsSum(a); vb = getDimensionsSum(b); break;
+      case 'freight_profile': va = a.freight_profile || 'Z'; vb = b.freight_profile || 'Z'; break;
+      case 'dimensions_source': va = a.dimensions_source || ''; vb = b.dimensions_source || ''; break;
+      case 'expected_freight_cost': va = a.expected_freight_cost || 0; vb = b.expected_freight_cost || 0; break;
+      case 'price': va = a.price || 0; vb = b.price || 0; break;
+    }
+    if (va < vb) return dir === 'asc' ? -1 : 1;
+    if (va > vb) return dir === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
 
 function StatusBadge({ source }: { source: string | null }) {
   if (!source || source === 'none') {
     return (
-      <Badge variant="destructive" className="gap-1">
-        <AlertCircle className="h-3 w-3" />
-        Sem dados
-      </Badge>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="destructive" className="gap-1 cursor-help">
+              <AlertCircle className="h-3 w-3" />
+              Sem dados
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p className="max-w-xs text-xs">O anúncio não possui peso/dimensões cadastrados no Mercado Livre. Edite manualmente ou cadastre no ML e sincronize.</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     );
   }
   if (source === 'estimated') {
@@ -52,6 +94,25 @@ function DimensionsDisplay({ p }: { p: FreightProduct }) {
   return <>-</>;
 }
 
+function SortableHeader({ label, field, currentField, currentDir, onClick }: {
+  label: string; field: SortField; currentField: SortField; currentDir: SortDir;
+  onClick: (f: SortField) => void;
+}) {
+  return (
+    <button
+      className="flex items-center gap-1 hover:text-foreground transition-colors w-full"
+      onClick={() => onClick(field)}
+    >
+      {label}
+      {currentField === field ? (
+        currentDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+      ) : (
+        <ArrowUpDown className="h-3 w-3 opacity-40" />
+      )}
+    </button>
+  );
+}
+
 export function FreightProductsTab() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -63,6 +124,8 @@ export function FreightProductsTab() {
   const [syncing, setSyncing] = useState(false);
   const [calculatingId, setCalculatingId] = useState<string | null>(null);
   const [massCalculating, setMassCalculating] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('title');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   const { sellerId } = useActiveAccount();
   const queryClient = useQueryClient();
@@ -78,19 +141,33 @@ export function FreightProductsTab() {
     setTimer(t);
   };
 
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
+
   const { data: products, isLoading, refetch } = useFreightProducts({
     search: debouncedSearch,
     dimensionStatus,
     freightProfile,
   });
 
-  const totalCount = products?.length ?? 0;
+  const sorted = useMemo(() => {
+    if (!products) return [];
+    return sortProducts(products, sortField, sortDir);
+  }, [products, sortField, sortDir]);
+
+  const totalCount = sorted.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const paged = useMemo(() => {
-    if (!products) return [];
     const start = (page - 1) * PAGE_SIZE;
-    return products.slice(start, start + PAGE_SIZE);
-  }, [products, page]);
+    return sorted.slice(start, start + PAGE_SIZE);
+  }, [sorted, page]);
 
   const handleSyncDimensions = async () => {
     if (!sellerId) return;
@@ -116,36 +193,60 @@ export function FreightProductsTab() {
     }
     setCalculatingId(product.id);
     try {
-      const { data, error } = await supabase.functions.invoke('pricing-engine', {
-        body: {
-          action: 'validate',
-          marketplace: 'ML',
-          sale_price: product.price || 0,
-          quantity: 1,
-          inputs: {
-            weight_kg: product.weight_kg,
-            height_cm: product.height_cm,
-            width_cm: product.width_cm,
-            length_cm: product.length_cm,
-          },
-        },
-      });
-      if (error) throw error;
+      // Use local FreightEngine for instant calculation
+      const productDims: ProductDimensions = {
+        weight_kg: product.weight_kg,
+        height_cm: product.height_cm,
+        width_cm: product.width_cm,
+        length_cm: product.length_cm,
+        freight_profile: (product.freight_profile as 'A' | 'B' | 'C') || 'B',
+        dimensions_source: (product.dimensions_source as any) || 'none',
+      };
 
-      const freightCost = data?.result?.shipping_cost_estimated || data?.result?.breakeven_price || null;
-      if (freightCost) {
-        await supabase
-          .from('meli_listings_cache')
-          .update({
-            expected_freight_cost: freightCost,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', product.id);
-        toast.success(`Frete calculado: R$ ${Number(freightCost).toFixed(2)}`);
-        queryClient.invalidateQueries({ queryKey: ['freight-products'] });
-      } else {
-        toast.info('Cálculo concluído, mas sem valor de frete disponível na tabela.');
+      // Fetch active ruleset
+      const { data: rulesets } = await supabase
+        .from('freight_rulesets')
+        .select('*')
+        .eq('status', 'active')
+        .limit(1);
+
+      if (!rulesets || rulesets.length === 0) {
+        toast.error('Nenhuma tabela de frete ativa. Configure na aba "Tabela de Frete".');
+        return;
       }
+
+      const ruleset = rulesets[0];
+      const { data: ruleLines } = await supabase
+        .from('freight_rule_lines')
+        .select('*')
+        .eq('ruleset_id', ruleset.id)
+        .order('sort_order', { ascending: true });
+
+      if (!ruleLines || ruleLines.length === 0) {
+        toast.error('Tabela de frete sem regras configuradas.');
+        return;
+      }
+
+      const context: FreightContext = {
+        ruleset: ruleset as FreightRuleset,
+        ruleLines: ruleLines as FreightRuleLine[],
+        logistic_mode: product.logistic_type || product.shipping_mode || 'ME2',
+        ad_type: 'classic',
+        item_price: product.price || 0,
+      };
+
+      const result = calculateFreight(productDims, context);
+
+      await supabase
+        .from('meli_listings_cache')
+        .update({
+          expected_freight_cost: result.expected_shipping_cost,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', product.id);
+
+      toast.success(`Frete calculado: R$ ${result.expected_shipping_cost.toFixed(2)} — ${result.reason}`);
+      queryClient.invalidateQueries({ queryKey: ['freight-products'] });
     } catch (err: any) {
       toast.error('Erro ao calcular: ' + (err.message || 'Erro'));
     } finally {
@@ -157,13 +258,11 @@ export function FreightProductsTab() {
     if (!sellerId) return;
     setMassCalculating(true);
     try {
-      // Step 1: Sync dimensions from ML
       toast.info('Passo 1/2: Sincronizando dimensões do ML...');
       await supabase.functions.invoke('freight-sync-dimensions', {
         body: { seller_id: sellerId },
       });
 
-      // Step 2: Notify user
       toast.success('Dimensões sincronizadas. Cálculo de frete em massa disponível após próxima atualização.');
       queryClient.invalidateQueries({ queryKey: ['freight-products'] });
     } catch (err: any) {
@@ -266,12 +365,24 @@ export function FreightProductsTab() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Produto</TableHead>
-                    <TableHead className="text-center">Peso (kg)</TableHead>
-                    <TableHead className="text-center">Dimensões</TableHead>
-                    <TableHead className="text-center">Perfil</TableHead>
-                    <TableHead className="text-center">Status</TableHead>
-                    <TableHead className="text-right">Frete Esperado</TableHead>
+                    <TableHead>
+                      <SortableHeader label="Produto" field="title" currentField={sortField} currentDir={sortDir} onClick={handleSort} />
+                    </TableHead>
+                    <TableHead className="text-center">
+                      <SortableHeader label="Peso (kg)" field="weight_kg" currentField={sortField} currentDir={sortDir} onClick={handleSort} />
+                    </TableHead>
+                    <TableHead className="text-center">
+                      <SortableHeader label="Dimensões" field="dimensions" currentField={sortField} currentDir={sortDir} onClick={handleSort} />
+                    </TableHead>
+                    <TableHead className="text-center">
+                      <SortableHeader label="Perfil" field="freight_profile" currentField={sortField} currentDir={sortDir} onClick={handleSort} />
+                    </TableHead>
+                    <TableHead className="text-center">
+                      <SortableHeader label="Status" field="dimensions_source" currentField={sortField} currentDir={sortDir} onClick={handleSort} />
+                    </TableHead>
+                    <TableHead className="text-right">
+                      <SortableHeader label="Frete Esperado" field="expected_freight_cost" currentField={sortField} currentDir={sortDir} onClick={handleSort} />
+                    </TableHead>
                     <TableHead className="text-center">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -298,7 +409,7 @@ export function FreightProductsTab() {
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
-                        {product.weight_kg ? `${product.weight_kg} kg` : '-'}
+                        {product.weight_kg ? `${Number(product.weight_kg).toFixed(2)} kg` : '-'}
                       </TableCell>
                       <TableCell className="text-center text-sm">
                         <DimensionsDisplay p={product} />
