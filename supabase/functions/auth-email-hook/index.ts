@@ -36,7 +36,7 @@ const EMAIL_TEMPLATES: Record<string, React.ComponentType<any>> = {
 }
 
 // Configuration
-const SITE_NAME = "mlfacil2"
+const SITE_NAME = "MKTP Fácil"
 const SENDER_DOMAIN = "notify.notifica.mktpfacil.com"
 const ROOT_DOMAIN = "notifica.mktpfacil.com"
 const FROM_DOMAIN = "notifica.mktpfacil.com" // Domain shown in From address (may be root or sender subdomain)
