@@ -34,6 +34,7 @@ import { AdminConsultantTips } from './admin/AdminConsultantTips';
 import { AdminExplanatoryCards } from './admin/AdminExplanatoryCards';
 import { AdminAuditLogs } from './admin/AdminAuditLogs';
 import { AdminSystemStatus } from './admin/AdminSystemStatus';
+import { AdminExecutionMonitor } from './admin/AdminExecutionMonitor';
 import AdminContatos from './admin/AdminContatos';
 import AdminCentralDeAjuda from './admin/AdminCentralDeAjuda';
 import { AdminEmails } from './admin/AdminEmails';
