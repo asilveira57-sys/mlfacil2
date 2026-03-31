@@ -416,6 +416,8 @@ function VerifyEmailState({ email, t }: { email: string; t: any }) {
         Ir para o login
       </Link>
     </div>
+    <WhatsAppFloatingButton />
+    </>
   );
 }
 
