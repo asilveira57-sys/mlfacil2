@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { BarChart3, Menu, X, ChevronRight, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import WhatsAppFloatingButton from "@/components/WhatsAppFloatingButton";
 
 const NAV_ITEMS = [
   { label: "Início", href: "/" },
