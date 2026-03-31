@@ -71,6 +71,7 @@ const adminTabs = [
   { id: 'identidade-visual', label: 'Identidade Visual', icon: Palette },
   { id: 'cards-explicativos', label: 'Cards Explicativos', icon: Eye },
   { id: 'system-status', label: 'Status Sistema', icon: Activity },
+  { id: 'execution-monitor', label: 'Motor Execução', icon: Zap },
   { id: 'contatos', label: 'Contatos', icon: Users },
   { id: 'central-de-ajuda', label: 'Central Ajuda', icon: HelpCircle },
   { id: 'emails', label: 'Comunicação', icon: Mail },
