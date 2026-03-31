@@ -17,7 +17,7 @@ export function BillingDataGate() {
   // Allow access to settings page (where billing data is filled)
   const isOnSettingsPage = location.pathname === '/settings';
   const isOnPlanosPage = location.pathname === '/planos';
-  const isPublicRoute = ['/', '/home', '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/blog', '/planos', '/termos-de-uso', '/politica-de-privacidade', '/politica-de-cookies', '/lgpd', '/contato', '/suporte', '/central-de-ajuda', '/status'].some(r => location.pathname.startsWith(r));
+  const isPublicRoute = ['/', '/home', '/auth', '/reset-password', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/blog', '/planos', '/termos-de-uso', '/politica-de-privacidade', '/politica-de-cookies', '/lgpd', '/contato', '/suporte', '/central-de-ajuda', '/status'].some(r => location.pathname.startsWith(r));
 
   const requiresBilling = flags?.requires_billing ?? false;
 

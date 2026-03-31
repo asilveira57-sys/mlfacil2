@@ -25,6 +25,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 // === Eager-loaded routes (critical path) ===
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import ResetPassword from "./pages/ResetPassword";
 import CriarAcesso from "./pages/CriarAcesso";
 import PrimeiroAcesso from "./pages/PrimeiroAcesso";
 import Reconnecting from "./pages/Reconnecting";
@@ -186,6 +187,7 @@ const App = () => {
                 <Route path="/home" element={<Index />} />
                 <Route path="/planos" element={<Planos />} />
                 <Route path="/auth" element={<Auth />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/criar-acesso" element={<CriarAcesso />} />
                 <Route path="/reconnecting" element={<Reconnecting />} />
                 <Route path="/blog" element={<Blog />} />
