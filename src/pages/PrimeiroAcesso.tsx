@@ -9,6 +9,7 @@ import {
   User, Sparkles, CheckCircle2, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import WhatsAppFloatingButton from "@/components/WhatsAppFloatingButton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
