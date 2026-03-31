@@ -733,6 +733,7 @@ const PrimeiroAcesso = () => {
           </div>
         )}
       </main>
+      <WhatsAppFloatingButton />
     </div>
   );
 };
