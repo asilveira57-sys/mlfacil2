@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import alexandrePhoto from "@/assets/alexandre-silveira.png";
 import seloML from "@/assets/selo-consultoria-ml.avif";
+import WhatsAppFloatingButton from "@/components/WhatsAppFloatingButton";
 
 const CriarAcesso = () => {
   const { t } = useTranslation();
