@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import alexandrePhoto from "@/assets/alexandre-silveira.png";
+import WhatsAppFloatingButton from "@/components/WhatsAppFloatingButton";
 import seloML from "@/assets/selo-consultoria-ml.avif";
 
 const BenefitCard = ({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) => (
@@ -335,6 +336,7 @@ const Auth = () => {
           </div>
         </div>
       </div>
+      <WhatsAppFloatingButton />
     </div>
   );
 };

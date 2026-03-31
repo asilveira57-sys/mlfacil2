@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import alexandrePhoto from "@/assets/alexandre-silveira.png";
 import seloML from "@/assets/selo-consultoria-ml.avif";
+import WhatsAppFloatingButton from "@/components/WhatsAppFloatingButton";
 
 const CriarAcesso = () => {
   const { t } = useTranslation();
@@ -372,6 +373,7 @@ function VerifyEmailState({ email, t }: { email: string; t: any }) {
   }, [email, countdown]);
 
   return (
+    <>
     <div className="text-center space-y-4 py-6">
       <div className="flex justify-center">
         <div className="w-14 h-14 bg-primary/10 rounded-full flex items-center justify-center">
@@ -415,6 +417,8 @@ function VerifyEmailState({ email, t }: { email: string; t: any }) {
         Ir para o login
       </Link>
     </div>
+    <WhatsAppFloatingButton />
+    </>
   );
 }
 
