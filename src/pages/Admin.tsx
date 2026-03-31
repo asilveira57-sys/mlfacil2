@@ -152,6 +152,7 @@ export default function Admin() {
           <Route path="dica-consultor" element={<AdminConsultantTips />} />
           <Route path="cards-explicativos" element={<AdminExplanatoryCards />} />
           <Route path="system-status" element={<AdminSystemStatus />} />
+          <Route path="execution-monitor" element={<AdminExecutionMonitor />} />
           <Route path="contatos" element={<AdminContatos />} />
           <Route path="central-de-ajuda" element={<AdminCentralDeAjuda />} />
           <Route path="emails" element={<AdminEmails />} />
