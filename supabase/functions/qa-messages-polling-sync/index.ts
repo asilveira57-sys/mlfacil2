@@ -609,14 +609,54 @@ Deno.serve(async (req) => {
       started_at: new Date().toISOString(),
     };
 
-    // ── Process each account ────────────────────────────────────
+    // ── Process each account with execution engine ────────────
     for (const account of accounts) {
       if (Date.now() - startTime > MAX_EXECUTION_MS) {
         console.log("[polling] Time limit reached, stopping");
         break;
       }
 
+      const sellerId = account.ml_user_id;
+
       try {
+        // ── Execution Engine: check eligibility for QA polling ──
+        // Update priority metrics
+        const { count: qCount } = await supabase
+          .from("qa_questions")
+          .select("id", { count: 'exact', head: true })
+          .eq("seller_id", sellerId)
+          .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+
+        await supabase.rpc('update_execution_priority', {
+          p_seller_id: sellerId,
+          p_routine_key: 'qa_polling',
+          p_active_listings: 0,
+          p_recent_sales_7d: 0,
+          p_recent_questions_24h: qCount || 0,
+        });
+
+        // Ask the engine
+        const { data: decision } = await supabase.rpc('should_run_routine', {
+          p_seller_id: sellerId,
+          p_routine_key: 'qa_polling',
+          p_is_manual: false,
+        });
+
+        const dec = decision || { decision: 'run', reason: 'no_engine', priority_level: 'medium', cooldown_applied: 0 };
+
+        if (dec.decision !== 'run') {
+          console.log(`[polling] ${dec.decision.toUpperCase()} seller ${sellerId}: ${dec.reason}`);
+          await supabase.rpc('log_execution_result', {
+            p_seller_id: sellerId, p_routine_key: 'qa_polling',
+            p_decision: dec.decision, p_reason: dec.reason, p_priority: dec.priority_level,
+            p_cooldown: dec.cooldown_applied || 0, p_execution_ms: 0, p_items_processed: 0,
+            p_is_manual: false, p_metadata: {},
+          });
+          continue;
+        }
+
+        const acctStart = Date.now();
+
         // Get company name for notifications
         const companyName = await getCompanyName(supabase, account);
 
@@ -625,7 +665,7 @@ Deno.serve(async (req) => {
         const tokenExpires = account.token_expires_at ? new Date(account.token_expires_at) : null;
 
         if (!tokenExpires || tokenExpires < new Date()) {
-          console.log(`[polling] Refreshing token for ${account.ml_user_id}`);
+          console.log(`[polling] Refreshing token for ${sellerId}`);
           const result = await refreshMercadoLibreToken(account.refresh_token);
           if (result.success && result.access_token) {
             accessToken = result.access_token;
@@ -638,7 +678,7 @@ Deno.serve(async (req) => {
               })
               .eq("id", account.id);
           } else {
-            console.error(`[polling] Token refresh failed for ${account.ml_user_id}: ${result.error}`);
+            console.error(`[polling] Token refresh failed for ${sellerId}: ${result.error}`);
             await supabase.from("ml_accounts").update({ connection_status: "attention" }).eq("id", account.id);
             stats.accounts_failed++;
             continue;
@@ -652,7 +692,7 @@ Deno.serve(async (req) => {
         stats.questions_reconciled += qResult.reconciledCount;
 
         if (qResult.newCount > 0) {
-          await upsertNotification(supabase, account.user_id, account.ml_user_id, companyName, "question", qResult.pendingCount);
+          await upsertNotification(supabase, account.user_id, sellerId, companyName, "question", qResult.pendingCount);
           stats.notifications_created++;
         }
 
@@ -661,33 +701,44 @@ Deno.serve(async (req) => {
           const { data: resolvedNotifs } = await supabase
             .from("app_notifications")
             .update({ is_actioned: true, read_at: new Date().toISOString() })
-            .eq("seller_id", account.ml_user_id)
+            .eq("seller_id", sellerId)
             .eq("category", "qa_pending")
             .eq("is_actioned", false)
             .select("id");
           if (resolvedNotifs && resolvedNotifs.length > 0) {
-            console.log(`[polling] Auto-resolved ${resolvedNotifs.length} qa_pending notifications for seller ${account.ml_user_id}`);
+            console.log(`[polling] Auto-resolved ${resolvedNotifs.length} qa_pending notifications for seller ${sellerId}`);
           }
         }
 
         await sleep(DELAY_API_MS);
 
         // ── Sync messages ───────────────────────────────────────
+        let msgTotal = 0;
         if (Date.now() - startTime < MAX_EXECUTION_MS - 10000) {
           const mResult = await syncMessages(supabase, account, accessToken, startTime);
           stats.messages_synced += mResult.total;
           stats.messages_new_unread += mResult.newUnreadCount;
+          msgTotal = mResult.total;
 
           if (mResult.newUnreadCount > 0) {
-            await upsertNotification(supabase, account.user_id, account.ml_user_id, companyName, "message", mResult.newUnreadCount);
+            await upsertNotification(supabase, account.user_id, sellerId, companyName, "message", mResult.newUnreadCount);
             stats.notifications_created++;
           }
         }
 
+        // Log execution result
+        const itemsProcessed = qResult.total + msgTotal;
+        await supabase.rpc('log_execution_result', {
+          p_seller_id: sellerId, p_routine_key: 'qa_polling',
+          p_decision: 'run', p_reason: 'eligible', p_priority: dec.priority_level,
+          p_cooldown: dec.cooldown_applied || 0, p_execution_ms: Date.now() - acctStart,
+          p_items_processed: itemsProcessed, p_is_manual: false, p_metadata: {},
+        });
+
         stats.accounts_processed++;
         await sleep(DELAY_ACCOUNT_MS);
       } catch (err) {
-        console.error(`[polling] Error for ${account.ml_user_id}:`, err);
+        console.error(`[polling] Error for ${sellerId}:`, err);
         stats.accounts_failed++;
       }
     }

@@ -66,7 +66,23 @@ export function WeatherWidget({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const CACHE_KEY = `weather_cache_${city}_${country}`;
+  const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
   const fetchWeather = useCallback(async () => {
+    // Check localStorage cache first
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const { data: cachedData, cachedAt } = JSON.parse(cached);
+        if (Date.now() - cachedAt < CACHE_TTL_MS) {
+          setWeather({ ...cachedData, lastUpdate: new Date(cachedAt) });
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (_) { /* ignore parse errors */ }
+
     setLoading(true);
     setError(null);
     
@@ -83,7 +99,7 @@ export function WeatherWidget({
         throw new Error(data.error);
       }
 
-      setWeather({
+      const weatherData = {
         temperature: data.temperature,
         feelsLike: data.feelsLike,
         humidity: data.humidity,
@@ -92,7 +108,13 @@ export function WeatherWidget({
         conditionDescription: data.conditionDescription,
         city: data.city,
         lastUpdate: new Date(),
-      });
+      };
+      setWeather(weatherData);
+
+      // Save to localStorage cache
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ data: weatherData, cachedAt: Date.now() }));
+      } catch (_) { /* quota exceeded */ }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);
@@ -102,12 +124,13 @@ export function WeatherWidget({
     } finally {
       setLoading(false);
     }
-  }, [city, country]);
+  }, [city, country, CACHE_KEY]);
 
   useEffect(() => {
     fetchWeather();
     
-    const interval = setInterval(fetchWeather, updateInterval * 60 * 1000);
+    // Use longer interval since we have cache (60 min)
+    const interval = setInterval(fetchWeather, Math.max(updateInterval, 60) * 60 * 1000);
     return () => clearInterval(interval);
   }, [fetchWeather, updateInterval]);
 

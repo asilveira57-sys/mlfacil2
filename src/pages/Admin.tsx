@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   LayoutDashboard, Rocket, Users, Shield, CreditCard, Receipt, FileText, 
   Search, Plug, Settings, Tags, Link2, FileStack, Globe, Menu, Star,
-  ClipboardList, History, Palette, Radio, CalendarDays, Sparkles, Eye, Activity, HelpCircle, Mail, Headphones,
+  ClipboardList, History, Palette, Radio, CalendarDays, Sparkles, Eye, Activity, HelpCircle, Mail, Headphones, Zap,
   UserCheck,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
@@ -34,6 +34,7 @@ import { AdminConsultantTips } from './admin/AdminConsultantTips';
 import { AdminExplanatoryCards } from './admin/AdminExplanatoryCards';
 import { AdminAuditLogs } from './admin/AdminAuditLogs';
 import { AdminSystemStatus } from './admin/AdminSystemStatus';
+import { AdminExecutionMonitor } from './admin/AdminExecutionMonitor';
 import AdminContatos from './admin/AdminContatos';
 import AdminCentralDeAjuda from './admin/AdminCentralDeAjuda';
 import { AdminEmails } from './admin/AdminEmails';
@@ -70,6 +71,7 @@ const adminTabs = [
   { id: 'identidade-visual', label: 'Identidade Visual', icon: Palette },
   { id: 'cards-explicativos', label: 'Cards Explicativos', icon: Eye },
   { id: 'system-status', label: 'Status Sistema', icon: Activity },
+  { id: 'execution-monitor', label: 'Motor Execução', icon: Zap },
   { id: 'contatos', label: 'Contatos', icon: Users },
   { id: 'central-de-ajuda', label: 'Central Ajuda', icon: HelpCircle },
   { id: 'emails', label: 'Comunicação', icon: Mail },
@@ -151,6 +153,7 @@ export default function Admin() {
           <Route path="dica-consultor" element={<AdminConsultantTips />} />
           <Route path="cards-explicativos" element={<AdminExplanatoryCards />} />
           <Route path="system-status" element={<AdminSystemStatus />} />
+          <Route path="execution-monitor" element={<AdminExecutionMonitor />} />
           <Route path="contatos" element={<AdminContatos />} />
           <Route path="central-de-ajuda" element={<AdminCentralDeAjuda />} />
           <Route path="emails" element={<AdminEmails />} />

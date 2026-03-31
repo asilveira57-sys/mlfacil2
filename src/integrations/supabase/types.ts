@@ -4924,6 +4924,168 @@ export type Database = {
           },
         ]
       }
+      execution_logs: {
+        Row: {
+          cooldown_applied: number | null
+          created_at: string
+          decision: string
+          execution_ms: number | null
+          id: string
+          is_manual_override: boolean | null
+          items_processed: number | null
+          metadata: Json | null
+          priority: string | null
+          reason: string | null
+          routine_key: string
+          seller_id: string
+        }
+        Insert: {
+          cooldown_applied?: number | null
+          created_at?: string
+          decision: string
+          execution_ms?: number | null
+          id?: string
+          is_manual_override?: boolean | null
+          items_processed?: number | null
+          metadata?: Json | null
+          priority?: string | null
+          reason?: string | null
+          routine_key: string
+          seller_id: string
+        }
+        Update: {
+          cooldown_applied?: number | null
+          created_at?: string
+          decision?: string
+          execution_ms?: number | null
+          id?: string
+          is_manual_override?: boolean | null
+          items_processed?: number | null
+          metadata?: Json | null
+          priority?: string | null
+          reason?: string | null
+          routine_key?: string
+          seller_id?: string
+        }
+        Relationships: []
+      }
+      execution_policies: {
+        Row: {
+          cooldown_high: number
+          cooldown_low: number
+          cooldown_medium: number
+          cooldown_zero: number
+          created_at: string
+          default_cooldown_minutes: number
+          enabled: boolean
+          id: string
+          max_runs_per_day: number
+          requires_active_listings: boolean
+          requires_recent_activity: boolean
+          routine_key: string
+          updated_at: string
+        }
+        Insert: {
+          cooldown_high?: number
+          cooldown_low?: number
+          cooldown_medium?: number
+          cooldown_zero?: number
+          created_at?: string
+          default_cooldown_minutes?: number
+          enabled?: boolean
+          id?: string
+          max_runs_per_day?: number
+          requires_active_listings?: boolean
+          requires_recent_activity?: boolean
+          routine_key: string
+          updated_at?: string
+        }
+        Update: {
+          cooldown_high?: number
+          cooldown_low?: number
+          cooldown_medium?: number
+          cooldown_zero?: number
+          created_at?: string
+          default_cooldown_minutes?: number
+          enabled?: boolean
+          id?: string
+          max_runs_per_day?: number
+          requires_active_listings?: boolean
+          requires_recent_activity?: boolean
+          routine_key?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      execution_state: {
+        Row: {
+          active_listings_count: number
+          activity_level: string
+          consecutive_no_result: number
+          cooldown_minutes_applied: number
+          created_at: string
+          daily_run_count: number
+          daily_run_date: string
+          eligible_to_run: boolean
+          id: string
+          last_run_at: string | null
+          last_skipped_at: string | null
+          last_success_at: string | null
+          next_eligible_run_at: string | null
+          priority_level: string
+          recent_questions_24h: number
+          recent_sales_7d: number
+          routine_key: string
+          seller_id: string
+          tenant_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          active_listings_count?: number
+          activity_level?: string
+          consecutive_no_result?: number
+          cooldown_minutes_applied?: number
+          created_at?: string
+          daily_run_count?: number
+          daily_run_date?: string
+          eligible_to_run?: boolean
+          id?: string
+          last_run_at?: string | null
+          last_skipped_at?: string | null
+          last_success_at?: string | null
+          next_eligible_run_at?: string | null
+          priority_level?: string
+          recent_questions_24h?: number
+          recent_sales_7d?: number
+          routine_key: string
+          seller_id: string
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active_listings_count?: number
+          activity_level?: string
+          consecutive_no_result?: number
+          cooldown_minutes_applied?: number
+          created_at?: string
+          daily_run_count?: number
+          daily_run_date?: string
+          eligible_to_run?: boolean
+          id?: string
+          last_run_at?: string | null
+          last_skipped_at?: string | null
+          last_success_at?: string | null
+          next_eligible_run_at?: string | null
+          priority_level?: string
+          recent_questions_24h?: number
+          recent_sales_7d?: number
+          routine_key?: string
+          seller_id?: string
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       feedback_display_rules: {
         Row: {
           cooldown_days: number
@@ -21388,6 +21550,21 @@ export type Database = {
         }
         Returns: string
       }
+      log_execution_result: {
+        Args: {
+          p_cooldown: number
+          p_decision: string
+          p_execution_ms?: number
+          p_is_manual?: boolean
+          p_items_processed?: number
+          p_metadata?: Json
+          p_priority: string
+          p_reason: string
+          p_routine_key: string
+          p_seller_id: string
+        }
+        Returns: undefined
+      }
       move_to_dlq: {
         Args: {
           dlq_name: string
@@ -21531,6 +21708,14 @@ export type Database = {
         }
         Returns: Json
       }
+      should_run_routine: {
+        Args: {
+          p_is_manual?: boolean
+          p_routine_key: string
+          p_seller_id: string
+        }
+        Returns: Json
+      }
       snooze_notification: {
         Args: { p_notification_id: string; p_snooze_hours?: number }
         Returns: undefined
@@ -21550,6 +21735,16 @@ export type Database = {
           p_module_slug: string
           p_seller_id: string
           p_user_id: string
+        }
+        Returns: undefined
+      }
+      update_execution_priority: {
+        Args: {
+          p_active_listings?: number
+          p_recent_questions_24h?: number
+          p_recent_sales_7d?: number
+          p_routine_key: string
+          p_seller_id: string
         }
         Returns: undefined
       }
