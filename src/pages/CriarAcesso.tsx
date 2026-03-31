@@ -373,6 +373,7 @@ function VerifyEmailState({ email, t }: { email: string; t: any }) {
   }, [email, countdown]);
 
   return (
+    <>
     <div className="text-center space-y-4 py-6">
       <div className="flex justify-center">
         <div className="w-14 h-14 bg-primary/10 rounded-full flex items-center justify-center">
