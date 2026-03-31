@@ -3894,7 +3894,7 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
 }
 
 // ============================================================================
-// NIGHTLY CRON — with seller cursor and self-chain for continuation
+// NIGHTLY CRON — with seller cursor, self-chain AND execution engine
 // ============================================================================
 async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, skipSync?: boolean) {
   console.log(`[rad-collector] NIGHTLY CRON started (cursor: ${lastProcessedSellerId || "start"}, skipSync: ${!!skipSync})`);
@@ -3924,12 +3924,76 @@ async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, 
 
   const results: any[] = [];
   let lastProcessed: string | null = null;
+  let skippedCount = 0;
+  let deferredCount = 0;
 
   for (let si = startIdx; si < sellerIds.length; si++) {
     const sellerId = sellerIds[si];
     const sellerStart = Date.now();
 
     try {
+      // ── Execution Engine: check eligibility ──
+      // First update priority metrics from cached listings count
+      const { count: activeCount } = await supabase
+        .from("meli_listings_cache")
+        .select("id", { count: 'exact', head: true })
+        .eq("seller_id", sellerId)
+        .eq("status", "active");
+
+      const { count: salesCount } = await supabase
+        .from("meli_order_items_cache")
+        .select("id", { count: 'exact', head: true })
+        .eq("seller_id", sellerId)
+        .gte("date_created", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+
+      await supabase.rpc('update_execution_priority', {
+        p_seller_id: sellerId,
+        p_routine_key: 'radiography_collect',
+        p_active_listings: activeCount || 0,
+        p_recent_sales_7d: salesCount || 0,
+        p_recent_questions_24h: 0,
+      });
+
+      // Ask the engine
+      const { data: decision } = await supabase.rpc('should_run_routine', {
+        p_seller_id: sellerId,
+        p_routine_key: 'radiography_collect',
+        p_is_manual: false,
+      });
+
+      const dec = decision || { decision: 'run', reason: 'no_engine', priority_level: 'medium', cooldown_applied: 0 };
+
+      if (dec.decision === 'skip') {
+        console.log(`[rad-collector] SKIP seller ${sellerId}: ${dec.reason} (priority: ${dec.priority_level})`);
+        await supabase.rpc('log_execution_result', {
+          p_seller_id: sellerId, p_routine_key: 'radiography_collect',
+          p_decision: 'skip', p_reason: dec.reason, p_priority: dec.priority_level,
+          p_cooldown: dec.cooldown_applied || 0, p_execution_ms: 0, p_items_processed: 0,
+          p_is_manual: false, p_metadata: {},
+        });
+        skippedCount++;
+        results.push({ seller_id: sellerId, decision: 'skip', reason: dec.reason });
+        lastProcessed = sellerId;
+        continue;
+      }
+
+      if (dec.decision === 'defer') {
+        console.log(`[rad-collector] DEFER seller ${sellerId}: ${dec.reason} (next: ${dec.next_eligible_run_at})`);
+        await supabase.rpc('log_execution_result', {
+          p_seller_id: sellerId, p_routine_key: 'radiography_collect',
+          p_decision: 'defer', p_reason: dec.reason, p_priority: dec.priority_level,
+          p_cooldown: dec.cooldown_applied || 0, p_execution_ms: 0, p_items_processed: 0,
+          p_is_manual: false, p_metadata: {},
+        });
+        deferredCount++;
+        results.push({ seller_id: sellerId, decision: 'defer', reason: dec.reason });
+        lastProcessed = sellerId;
+        continue;
+      }
+
+      console.log(`[rad-collector] RUN seller ${sellerId} (priority: ${dec.priority_level}, cooldown: ${dec.cooldown_applied}min)`);
+
+      // ── Actual processing ──
       // AJUSTE #5: Sync only if not skipped and last_sync_at is old (> 7 days)
       if (!skipSync) {
         const { data: lastSyncRow } = await supabase
@@ -3951,8 +4015,17 @@ async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, 
         }
       }
 
-      // Collection always runs (eligibility is per-item)
+      // Collection
       const collResult = await handleCollection(supabase, sellerId, Date.now());
+      const itemsProcessed = collResult?.items_processed || collResult?.processed || 0;
+
+      // Log execution result
+      await supabase.rpc('log_execution_result', {
+        p_seller_id: sellerId, p_routine_key: 'radiography_collect',
+        p_decision: 'run', p_reason: 'eligible', p_priority: dec.priority_level,
+        p_cooldown: dec.cooldown_applied || 0, p_execution_ms: Date.now() - sellerStart,
+        p_items_processed: itemsProcessed, p_is_manual: false, p_metadata: {},
+      });
 
       // Trigger backfill if needed
       const { data: backfillCtrl } = await supabase
@@ -3968,7 +4041,7 @@ async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, 
       // Run intelligent analysis after collection
       selfChain(sellerId, "analyze");
 
-      results.push({ seller_id: sellerId, collection: collResult });
+      results.push({ seller_id: sellerId, collection: collResult, decision: 'run', priority: dec.priority_level });
       lastProcessed = sellerId;
     } catch (err) {
       console.error(`[rad-collector] Error processing seller ${sellerId}:`, err);
