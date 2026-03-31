@@ -4062,8 +4062,8 @@ async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, 
     }
   }
 
-  console.log(`[rad-collector] NIGHTLY CRON complete: ${results.length}/${sellerIds.length} sellers`);
-  return { success: true, sellers_processed: results.length, total_sellers: sellerIds.length, results };
+  console.log(`[rad-collector] NIGHTLY CRON complete: ${results.length}/${sellerIds.length} sellers (skipped=${skippedCount}, deferred=${deferredCount})`);
+  return { success: true, sellers_processed: results.length, total_sellers: sellerIds.length, skipped: skippedCount, deferred: deferredCount, results };
 }
 
 // ============================================================================
