@@ -199,6 +199,8 @@ export default function PublicLayout({ children }: PublicLayoutProps) {
           </div>
         </div>
       </footer>
+
+      <WhatsAppFloatingButton />
     </div>
   );
 }
