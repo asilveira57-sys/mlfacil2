@@ -73,7 +73,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
 
     const moduleKey = getModuleKeyFromRouteSync(location.pathname);
     
-    const publicRoutes = ['/dashboard', '/settings', '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/'];
+    const publicRoutes = ['/dashboard', '/settings', '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/reset-password', '/'];
     if (publicRoutes.includes(location.pathname)) return;
 
     if (!moduleKey) return;

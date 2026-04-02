@@ -28,7 +28,7 @@ export function TrialExpiredPaywall() {
     '/planos', '/settings', '/auth', '/contato',
     '/home', '/blog', '/suporte', '/central-de-ajuda',
     '/termos-de-uso', '/politica-de-privacidade', '/politica-de-cookies',
-    '/lgpd', '/status', '/criar-acesso', '/primeiro-acesso',
+    '/lgpd', '/status', '/criar-acesso', '/primeiro-acesso', '/reset-password',
   ].some(p => location.pathname.startsWith(p));
   
   // Also exclude exact root path (landing page)
