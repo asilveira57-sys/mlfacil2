@@ -1,0 +1,2 @@
+ALTER TABLE public.user_consents DROP CONSTRAINT user_consents_source_check;
+ALTER TABLE public.user_consents ADD CONSTRAINT user_consents_source_check CHECK (source = ANY (ARRAY['banner'::text, 'settings'::text, 'system'::text, 'system_rating_modal'::text, 'signup'::text, 'module_rating_modal'::text]));
