@@ -197,7 +197,7 @@ export default function ShippingLabels() {
     </Button>
   );
 
-  if (accountLoading || !initialized) {
+  if (accountLoading || !initialized || mlAccessLoading) {
     return (
       <PageContainer title={t('title')}>
         <div className="flex items-center justify-center h-64">
@@ -205,6 +205,11 @@ export default function ShippingLabels() {
         </div>
       </PageContainer>
     );
+  }
+
+  // Show friendly expired screen instead of loading data that will fail
+  if (!mlAllowed && isTrialExpired) {
+    return <TrialExpiredScreen title={t('title')} />;
   }
 
   return (
