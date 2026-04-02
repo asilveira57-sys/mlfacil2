@@ -833,11 +833,16 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
     } catch (error) {
       console.error('Repair error:', error);
-      toast({
-        title: 'Erro no reparo',
-        description: error instanceof Error ? error.message : 'Erro desconhecido',
-        variant: 'destructive',
-      });
+      const isTrialError = error instanceof Error && error.message === 'TRIAL_EXPIRED';
+      if (isTrialError) {
+        sonnerToast.error('Seu período de teste expirou. Assine um plano para continuar sincronizando.', { id: 'trial-expired' });
+      } else {
+        toast({
+          title: 'Erro no reparo',
+          description: error instanceof Error ? error.message : 'Erro desconhecido',
+          variant: 'destructive',
+        });
+      }
       setIsSyncing(false);
       setSyncPhase('idle');
       setSyncProgress('');
