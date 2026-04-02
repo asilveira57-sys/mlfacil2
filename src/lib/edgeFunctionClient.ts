@@ -170,11 +170,18 @@ export async function invokeEdgeFunction<T = unknown>(
         ? parsed.error 
         : (parsed.error as Record<string, unknown>)?.message || 'Erro no servidor';
       
+      const parsedErrorCode = (parsed.error_code as string) || 'SERVER_ERROR';
+      
+      // Detect trial expired in parsed response
+      if (parsedErrorCode === 'TRIAL_EXPIRED') {
+        toast.error('Seu período de teste expirou. Assine um plano para continuar.', { id: 'trial-expired' });
+      }
+      
       return {
         success: false,
         data: null,
         error: errorMsg as string,
-        errorCode: (parsed.error_code as string) || 'SERVER_ERROR',
+        errorCode: parsedErrorCode,
         rawResponse: parsed,
       };
     }
