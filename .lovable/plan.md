@@ -1,50 +1,56 @@
 
 
-# Correção: Etiquetas bloqueadas por inconsistência no controle de acesso
+# Correção: Acesso bloqueado + UX de plano expirado
 
-## Diagnóstico
+## Problema 1: Bug no `check_ml_api_access` (tenant_id errado)
 
-O usuário ADECONEX (etiquetacapixaba2@gmail.com) está com trial expirado desde 27/03 na tabela `companies` e sem nenhum registro em `subscriptions`. Toda vez que tenta usar etiquetas, as edge functions chamam `check_ml_api_access`, que retorna 402 TRIAL_EXPIRED.
+A função SQL consulta `tenant_entitlements WHERE tenant_id = v_company.id` (o UUID da company), mas o entitlement do ADECONEX está registrado em `tenant_id = 'a1000001-...'` — que é o campo `companies.tenant_id`, não `companies.id`.
 
-Há uma inconsistência de dados:
-- `user_access_state`: `payment_status = active`, `trial_end_at = 2028` 
-- `companies`: `trial_ends_at = 2026-03-27` (expirado), sem subscription
+**Dados atuais:**
+- `companies.id` = `bf1b9ced-...` 
+- `companies.tenant_id` = `a1000001-...`
+- `tenant_entitlements.tenant_id` = `a1000001-...` (ativo até 2028)
 
-A função `check_ml_api_access` só consulta `companies` + `subscriptions`, ignorando `tenant_entitlements` (sistema novo de billing).
+A query nunca encontra o entitlement porque compara IDs diferentes.
 
-## Plano de Correção
+**Correção:** Alterar a query do fallback de entitlements para usar `v_company.tenant_id` (quando disponível) além de `v_company.id`:
 
-### 1. Atualizar `check_ml_api_access` para consultar `tenant_entitlements`
-
-Adicionar fallback na função SQL: após verificar `subscriptions` (tabela legada), também consultar `tenant_entitlements` com status ativo e período válido. Se encontrar entitlement ativo, liberar acesso.
-
-```text
-companies.trial → subscriptions → tenant_entitlements (fallback)
+```sql
+WHERE te.tenant_id IN (v_company.id, v_company.tenant_id)
 ```
 
-### 2. Corrigir dados inconsistentes do `user_access_state`
+## Problema 2: UX — erro genérico em vez de tela de "renove seu plano"
 
-Atualizar o registro deste usuário para refletir a realidade (trial expirado, sem assinatura ativa).
+Quando o trial expira, o frontend mostra um toast + o erro cai no error boundary (tela vermelha "Error"). Deveria mostrar uma tela informativa com botão para ir ao plano.
 
-### 3. Melhorar tratamento de erro no frontend
+**Correção:**
+- Na página `ShippingLabels.tsx`, verificar o estado de acesso ML via `useMlApiAccess()` (hook que já existe em `TrialExpiredBanner.tsx`)
+- Se `isTrialExpired` for true, renderizar uma tela dedicada de "Plano expirado" com botão "Assinar plano" em vez de carregar toda a página de etiquetas
+- Isso elimina a necessidade de sincronização e evita qualquer crash
 
-Garantir que quando o erro 402 ocorre em qualquer chamada de edge function no fluxo de etiquetas, a UI mostra uma mensagem clara com link para ativar plano em vez de tela branca.
+## Plano de execução
 
-## Detalhes Técnicos
+### 1. Migration SQL — Corrigir `check_ml_api_access`
+Recriar a função para que o bloco de fallback `tenant_entitlements` consulte tanto `v_company.id` quanto `v_company.tenant_id`:
 
-**Migration SQL** — Recriar `check_ml_api_access`:
-- Após o check de `subscriptions`, adicionar bloco que consulta `tenant_entitlements` via `tenant_members` (ou fallback direto por tenant_id = company_id)
-- Se encontrar entitlement tier ativo com `current_period_end > now()`, retornar `allowed: true, reason: 'active_entitlement'`
+```sql
+WHERE te.tenant_id IN (v_company.id, COALESCE(v_company.tenant_id, v_company.id))
+  AND te.status = 'active'
+  AND te.current_period_end > now()
+```
 
-**Migration SQL** — Fix dados:
-- `UPDATE user_access_state SET trial_status = 'expired', payment_status = 'blocked' WHERE user_id = '433a4292-92c0-4ced-9c29-f1199f990d9a'`
+### 2. Frontend — Tela de plano expirado na ShippingLabels
+No `ShippingLabels.tsx`, usar o hook `useMlApiAccess()` para verificar se o acesso está bloqueado. Se `isTrialExpired`, renderizar uma tela clara com:
+- Ícone e título "Período de teste finalizado"
+- Mensagem explicativa
+- Botão "Ver planos" que navega para `/settings?section=plano`
+- Sem carregar a tabela de pedidos ou tentar sincronizar
 
-**Frontend** — `useShippingLabels.ts`:
-- O tratamento de TRIAL_EXPIRED já foi adicionado nas mensagens anteriores; verificar que cobre todos os pontos de chamada
+### 3. Tratamento global no edgeFunctionClient
+Garantir que o `edgeFunctionClient.ts` ao receber TRIAL_EXPIRED não dispare erro que caia no error boundary — apenas retorne graciosamente.
 
-## Resultado Esperado
-
-- Usuários com `tenant_entitlements` ativo terão acesso mesmo sem registro na tabela legada `subscriptions`
-- Usuários sem nenhum plano verão mensagem clara pedindo ativação
-- Sem tela branca em nenhum cenário
+## Resultado
+- ADECONEX volta a funcionar imediatamente (entitlement encontrado)
+- Qualquer usuário com trial expirado vê tela amigável em vez de erro
+- Sem perda de funcionalidade existente
 
