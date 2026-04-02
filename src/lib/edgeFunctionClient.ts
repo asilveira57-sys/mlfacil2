@@ -4,6 +4,7 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 // Standard API response structure
 export interface ApiResponse<T = unknown> {
