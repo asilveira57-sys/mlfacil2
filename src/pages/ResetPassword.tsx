@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { Loader2, Eye, EyeOff, CheckCircle } from 'lucide-react';
+import WhatsAppFloatingButton from '@/components/WhatsAppFloatingButton';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
