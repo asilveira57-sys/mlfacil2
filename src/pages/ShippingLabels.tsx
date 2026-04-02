@@ -18,6 +18,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparationReport';
+import { useMlApiAccess } from '@/components/access/TrialExpiredBanner';
+import { TrialExpiredScreen } from '@/components/shipping/TrialExpiredScreen';
 
 export default function ShippingLabels() {
   const { t } = useTranslation('shipping');
@@ -31,6 +33,7 @@ export default function ShippingLabels() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [logisticFilter, setLogisticFilter] = useState<'all' | 'flex' | 'coleta' | 'full'>('all');
   const { isAdmin } = useUserRole();
+  const { allowed: mlAllowed, loading: mlAccessLoading, isTrialExpired } = useMlApiAccess();
   const companyId = activeAccount?.companyId || null;
 
   // Shipping cutoff
@@ -194,7 +197,7 @@ export default function ShippingLabels() {
     </Button>
   );
 
-  if (accountLoading || !initialized) {
+  if (accountLoading || !initialized || mlAccessLoading) {
     return (
       <PageContainer title={t('title')}>
         <div className="flex items-center justify-center h-64">
@@ -202,6 +205,11 @@ export default function ShippingLabels() {
         </div>
       </PageContainer>
     );
+  }
+
+  // Show friendly expired screen instead of loading data that will fail
+  if (!mlAllowed && isTrialExpired) {
+    return <TrialExpiredScreen title={t('title')} />;
   }
 
   return (
