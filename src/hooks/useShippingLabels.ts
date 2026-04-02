@@ -4,6 +4,16 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { startOfDay, endOfDay, subDays, subHours } from 'date-fns';
+import { toast as sonnerToast } from 'sonner';
+
+/** Check if edge function response indicates trial expired (402) */
+function isTrialExpiredResponse(response: { data?: any; error?: any }): boolean {
+  const errorBody = response.error?.context?.body || response.error?.message || '';
+  const parsed = typeof errorBody === 'string' ? (() => { try { return JSON.parse(errorBody); } catch { return null; } })() : errorBody;
+  if (parsed?.error_code === 'TRIAL_EXPIRED') return true;
+  if (response.data?.error_code === 'TRIAL_EXPIRED') return true;
+  return false;
+}
 
 export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
 export type PeriodFilter = 'all' | 'today_sales' | 'today' | '7d' | '15d' | '30d' | 'custom';
@@ -497,6 +507,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           date_to: dateTo || new Date().toISOString(),
         },
       });
+
+      // Abort if trial expired
+      if (isTrialExpiredResponse(ordersResponse)) {
+        sonnerToast.error('Seu período de teste expirou. Assine um plano para continuar sincronizando.', { id: 'trial-expired' });
+        setIsSyncing(false);
+        setSyncPhase('idle');
+        setSyncProgress('');
+        return;
+      }
 
       if (ordersResponse.data?.job_id) {
         if (!silent) setSyncProgress('Aguardando pedidos...');
