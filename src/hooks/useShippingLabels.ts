@@ -588,6 +588,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             body: { seller_id: sellerId, shipment_ids: batch },
           });
           
+          if (isTrialExpiredResponse(shipmentsResponse)) {
+            throw new Error('TRIAL_EXPIRED');
+          }
+          
           if (shipmentsResponse.data?.job_id) {
             await waitForJob(shipmentsResponse.data.job_id, silent);
           }
@@ -625,6 +629,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             headers,
             body: { seller_id: sellerId, shipment_ids: batch },
           });
+          
+          if (isTrialExpiredResponse(resp)) {
+            throw new Error('TRIAL_EXPIRED');
+          }
           if (resp.data?.job_id) {
             await waitForJob(resp.data.job_id, silent);
           }
@@ -672,6 +680,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
               body: { seller_id: sellerId, order_ids: batch },
             });
             
+            if (isTrialExpiredResponse(invoicesResponse)) {
+              throw new Error('TRIAL_EXPIRED');
+            }
+            
             if (invoicesResponse.data?.job_id) {
               await waitForJob(invoicesResponse.data.job_id, silent);
             }
@@ -701,7 +713,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
     } catch (error) {
       console.error('Sync pipeline error:', error);
-      if (!silent) {
+      const isTrialError = error instanceof Error && error.message === 'TRIAL_EXPIRED';
+      if (isTrialError) {
+        sonnerToast.error('Seu período de teste expirou. Assine um plano para continuar sincronizando.', { id: 'trial-expired' });
+      } else if (!silent) {
         toast({
           title: 'Erro na sincronização',
           description: error instanceof Error ? error.message : 'Erro desconhecido',
