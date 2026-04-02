@@ -508,6 +508,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         },
       });
 
+      // Abort if trial expired
+      if (isTrialExpiredResponse(ordersResponse)) {
+        sonnerToast.error('Seu período de teste expirou. Assine um plano para continuar sincronizando.', { id: 'trial-expired' });
+        setIsSyncing(false);
+        setSyncPhase('idle');
+        setSyncProgress('');
+        return;
+      }
+
       if (ordersResponse.data?.job_id) {
         if (!silent) setSyncProgress('Aguardando pedidos...');
         await waitForJob(ordersResponse.data.job_id, silent);
