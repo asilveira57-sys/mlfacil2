@@ -132,6 +132,7 @@ export default function ResetPassword() {
           )}
         </CardContent>
       </Card>
+      <WhatsAppFloatingButton />
     </div>
   );
 }
