@@ -216,6 +216,7 @@ export async function invokeEdgeFunction<T = unknown>(
  * Error codes and their user-friendly messages
  */
 export const ERROR_MESSAGES: Record<string, string> = {
+  TRIAL_EXPIRED: 'Seu período de teste expirou. Assine um plano para continuar.',
   INVOKE_ERROR: 'Erro ao conectar com o servidor. Tente novamente.',
   EMPTY_RESPONSE: 'O servidor não retornou dados. Tente sincronizar novamente.',
   INVALID_JSON: 'Resposta inválida do servidor. Entre em contato com o suporte.',
