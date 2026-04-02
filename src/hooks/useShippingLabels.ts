@@ -802,6 +802,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           headers,
           body: { seller_id: sellerId, shipment_ids: batch },
         });
+
+        if (isTrialExpiredResponse(resp)) {
+          throw new Error('TRIAL_EXPIRED');
+        }
         
         if (resp.data?.job_id) {
           await waitForJob(resp.data.job_id, false);
