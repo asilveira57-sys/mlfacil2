@@ -97,9 +97,23 @@ export async function invokeEdgeFunction<T = unknown>(
     const elapsed = Date.now() - startTime;
     console.log(`[EdgeFunction] ${functionName} completed in ${elapsed}ms`);
 
-    // Handle Supabase client-level error
+    // Handle Supabase client-level error (includes HTTP 4xx/5xx from edge functions)
     if (error) {
       console.error(`[EdgeFunction] ${functionName} client error:`, error);
+
+      // Detect trial expired (402) — the SDK puts the JSON body in error.context
+      const errorBody = safeJsonParse<Record<string, unknown>>(error.context?.body || error.message || '');
+      const errorCode = (errorBody as any)?.error_code || '';
+      if (errorCode === 'TRIAL_EXPIRED' || error.message?.includes('TRIAL_EXPIRED')) {
+        toast.error('Seu período de teste expirou. Assine um plano para continuar.', { id: 'trial-expired' });
+        return {
+          success: false,
+          data: null,
+          error: 'Trial expirado',
+          errorCode: 'TRIAL_EXPIRED',
+          rawResponse: error,
+        };
+      }
 
        // Common parse failure when server returns empty/invalid JSON
       const msg = error.message || 'Erro ao chamar função';
