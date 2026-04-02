@@ -713,7 +713,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
     } catch (error) {
       console.error('Sync pipeline error:', error);
-      if (!silent) {
+      const isTrialError = error instanceof Error && error.message === 'TRIAL_EXPIRED';
+      if (isTrialError) {
+        sonnerToast.error('Seu período de teste expirou. Assine um plano para continuar sincronizando.', { id: 'trial-expired' });
+      } else if (!silent) {
         toast({
           title: 'Erro na sincronização',
           description: error instanceof Error ? error.message : 'Erro desconhecido',
