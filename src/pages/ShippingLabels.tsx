@@ -18,6 +18,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparationReport';
+import { useMlApiAccess } from '@/components/access/TrialExpiredBanner';
+import { TrialExpiredScreen } from '@/components/shipping/TrialExpiredScreen';
 
 export default function ShippingLabels() {
   const { t } = useTranslation('shipping');
