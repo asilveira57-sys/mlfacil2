@@ -207,7 +207,7 @@ const SettingsPlan = () => {
                     </span>
                   </div>
                 )}
-                {trialDaysRemaining > 0 && trialDaysRemaining <= 3 && (
+                {trialDaysRemaining > 0 && trialDaysRemaining <= 7 && (
                   <Badge variant="destructive" className="mt-3">
                     {t('settings:plan.trial_ending_soon')}
                   </Badge>
