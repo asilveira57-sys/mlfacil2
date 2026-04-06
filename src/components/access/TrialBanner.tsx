@@ -44,7 +44,7 @@ export function TrialBanner({ className, compact = false }: TrialBannerProps) {
 
   // Trial active - show info banner
   if (isActive) {
-    const isUrgent = daysRemaining <= 3;
+    const isUrgent = daysRemaining <= 7;
     
     return (
       <div className={cn('space-y-2', className)}>
@@ -58,7 +58,7 @@ export function TrialBanner({ className, compact = false }: TrialBannerProps) {
           <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
             <span>
               {isUrgent ? (
-                <strong>Apenas {daysRemaining} dia{daysRemaining !== 1 ? 's' : ''} restante{daysRemaining !== 1 ? 's' : ''} de teste!</strong>
+                <strong>Seu prazo acaba em {daysRemaining} dia{daysRemaining !== 1 ? 's' : ''}. Renove para evitar bloqueio.</strong>
               ) : (
                 <>
                   <Sparkles className="inline h-3.5 w-3.5 mr-1 text-primary" />
