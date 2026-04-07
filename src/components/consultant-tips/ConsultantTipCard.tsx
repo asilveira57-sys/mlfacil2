@@ -99,12 +99,12 @@ export function ConsultantTipCard({ tip, compact = false, className }: Props) {
 
         {/* Content */}
         {!compact && (
-          <div className="flex-1">
+          <div className="flex-1 min-h-0">
             {/* Main text */}
             {body && (
               <p className={cn(
                 'text-sm text-muted-foreground leading-relaxed',
-                !expanded && 'line-clamp-4'
+                !expanded && 'line-clamp-3'
               )}>
                 {body}
               </p>
@@ -123,10 +123,10 @@ export function ConsultantTipCard({ tip, compact = false, className }: Props) {
             )}
 
             {/* Expand toggle */}
-            {body.length > 180 && (
+            {body.length > 100 && (
               <button
                 onClick={handleExpand}
-                className="mt-2 flex items-center gap-1 text-xs text-primary hover:underline"
+                className="mt-2 flex items-center gap-1 text-xs font-medium text-primary hover:underline shrink-0"
               >
                 {expanded ? 'Ver menos' : 'Ver mais'}
                 <ChevronRight className={cn('h-3 w-3 transition-transform', expanded && 'rotate-90')} />
