@@ -66,6 +66,28 @@ export function AdminClientes() {
   const [clientToDelete, setClientToDelete] = useState<AdminClient | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
+  // Sorting
+  type SortKey = 'full_name' | 'company_name' | 'status' | 'trial' | 'profile_created_at' | 'last_access' | 'tag';
+  type SortDir = 'asc' | 'desc';
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const handleSort = useCallback((key: SortKey) => {
+    if (sortKey === key) {
+      if (sortDir === 'desc') setSortDir('asc');
+      else { setSortKey(null); setSortDir('desc'); }
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+    setCurrentPage(1);
+  }, [sortKey, sortDir]);
+
+  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
+    if (sortKey !== columnKey) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortDir === 'desc' ? <ArrowDown className="h-3 w-3 ml-1" /> : <ArrowUp className="h-3 w-3 ml-1" />;
+  };
+
   // Trial adjustment dialog
   const [trialOpen, setTrialOpen] = useState(false);
   const [trialDays, setTrialDays] = useState('7');
@@ -73,7 +95,7 @@ export function AdminClientes() {
 
   const filtered = useMemo(() => {
     if (!clients) return [];
-    return clients.filter((c) => {
+    let result = clients.filter((c) => {
       const matchesSearch =
         !search ||
         c.full_name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -88,7 +110,63 @@ export function AdminClientes() {
 
       return matchesSearch && matchesStatus;
     });
-  }, [clients, search, statusFilter]);
+
+    if (sortKey) {
+      result = [...result].sort((a, b) => {
+        let aVal: string | number | null = null;
+        let bVal: string | number | null = null;
+
+        switch (sortKey) {
+          case 'full_name':
+            aVal = (a.full_name || '').toLowerCase();
+            bVal = (b.full_name || '').toLowerCase();
+            break;
+          case 'company_name':
+            aVal = (a.company_name || '').toLowerCase();
+            bVal = (b.company_name || '').toLowerCase();
+            break;
+          case 'status': {
+            const statusOrder = (c: AdminClient) => {
+              if (c.payment_status === 'active') return 4;
+              if (c.trial_status === 'active') return 3;
+              if (c.trial_status === 'expired') return 1;
+              if (c.payment_status === 'blocked') return 0;
+              return 2;
+            };
+            aVal = statusOrder(a);
+            bVal = statusOrder(b);
+            break;
+          }
+          case 'trial':
+            aVal = a.trial_end_at ? new Date(a.trial_end_at).getTime() : 0;
+            bVal = b.trial_end_at ? new Date(b.trial_end_at).getTime() : 0;
+            break;
+          case 'profile_created_at':
+            aVal = new Date(a.profile_created_at).getTime();
+            bVal = new Date(b.profile_created_at).getTime();
+            break;
+          case 'last_access': {
+            const aDate = a.last_activity_at || a.last_sign_in_at;
+            const bDate = b.last_activity_at || b.last_sign_in_at;
+            aVal = aDate ? new Date(aDate).getTime() : 0;
+            bVal = bDate ? new Date(bDate).getTime() : 0;
+            break;
+          }
+          case 'tag':
+            aVal = (a.tag || '').toLowerCase();
+            bVal = (b.tag || '').toLowerCase();
+            break;
+        }
+
+        if (aVal === null || bVal === null) return 0;
+        if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [clients, search, statusFilter, sortKey, sortDir]);
 
   // Reset page when filters change
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
