@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useAdminClients, useDeleteClient, type AdminClient } from '@/hooks/useAdminClients';
 import { supabase } from '@/integrations/supabase/client';
 import { useAdminTrialManagement } from '@/hooks/useAdmin';
