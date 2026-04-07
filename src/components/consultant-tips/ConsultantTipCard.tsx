@@ -60,11 +60,11 @@ export function ConsultantTipCard({ tip, compact = false, className }: Props) {
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden transition-all duration-200',
+        'rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden transition-all duration-200 flex flex-col',
         'hover:shadow-md hover:border-primary/20',
         className
       )}
-      style={{ aspectRatio: compact ? undefined : '2/3', maxWidth: compact ? undefined : 360 }}
+      style={{ maxWidth: compact ? undefined : 360 }}
     >
       {/* Header strip */}
       <div className="flex items-center gap-2 px-4 py-3 bg-primary/5 border-b border-border/40">
