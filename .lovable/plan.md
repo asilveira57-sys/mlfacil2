@@ -1,52 +1,75 @@
 
+Diagnóstico confirmado
 
-# Correção: Ativação travada em 80% para usuários em trial
+- O dashboard admin não está “sem dados”; ele está falhando ao carregar e o frontend mascara a falha como zero.
+- A causa raiz está no backend function `public.get_admin_dashboard_stats()`: ele referencia `public.mp_webhook_logs`, mas essa tabela não existe no banco atual.
+- Evidência direta: a chamada do `/admin` para `get_admin_dashboard_stats` retorna erro `42P01: relation "public.mp_webhook_logs" does not exist`.
+- Os dados reais existem:
+  - usuários cadastrados: 111
+  - registros em `user_access_state`: 110
+  - trials ativos: 105
+  - assinaturas ativas: 2
+- O acesso admin não é o problema: seu usuário está com role `admin`.
+- Há um segundo defeito estrutural: `useWebhookLogs()` está como stub/mock, chama a RPC errada e sempre retorna `[]`, então a parte de webhooks também nunca ficaria correta mesmo após o ajuste principal.
 
-## Diagnóstico
+Plano de correção definitiva
 
-O usuário Magma (magmacomercio@hotmail.com) está com:
-- `onboarding_status: completed` ✓
-- `ml_account_connected: true` ✓
-- `trial_status: active` ✓
-- `payment_status: trial`
-- `active_subscription_id: null`
+1. Corrigir a fonte do dashboard no backend
+- Recriar `public.get_admin_dashboard_stats()` para usar apenas tabelas reais do modelo atual.
+- Substituir `public.mp_webhook_logs` por `public.webhook_events` no cálculo de webhooks pendentes.
+- Manter as contagens principais com base no estado atual do sistema:
+  - `total_users` via `auth.users`
+  - `trial_users` via `public.user_access_state`
+  - `active_subscriptions` via `public.user_access_state`/modelo atual
+  - `expired_subscriptions` via `public.user_access_state`
+- Ajustar `trials_expiring_soon` para 7 dias, alinhando com a regra já definida para avisos.
 
-O problema está na linha 52 do `ActivationSpeedometer.tsx`. O último passo ("Ativar módulos") exige **duas condições simultâneas**:
-```
-onboarding_completed AND has_active_subscription
-```
+2. Corrigir a seção de webhooks do admin
+- Criar uma RPC administrativa própria, por exemplo `get_admin_webhook_logs(p_limit)`, com `SECURITY DEFINER`, lendo `public.webhook_events`.
+- Mapear os campos para o formato esperado no frontend:
+  - `topic`/`provider` -> `event_type`
+  - `payload_raw` -> `payload`
+  - `last_error` -> `error_message`
+  - `processed_at` e `created_at`/`received_at`
+- Atualizar `useWebhookLogs()` para usar essa RPC real e remover o stub atual que retorna array vazio.
 
-`has_active_subscription` só é `true` quando há assinatura paga OU `payment_status = 'active'`. Usuários em **trial** têm `payment_status = 'trial'`, então essa flag é `false`. Resultado: o speedometer nunca chega a 100% durante o trial.
+3. Parar de esconder erro como se fosse zero
+- Ajustar `useAdminDashboardStats()` para validar a resposta da RPC.
+- Se vier erro de permissão ou erro estrutural, propagar isso corretamente.
+- Ajustar `AdminDashboard.tsx` para exibir estado de erro claro (“Falha ao carregar métricas do painel”) em vez de renderizar `0` em todos os cards quando `stats` estiver indefinido.
 
-## Correção
+4. Alinhar textos do painel com a regra real
+- Atualizar a copy de “Testes Expirando” de “próximos 3 dias” para “próximos 7 dias”.
+- Garantir consistência entre card principal, bloco de alerta e cálculo do backend.
 
-### 1. Alterar lógica do passo "Ativar módulos" no `ActivationSpeedometer.tsx`
+5. Validação final
+- Validar com usuário admin real no `/admin`:
+  - Total de usuários > 0
+  - Em teste > 0
+  - Assinaturas ativas > 0
+  - Webhooks refletindo `webhook_events`
+- Validar cenário de erro proposital: se a RPC falhar, o painel deve mostrar mensagem de erro e nunca mais zeros falsos.
+- Validar que usuários não-admin continuam bloqueados do painel.
 
-Substituir a condição do último passo para aceitar trial ativo OU assinatura ativa:
+Detalhes técnicos
 
-```
-completed: (flags?.onboarding_completed ?? false) && 
-           (flags?.has_active_subscription || flags?.trial_active)
-```
+- Arquivos envolvidos no frontend:
+  - `src/hooks/useAdmin.ts`
+  - `src/pages/admin/AdminDashboard.tsx`
+  - possivelmente `src/types/admin.ts` se houver ajuste de shape
+- Mudanças de banco:
+  - migration para recriar `public.get_admin_dashboard_stats()`
+  - migration para criar `public.get_admin_webhook_logs(...)`
+- Ponto exato que hoje quebra:
+  - `get_admin_dashboard_stats` usa `public.mp_webhook_logs`
+  - a tabela existente no projeto é `public.webhook_events`
+- Ponto exato que hoje mascara o problema:
+  - `AdminDashboard.tsx` usa fallback `stats?.campo || 0`
+  - `useWebhookLogs()` está mockado e não consulta dados reais
 
-Isso garante que qualquer usuário com acesso válido (trial ou pago) chegue a 100%.
+Resultado esperado
 
-### 2. Atualizar `has_active_subscription` no RPC `get_user_feature_flags`
-
-Na função SQL, incluir `payment_status = 'trial' AND trial_end_at > now()` como condição válida para `has_active_subscription`:
-
-```sql
-'has_active_subscription', v_subscription IS NOT NULL 
-  OR v_state.payment_status = 'active' 
-  OR (v_state.payment_status = 'trial' AND v_effective_trial_end_at > now())
-  OR COALESCE((v_api_access->>'allowed')::boolean, false)
-```
-
-Isso resolve globalmente — todos os componentes que checam `has_active_subscription` passam a reconhecer trial ativo como acesso válido.
-
-## Resultado
-
-- Usuários em trial com onboarding completo e ML conectado verão 100%
-- O speedometer desaparece quando tudo está ativo (comportamento existente)
-- Quando o trial expirar, `has_active_subscription` volta a false e o sistema mostra aviso de renovação
-
+- O `/admin` volta a mostrar os números reais imediatamente.
+- O painel deixa de “zerar silenciosamente” quando houver erro.
+- A área de webhooks passa a refletir dados reais do banco.
+- O problema fica resolvido de forma estrutural, não apenas “maquiado”.
