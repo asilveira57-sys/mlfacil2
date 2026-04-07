@@ -49,7 +49,7 @@ export function ActivationSpeedometer() {
       key: 'activate_modules',
       label: 'Ativar módulos',
       icon: <Zap className="h-4 w-4" />,
-      completed: (flags?.onboarding_completed ?? false) && (flags?.has_active_subscription ?? false),
+      completed: (flags?.onboarding_completed ?? false) && (flags?.has_active_subscription || flags?.trial_active),
     },
   ];
 
