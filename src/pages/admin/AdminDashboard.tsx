@@ -1,6 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Users, 
   CreditCard, 
@@ -8,13 +9,14 @@ import {
   AlertTriangle,
   TrendingUp,
   UserPlus,
-  Timer
+  Timer,
+  XCircle
 } from 'lucide-react';
 import { useAdminDashboardStats, useWebhookLogs } from '@/hooks/useAdmin';
 
 export function AdminDashboard() {
-  const { data: stats, isLoading: statsLoading } = useAdminDashboardStats();
-  const { data: webhooks, isLoading: webhooksLoading } = useWebhookLogs();
+  const { data: stats, isLoading: statsLoading, error: statsError } = useAdminDashboardStats();
+  const { data: webhooks, isLoading: webhooksLoading, error: webhooksError } = useWebhookLogs();
 
   const pendingWebhooks = webhooks?.filter(w => !w.processed_at) || [];
   const errorWebhooks = webhooks?.filter(w => w.error_message) || [];
@@ -28,6 +30,16 @@ export function AdminDashboard() {
           Visão geral da plataforma
         </p>
       </div>
+
+      {/* Error Alert */}
+      {statsError && (
+        <Alert variant="destructive">
+          <XCircle className="h-4 w-4" />
+          <AlertDescription>
+            Falha ao carregar métricas do painel: {statsError.message}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -108,7 +120,7 @@ export function AdminDashboard() {
               Testes Expirando
             </CardTitle>
             <CardDescription>
-              Usuários com teste expirando nos próximos 3 dias
+              Usuários com teste expirando nos próximos 7 dias
             </CardDescription>
           </CardHeader>
           <CardContent>

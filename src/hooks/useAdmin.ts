@@ -19,11 +19,13 @@ export function useAdminDashboardStats() {
     queryKey: ['admin', 'dashboard-stats'],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_admin_dashboard_stats');
-      if (error) throw error;
+      if (error) {
+        console.error('[useAdminDashboardStats] RPC error:', error);
+        throw new Error(`Falha ao carregar métricas: ${error.message}`);
+      }
+      if (!data) throw new Error('Sem dados retornados do backend');
       return data as unknown as AdminDashboardStats;
     },
-    // DISABLED: Static mode - no polling. Use manual refresh button instead.
-    // refetchInterval: 60000,
   });
 }
 
@@ -462,12 +464,12 @@ export function useWebhookLogs() {
   return useQuery({
     queryKey: ['admin', 'webhook-logs'],
     queryFn: async () => {
-      // Use raw SQL approach for tables not in types
-      const { data, error } = await supabase
-        .rpc('get_admin_dashboard_stats'); // We'll mock this for now
-      
-      // Return empty array - actual implementation would need RPC function
-      return [] as WebhookLogData[];
+      const { data, error } = await supabase.rpc('get_admin_webhook_logs', { p_limit: 50 });
+      if (error) {
+        console.error('[useWebhookLogs] RPC error:', error);
+        throw new Error(`Falha ao carregar webhooks: ${error.message}`);
+      }
+      return (data as unknown as WebhookLogData[]) || [];
     },
   });
 }
