@@ -1,56 +1,52 @@
 
 
-# Correção: Acesso bloqueado + UX de plano expirado
+# Correção: Ativação travada em 80% para usuários em trial
 
-## Problema 1: Bug no `check_ml_api_access` (tenant_id errado)
+## Diagnóstico
 
-A função SQL consulta `tenant_entitlements WHERE tenant_id = v_company.id` (o UUID da company), mas o entitlement do ADECONEX está registrado em `tenant_id = 'a1000001-...'` — que é o campo `companies.tenant_id`, não `companies.id`.
+O usuário Magma (magmacomercio@hotmail.com) está com:
+- `onboarding_status: completed` ✓
+- `ml_account_connected: true` ✓
+- `trial_status: active` ✓
+- `payment_status: trial`
+- `active_subscription_id: null`
 
-**Dados atuais:**
-- `companies.id` = `bf1b9ced-...` 
-- `companies.tenant_id` = `a1000001-...`
-- `tenant_entitlements.tenant_id` = `a1000001-...` (ativo até 2028)
-
-A query nunca encontra o entitlement porque compara IDs diferentes.
-
-**Correção:** Alterar a query do fallback de entitlements para usar `v_company.tenant_id` (quando disponível) além de `v_company.id`:
-
-```sql
-WHERE te.tenant_id IN (v_company.id, v_company.tenant_id)
+O problema está na linha 52 do `ActivationSpeedometer.tsx`. O último passo ("Ativar módulos") exige **duas condições simultâneas**:
+```
+onboarding_completed AND has_active_subscription
 ```
 
-## Problema 2: UX — erro genérico em vez de tela de "renove seu plano"
+`has_active_subscription` só é `true` quando há assinatura paga OU `payment_status = 'active'`. Usuários em **trial** têm `payment_status = 'trial'`, então essa flag é `false`. Resultado: o speedometer nunca chega a 100% durante o trial.
 
-Quando o trial expira, o frontend mostra um toast + o erro cai no error boundary (tela vermelha "Error"). Deveria mostrar uma tela informativa com botão para ir ao plano.
+## Correção
 
-**Correção:**
-- Na página `ShippingLabels.tsx`, verificar o estado de acesso ML via `useMlApiAccess()` (hook que já existe em `TrialExpiredBanner.tsx`)
-- Se `isTrialExpired` for true, renderizar uma tela dedicada de "Plano expirado" com botão "Assinar plano" em vez de carregar toda a página de etiquetas
-- Isso elimina a necessidade de sincronização e evita qualquer crash
+### 1. Alterar lógica do passo "Ativar módulos" no `ActivationSpeedometer.tsx`
 
-## Plano de execução
+Substituir a condição do último passo para aceitar trial ativo OU assinatura ativa:
 
-### 1. Migration SQL — Corrigir `check_ml_api_access`
-Recriar a função para que o bloco de fallback `tenant_entitlements` consulte tanto `v_company.id` quanto `v_company.tenant_id`:
-
-```sql
-WHERE te.tenant_id IN (v_company.id, COALESCE(v_company.tenant_id, v_company.id))
-  AND te.status = 'active'
-  AND te.current_period_end > now()
+```
+completed: (flags?.onboarding_completed ?? false) && 
+           (flags?.has_active_subscription || flags?.trial_active)
 ```
 
-### 2. Frontend — Tela de plano expirado na ShippingLabels
-No `ShippingLabels.tsx`, usar o hook `useMlApiAccess()` para verificar se o acesso está bloqueado. Se `isTrialExpired`, renderizar uma tela clara com:
-- Ícone e título "Período de teste finalizado"
-- Mensagem explicativa
-- Botão "Ver planos" que navega para `/settings?section=plano`
-- Sem carregar a tabela de pedidos ou tentar sincronizar
+Isso garante que qualquer usuário com acesso válido (trial ou pago) chegue a 100%.
 
-### 3. Tratamento global no edgeFunctionClient
-Garantir que o `edgeFunctionClient.ts` ao receber TRIAL_EXPIRED não dispare erro que caia no error boundary — apenas retorne graciosamente.
+### 2. Atualizar `has_active_subscription` no RPC `get_user_feature_flags`
+
+Na função SQL, incluir `payment_status = 'trial' AND trial_end_at > now()` como condição válida para `has_active_subscription`:
+
+```sql
+'has_active_subscription', v_subscription IS NOT NULL 
+  OR v_state.payment_status = 'active' 
+  OR (v_state.payment_status = 'trial' AND v_effective_trial_end_at > now())
+  OR COALESCE((v_api_access->>'allowed')::boolean, false)
+```
+
+Isso resolve globalmente — todos os componentes que checam `has_active_subscription` passam a reconhecer trial ativo como acesso válido.
 
 ## Resultado
-- ADECONEX volta a funcionar imediatamente (entitlement encontrado)
-- Qualquer usuário com trial expirado vê tela amigável em vez de erro
-- Sem perda de funcionalidade existente
+
+- Usuários em trial com onboarding completo e ML conectado verão 100%
+- O speedometer desaparece quando tudo está ativo (comportamento existente)
+- Quando o trial expirar, `has_active_subscription` volta a false e o sistema mostra aviso de renovação
 
