@@ -120,7 +120,7 @@ export function AdminDashboard() {
               Testes Expirando
             </CardTitle>
             <CardDescription>
-              Usuários com teste expirando nos próximos 3 dias
+              Usuários com teste expirando nos próximos 7 dias
             </CardDescription>
           </CardHeader>
           <CardContent>
