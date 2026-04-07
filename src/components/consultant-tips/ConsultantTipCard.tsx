@@ -60,7 +60,7 @@ export function ConsultantTipCard({ tip, compact = false, className }: Props) {
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden transition-all duration-200',
+        'rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden transition-all duration-200 flex flex-col',
         'hover:shadow-md hover:border-primary/20',
         className
       )}
