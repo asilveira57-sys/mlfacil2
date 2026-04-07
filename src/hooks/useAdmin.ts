@@ -19,11 +19,13 @@ export function useAdminDashboardStats() {
     queryKey: ['admin', 'dashboard-stats'],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_admin_dashboard_stats');
-      if (error) throw error;
+      if (error) {
+        console.error('[useAdminDashboardStats] RPC error:', error);
+        throw new Error(`Falha ao carregar métricas: ${error.message}`);
+      }
+      if (!data) throw new Error('Sem dados retornados do backend');
       return data as unknown as AdminDashboardStats;
     },
-    // DISABLED: Static mode - no polling. Use manual refresh button instead.
-    // refetchInterval: 60000,
   });
 }
 
