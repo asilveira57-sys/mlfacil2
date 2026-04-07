@@ -44,7 +44,8 @@ export function ConsultantTipCard({ tip, compact = false, className }: Props) {
 
   const handleInteraction = (tipo: 'like' | 'salvar' | 'compartilhar') => {
     if (tipo === 'compartilhar') {
-      const url = `${window.location.origin}/dica/${tip.slug}`;
+      const publishedOrigin = 'https://mlfacil2.lovable.app';
+      const url = `${publishedOrigin}/dica/${tip.slug}`;
       navigator.clipboard.writeText(url).catch(() => {});
       toast({ title: 'Link copiado!', description: 'Link da dica copiado para a área de transferência.' });
       toggle.mutate({ tipId: tip.id, tipo });
