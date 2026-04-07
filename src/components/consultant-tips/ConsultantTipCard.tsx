@@ -64,7 +64,7 @@ export function ConsultantTipCard({ tip, compact = false, className }: Props) {
         'hover:shadow-md hover:border-primary/20',
         className
       )}
-      style={{ aspectRatio: compact ? undefined : '2/3', maxWidth: compact ? undefined : 360 }}
+      style={{ maxWidth: compact ? undefined : 360 }}
     >
       {/* Header strip */}
       <div className="flex items-center gap-2 px-4 py-3 bg-primary/5 border-b border-border/40">
