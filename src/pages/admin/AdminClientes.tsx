@@ -261,14 +261,28 @@ export function AdminClientes() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Cliente</TableHead>
-              <TableHead>Empresa</TableHead>
+              <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('full_name')}>
+                <div className="flex items-center">Cliente <SortIcon columnKey="full_name" /></div>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('company_name')}>
+                <div className="flex items-center">Empresa <SortIcon columnKey="company_name" /></div>
+              </TableHead>
               <TableHead>Contas ML</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Trial</TableHead>
-              <TableHead>Cadastro</TableHead>
-              <TableHead>Último Acesso</TableHead>
-              <TableHead>Tag</TableHead>
+              <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('status')}>
+                <div className="flex items-center">Status <SortIcon columnKey="status" /></div>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('trial')}>
+                <div className="flex items-center">Trial <SortIcon columnKey="trial" /></div>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('profile_created_at')}>
+                <div className="flex items-center">Cadastro <SortIcon columnKey="profile_created_at" /></div>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('last_access')}>
+                <div className="flex items-center">Último Acesso <SortIcon columnKey="last_access" /></div>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('tag')}>
+                <div className="flex items-center">Tag <SortIcon columnKey="tag" /></div>
+              </TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
