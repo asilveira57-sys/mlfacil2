@@ -53,7 +53,7 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setBlocked } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding } = useAdminTrialManagement();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
