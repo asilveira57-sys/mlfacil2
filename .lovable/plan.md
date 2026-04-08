@@ -1,42 +1,46 @@
 
-# Resetar Onboarding para Usuários Importados (VETERANO)
 
-## Problema
-Usuários importados com tag VETERANO entram no sistema mas ficam sem empresa e sem conexão ML. Falta um mecanismo para o admin resetar o onboarding de qualquer usuário, forçando-o a passar pelo `/primeiro-acesso` novamente.
+# Gerenciamento de Plano no Admin Clientes
 
-## Dados confirmados
-- 99 VETERANO com `onboarding_status = 'pending'` (esses JÁ são redirecionados para `/primeiro-acesso`)
-- 3 VETERANO com `onboarding_status = 'completed'` — destes, 1 (ADECONEX) completou sem conectar ML
-- O fluxo de redirecionamento já funciona: `ProtectedRoute` manda para `/primeiro-acesso` quando `requiresOnboarding = true`
+## Situação atual
+- O painel de detalhes mostra apenas o UUID truncado do plano (`selected_plan_id.slice(0,8)`)
+- Não existe nenhuma ação para trocar o plano de um cliente
+- A tabela `user_plan_assignments` já tem a estrutura necessária (user_id, plan_tier_id, status)
+- Existem 7 tiers ativos no banco (ZPL Básico, Até 50, 51-300, etc.)
 
-## Solução
+## O que será feito
 
-### 1. Botão "Resetar Onboarding" no Admin Clientes
-Adicionar uma nova ação no dropdown de cada cliente em `AdminClientes.tsx`:
-- Ícone `RotateCcw` com texto "Resetar Onboarding"
-- Ao clicar, executa uma RPC que:
-  - Seta `user_access_state.onboarding_status = 'pending'`
-  - Limpa flags derivadas que impediriam o fluxo
-- Após sucesso, o próximo login do usuário o redireciona automaticamente para `/primeiro-acesso`
+### 1. Mostrar o plano atual do cliente (legível)
+No dialog "Ver detalhes" e na tabela principal, exibir o **nome** do plano em vez do UUID.
+- Buscar o `plan_tier_id` ativo do `user_plan_assignments` junto com o nome do tier
+- Exibir como badge: ex. "ZPL Básico", "301 a 700 pedidos/mês"
 
-### 2. RPC `admin_reset_onboarding`
-Criar uma função SQL `admin_reset_onboarding(target_user_id uuid)` que:
-- Verifica se o chamador é admin (via `has_role`)
-- Atualiza `user_access_state` do alvo: `onboarding_status = 'pending'`
+### 2. Ação "Alterar Plano" no dropdown
+Nova opção no menu de ações de cada cliente que abre um dialog com:
+- Nome do cliente e plano atual
+- Select com todos os tiers ativos disponíveis
+- Botão "Confirmar"
+
+### 3. RPC `admin_change_user_plan`
+Função SQL que:
+- Verifica se o chamador é admin
+- Desativa todas as atribuições antigas do usuário (`status = 'inactive'`)
+- Insere nova atribuição com o tier escolhido (`status = 'active'`)
+- Atualiza `user_access_state.payment_status` se necessário
 - Retorna sucesso
 
-### 3. Hook no frontend
-Adicionar mutação `resetOnboarding` no hook `useAdminTrialManagement` (ou criar um dedicado) que chama a nova RPC.
-
-### 4. Opção de reset em massa
-Botão adicional no topo da lista para resetar todos os VETERANO com `onboarding_status = 'completed'` que não têm ML conectado (caso pontual).
+### 4. Hook e integração
+- Adicionar mutação `changeUserPlan(userId, planTierId)` no `useAdmin.ts`
+- Enriquecer `admin_get_clients_overview` para retornar o nome do plano ativo
 
 ## Arquivos afetados
-- **Migration SQL**: Criar RPC `admin_reset_onboarding`
-- **`src/hooks/useAdmin.ts`**: Adicionar mutação `resetOnboarding`
-- **`src/pages/admin/AdminClientes.tsx`**: Adicionar item no dropdown de ações
+- **Migration SQL**: Criar RPC `admin_change_user_plan`, atualizar `admin_get_clients_overview`
+- **`src/hooks/useAdmin.ts`**: Mutação `changeUserPlan`
+- **`src/pages/admin/AdminClientes.tsx`**: Dialog de troca de plano, exibição do nome do plano
+- **`src/hooks/useAdminClients.ts`**: Tipo `AdminClient` com campo `plan_name`
 
 ## Resultado
-- Admin pode forçar qualquer usuário a refazer o onboarding com um clique
-- Na próxima vez que o usuário acessar, será redirecionado para `/primeiro-acesso` automaticamente
-- O fluxo existente de onboarding (welcome → nome → empresa → plano → conexão) cuida do resto
+- Admin vê o plano atual de cada cliente pelo nome
+- Admin pode trocar o plano de qualquer cliente com 2 cliques
+- Mudança reflete imediatamente nos módulos habilitados do usuário
+
