@@ -238,7 +238,28 @@ export function useAdminTrialManagement() {
     },
   });
 
-  return { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding };
+  const changeUserPlan = useMutation({
+    mutationFn: async ({ userId, planTierId }: { userId: string; planTierId: string }) => {
+      const { data, error } = await supabase.rpc('admin_change_user_plan', {
+        p_target_user_id: userId,
+        p_plan_tier_id: planTierId,
+      });
+      if (error) throw error;
+      const result = data as unknown as { success: boolean; error?: string; new_plan?: string };
+      if (!result.success) throw new Error(result.error);
+      return result;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'clients'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      toast.success(`Plano alterado para "${(data as any).new_plan}"`);
+    },
+    onError: (error) => {
+      toast.error(`Erro ao alterar plano: ${error.message}`);
+    },
+  });
+
+  return { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan };
 }
 
 // Onboarding Cards

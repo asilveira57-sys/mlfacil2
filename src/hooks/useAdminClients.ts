@@ -40,6 +40,7 @@ export interface AdminClient {
   ml_accounts: MlAccountInfo[];
   roles: string[];
   tag: string | null;
+  plan_name: string | null;
 }
 
 export function useAdminClients() {
