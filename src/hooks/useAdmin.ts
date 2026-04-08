@@ -201,7 +201,44 @@ export function useAdminTrialManagement() {
     },
   });
 
-  return { adjustTrial, resetTrial, setBlocked };
+  const resetOnboarding = useMutation({
+    mutationFn: async ({ userId }: { userId: string }) => {
+      const { data, error } = await supabase.rpc('admin_reset_onboarding', {
+        p_target_user_id: userId,
+      });
+      if (error) throw error;
+      const result = data as unknown as { success: boolean; error?: string };
+      if (!result.success) throw new Error(result.error || 'Erro ao resetar onboarding');
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'clients'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      toast.success('Onboarding resetado — usuário passará pelo primeiro acesso');
+    },
+    onError: (error) => {
+      toast.error(`Erro ao resetar onboarding: ${error.message}`);
+    },
+  });
+
+  const bulkResetOnboarding = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.rpc('admin_bulk_reset_onboarding');
+      if (error) throw error;
+      const result = data as unknown as { success: boolean; reset_count?: number; error?: string };
+      if (!result.success) throw new Error(result.error || 'Erro no reset em massa');
+      return result;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'clients'] });
+      toast.success(`Onboarding resetado para ${(data as any).reset_count || 0} veteranos`);
+    },
+    onError: (error) => {
+      toast.error(`Erro no reset em massa: ${error.message}`);
+    },
+  });
+
+  return { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding };
 }
 
 // Onboarding Cards

@@ -21151,6 +21151,7 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_bulk_reset_onboarding: { Args: never; Returns: Json }
       admin_get_clients_overview: {
         Args: never
         Returns: {
@@ -21179,6 +21180,10 @@ export type Database = {
           user_id: string
           whatsapp: string
         }[]
+      }
+      admin_reset_onboarding: {
+        Args: { p_target_user_id: string }
+        Returns: Json
       }
       admin_reset_trial: {
         Args: {

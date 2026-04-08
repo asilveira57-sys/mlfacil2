@@ -53,7 +53,7 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setBlocked } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding } = useAdminTrialManagement();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -228,6 +228,9 @@ export function AdminClientes() {
         </div>
         <Button variant="outline" size="sm" onClick={() => refetch()}>
           <RefreshCw className="h-4 w-4 mr-1" /> Atualizar
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => bulkResetOnboarding.mutate(undefined, { onSuccess: () => refetch() })} disabled={bulkResetOnboarding.isPending}>
+          <RotateCcw className="h-4 w-4 mr-1" /> Resetar Veteranos
         </Button>
       </div>
 
@@ -438,6 +441,9 @@ export function AdminClientes() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => resetTrial.mutate({ userId: client.user_id, reason: 'Reset via Admin Clientes' }, { onSuccess: () => refetch() })}>
                               <RotateCcw className="h-4 w-4 mr-2" /> Resetar trial
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => resetOnboarding.mutate({ userId: client.user_id }, { onSuccess: () => refetch() })}>
+                              <RefreshCw className="h-4 w-4 mr-2" /> Resetar Onboarding
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {client.payment_status === 'blocked' ? (
