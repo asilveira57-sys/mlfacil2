@@ -460,6 +460,9 @@ export function AdminClientes() {
                             <DropdownMenuItem onClick={() => resetOnboarding.mutate({ userId: client.user_id }, { onSuccess: () => refetch() })}>
                               <RefreshCw className="h-4 w-4 mr-2" /> Resetar Onboarding
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setPlanClient(client); setSelectedTierId(''); setPlanOpen(true); }}>
+                              <Replace className="h-4 w-4 mr-2" /> Alterar Plano
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {client.payment_status === 'blocked' ? (
                               <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: false, reason: 'Desbloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
