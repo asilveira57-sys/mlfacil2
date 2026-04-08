@@ -21152,6 +21152,10 @@ export type Database = {
         Returns: Json
       }
       admin_bulk_reset_onboarding: { Args: never; Returns: Json }
+      admin_change_user_plan: {
+        Args: { p_plan_tier_id: string; p_target_user_id: string }
+        Returns: Json
+      }
       admin_get_clients_overview: {
         Args: never
         Returns: {
@@ -21170,6 +21174,7 @@ export type Database = {
           onboarding_status: string
           payment_status: string
           photo_url: string
+          plan_name: string
           profile_created_at: string
           roles: string[]
           selected_plan_id: string

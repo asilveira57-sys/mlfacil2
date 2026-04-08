@@ -21,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
   Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send, Link2,
-  ArrowUpDown, ArrowUp, ArrowDown,
+  ArrowUpDown, ArrowUp, ArrowDown, Replace,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -53,7 +53,17 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan } = useAdminTrialManagement();
+
+  const PLAN_TIERS = [
+    { id: 'a0000000-0000-0000-0000-000000000001', name: 'ZPL Básico' },
+    { id: '26cf9f33-4e95-400b-a335-9b4d4b70f58a', name: 'Até 50 pedidos/mês' },
+    { id: 'd4fabfc5-99fe-4b5b-8459-0529ef93baf4', name: '51 a 300 pedidos/mês' },
+    { id: 'b7ffb1c9-223d-4a30-a7ca-68375982c17e', name: '301 a 700 pedidos/mês' },
+    { id: '85944f40-8c37-43c0-9609-df96742537ad', name: '701 a 1.500 pedidos/mês' },
+    { id: 'feab130a-f002-43ba-82a1-79c6371bbfea', name: '1.501 a 3.000 pedidos/mês' },
+    { id: '8243db6b-7498-4056-a9e4-53dfdeae8d0a', name: 'Acima de 3.000 pedidos/mês' },
+  ];
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -92,6 +102,11 @@ export function AdminClientes() {
   const [trialOpen, setTrialOpen] = useState(false);
   const [trialDays, setTrialDays] = useState('7');
   const [trialClient, setTrialClient] = useState<AdminClient | null>(null);
+
+  // Plan change dialog
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planClient, setPlanClient] = useState<AdminClient | null>(null);
+  const [selectedTierId, setSelectedTierId] = useState('');
 
   const filtered = useMemo(() => {
     if (!clients) return [];
@@ -445,6 +460,9 @@ export function AdminClientes() {
                             <DropdownMenuItem onClick={() => resetOnboarding.mutate({ userId: client.user_id }, { onSuccess: () => refetch() })}>
                               <RefreshCw className="h-4 w-4 mr-2" /> Resetar Onboarding
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setPlanClient(client); setSelectedTierId(''); setPlanOpen(true); }}>
+                              <Replace className="h-4 w-4 mr-2" /> Alterar Plano
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {client.payment_status === 'blocked' ? (
                               <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: false, reason: 'Desbloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
@@ -633,7 +651,7 @@ export function AdminClientes() {
                   <div><span className="text-muted-foreground">Início Trial:</span> {formatDate(selectedClient.trial_start_at)}</div>
                   <div><span className="text-muted-foreground">Fim Trial:</span> {formatDate(selectedClient.trial_end_at)}</div>
                   <div><span className="text-muted-foreground">Onboarding:</span> {selectedClient.onboarding_status || '—'}</div>
-                  <div><span className="text-muted-foreground">Plano:</span> {selectedClient.selected_plan_id ? selectedClient.selected_plan_id.slice(0, 8) + '...' : '—'}</div>
+                  <div><span className="text-muted-foreground">Plano:</span> {selectedClient.plan_name || (selectedClient.selected_plan_id ? selectedClient.selected_plan_id.slice(0, 8) + '...' : '—')}</div>
                 </div>
               </div>
 
@@ -732,6 +750,51 @@ export function AdminClientes() {
             <Button variant="outline" onClick={() => setTrialOpen(false)}>Cancelar</Button>
             <Button onClick={handleAdjustTrial} disabled={adjustTrial.isPending}>
               {adjustTrial.isPending ? 'Ajustando...' : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Plan Change Dialog */}
+      <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Alterar Plano</DialogTitle>
+            <DialogDescription>
+              Alterar o plano de <strong>{planClient?.full_name || planClient?.email}</strong>.
+              {planClient?.plan_name && (
+                <> Plano atual: <Badge variant="secondary" className="ml-1">{planClient.plan_name}</Badge></>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium">Novo plano</label>
+              <Select value={selectedTierId} onValueChange={setSelectedTierId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Selecione o plano..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {PLAN_TIERS.map((tier) => (
+                    <SelectItem key={tier.id} value={tier.id}>{tier.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPlanOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!selectedTierId || changeUserPlan.isPending}
+              onClick={() => {
+                if (!planClient || !selectedTierId) return;
+                changeUserPlan.mutate(
+                  { userId: planClient.user_id, planTierId: selectedTierId },
+                  { onSuccess: () => { setPlanOpen(false); setPlanClient(null); refetch(); } }
+                );
+              }}
+            >
+              {changeUserPlan.isPending ? 'Alterando...' : 'Confirmar'}
             </Button>
           </DialogFooter>
         </DialogContent>
