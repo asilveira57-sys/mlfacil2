@@ -229,6 +229,9 @@ export function AdminClientes() {
         <Button variant="outline" size="sm" onClick={() => refetch()}>
           <RefreshCw className="h-4 w-4 mr-1" /> Atualizar
         </Button>
+        <Button variant="outline" size="sm" onClick={() => bulkResetOnboarding.mutate(undefined, { onSuccess: () => refetch() })} disabled={bulkResetOnboarding.isPending}>
+          <RotateCcw className="h-4 w-4 mr-1" /> Resetar Veteranos
+        </Button>
       </div>
 
       {/* Filters */}
