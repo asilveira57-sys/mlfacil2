@@ -385,6 +385,16 @@ function VerifyEmailState({ email, t }: { email: string; t: any }) {
         {t("auth:verify_email_description")}
       </p>
       {email && <p className="text-sm font-medium text-foreground">{email}</p>}
+
+      {/* Spam/Promotions warning */}
+      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-left max-w-sm mx-auto">
+        <p className="text-xs text-amber-800 dark:text-amber-200 font-medium mb-1">⚠️ Não encontrou o e-mail?</p>
+        <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-0.5 list-disc list-inside">
+          <li>Verifique a pasta <strong>Spam</strong> ou <strong>Lixo eletrônico</strong></li>
+          <li>No Gmail, cheque a aba <strong>Promoções</strong></li>
+          <li>Aguarde até 2 minutos para o e-mail chegar</li>
+        </ul>
+      </div>
       
       <div className="pt-2">
         {countdown > 0 ? (
@@ -412,6 +422,10 @@ function VerifyEmailState({ email, t }: { email: string; t: any }) {
           </Button>
         )}
       </div>
+
+      <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+        Se ainda não receber, entre em contato pelo WhatsApp no canto inferior direito.
+      </p>
 
       <Link to="/auth" className="text-sm text-primary hover:underline mt-4 inline-block">
         Ir para o login
