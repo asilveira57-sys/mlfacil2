@@ -1,72 +1,99 @@
 
+Objetivo: corrigir de forma estrutural o caso do usuário pago continuar vendo “precisa contratar um plano” e garantir que os próximos usuários ativem corretamente sem depender de sorte ou de caminhos diferentes.
 
-# Correção Completa: E-mails de Autenticação Não Chegando
+Diagnóstico confirmado
+- O problema não é só UI. Há divergência entre as fontes de verdade de acesso.
+- O histórico de faturamento já lê `tenant_entitlements`, por isso o plano aparece como ativo em Configurações.
+- Já o bloqueio de acesso e partes do dashboard dependem de flags calculadas por RPCs que ainda misturam modelos antigos e novos:
+  - alguns trechos buscam empresa por `companies.user_id`
+  - outros por `company_users`
+  - alguns validam entitlement via `tenant_members`
+  - outros via `company.id` / `company.tenant_id`
+  - outros ainda checam `subscriptions.user_id`
+- Resultado: o usuário pode ter pagamento e entitlement válidos, mas a flag `trial_expired/requires_payment` continua vindo errada em certos cenários.
 
-## Diagnóstico Confirmado
+O que corrigir
+1. Unificar a regra de acesso no backend
+- Reescrever a lógica de `get_user_feature_flags` para usar uma única resolução de contexto:
+  - localizar a empresa ativa do usuário via `company_users` com fallback seguro
+  - localizar entitlement ativo via `tenant_entitlements` usando ambos `company.id` e `company.tenant_id`
+  - considerar assinatura antiga apenas como fallback, nunca como fonte principal
+- Regra final:
+  - se existir entitlement ativo e dentro do período, então:
+    - `has_active_subscription = true`
+    - `requires_payment = false`
+    - `trial_expired = false`
+    - recursos liberados conforme plano
+- Isso precisa virar a regra única para todos os usuários novos e antigos.
 
-Existem **dois sistemas de e-mail paralelos** no projeto, e ambos estão com problemas:
+2. Sincronizar o estado derivado do usuário
+- Ajustar `rpc_activate_entitlement` / renovação para continuar sincronizando `user_access_state`, mas sem depender só de `tenant_members`.
+- Ao ativar um plano:
+  - atualizar `payment_status = 'active'`
+  - encerrar trial no estado derivado
+  - refletir o vínculo para o(s) usuário(s) da empresa/tenant correta
+- Adicionar fallback para casos em que o usuário esteja ligado à empresa por `company_users`, não apenas por `tenant_members`.
 
-### Sistema 1: Lovable Cloud (auth-email-hook → process-email-queue)
-- Domínio `notify.notifica.mktpfacil.com` verificado e ativo
-- Fila pgmq configurada e rodando a cada 5 segundos
-- **Últimos 8 e-mails (30/03 a 02/04) foram enviados com sucesso** via este sistema
-- **Desde 02/04 (6 dias), ZERO novos e-mails** no `email_send_log`
-- Sem logs da edge function `auth-email-hook` nos analytics — isso indica que o hook **não está sendo chamado** pelo backend de autenticação, possivelmente porque não foi re-deployed após as últimas alterações no código
+3. Eliminar caminhos antigos que reclassificam o usuário como bloqueado
+- Revisar `check_ml_api_access` para garantir que entitlement ativo sempre tenha precedência sobre trial expirado.
+- Garantir que o retorno `TRIAL_EXPIRED` só aconteça quando realmente não houver:
+  - entitlement ativo
+  - assinatura ativa legada
+  - período manual válido
+- Isso evita o banner amarelo no dashboard e o bloqueio indevido.
 
-### Sistema 2: Legado (email-worker-send → Resend API)
-- Roda via cron a cada 5 minutos (7h-20h)
-- **Retornando 401 constantemente** nos logs — o cron usa `anon_key` + `x-internal-key: SERVICE_ROLE_KEY_PLACEHOLDER` (literal), então a autenticação falha
-- **2 e-mails parados** na `email_queue` com status `queued` desde 31/03 e 02/04, nunca enviados
-- O provedor Resend (`email_provider_settings`) tem o domínio `mktpfacil.com` que **não é verificado** (último teste em 26/03 deu erro 403 do Resend)
+4. Alinhar frontend para não depender de interpretações paralelas
+- Manter o frontend lendo apenas as flags unificadas.
+- Revisar especialmente:
+  - `SalesDashboard.tsx`
+  - `AccessGate.tsx`
+  - `TrialExpiredPaywall.tsx`
+  - `ActivationSpeedometer.tsx`
+  - `SettingsSubscription.tsx`
+- Objetivo: nenhuma tela deve inferir “precisa de plano” por heurística própria se `has_active_subscription` vier verdadeiro.
 
-### Bug adicional: CHECK constraint
-- O `process-email-queue` tenta inserir `status = 'rate_limited'` na tabela `email_send_log`, mas a constraint só aceita: `pending, sent, suppressed, failed, bounced, complained, dlq`
-- Qualquer rate limit do provedor crasharia silenciosamente o processamento da fila
+5. Corrigir o caso atual e prevenir reincidência
+- Criar migration de saneamento para sincronizar `user_access_state` de usuários com entitlement ativo já existente.
+- Esse backfill deve:
+  - localizar usuários vinculados à empresa/tenant correta
+  - marcar `payment_status = 'active'`
+  - expirar o trial derivado quando houver plano pago ativo
+- Assim o usuário atual é corrigido e os já pagos que entraram antes também.
 
----
+6. Validação final obrigatória
+- Validar com um usuário pago real que hoje está com erro:
+  - Configurações mostra plano ativo
+  - dashboard não mostra mais “Ative um plano”
+  - `ActivationSpeedometer` fecha em 100% quando onboarding estiver concluído
+  - paywall/modal/banner não aparecem
+- Validar também usuário novo:
+  - pagou → webhook cria entitlement
+  - flags mudam para ativo
+  - dashboard abre sem mensagem de trial expirado
+  - histórico e acesso ficam consistentes
 
-## Plano de Correção (5 passos)
+Arquivos e áreas a revisar
+- Backend SQL:
+  - `supabase/migrations/...get_user_feature_flags...`
+  - `supabase/migrations/...check_ml_api_access...`
+  - `supabase/migrations/...rpc_activate_entitlement...`
+  - `supabase/migrations/...rpc_renew_entitlement...`
+- Frontend:
+  - `src/components/SalesDashboard.tsx`
+  - `src/components/access/AccessGate.tsx`
+  - `src/components/access/TrialExpiredPaywall.tsx`
+  - `src/components/dashboard/ActivationSpeedometer.tsx`
+  - `src/hooks/useUserAccessState.ts`
+  - `src/hooks/useBillingHistory.ts` (para manter coerência de tenant/contexto)
 
-### 1. Re-deploy do auth-email-hook
-O hook precisa ser re-deployed para garantir que o backend de autenticação esteja roteando e-mails corretamente para ele. Sem isso, os e-mails de signup/recovery simplesmente não são processados.
+Detalhe técnico importante
+- Hoje o sistema já prova a inconsistência:
+  - `BillingPaymentHistory` lê `tenant_entitlements` via `tenant_members`
+  - `get_user_feature_flags` mais recente já foi parcialmente mudada para `company_users`
+  - `check_ml_api_access` e revisões anteriores ainda usam resolução diferente
+- O conserto definitivo é padronizar tudo em cima do mesmo relacionamento e da mesma tabela principal de direito de acesso (`tenant_entitlements`).
 
-### 2. Corrigir CHECK constraint do email_send_log
-Adicionar `rate_limited` à lista de valores aceitos para evitar crash silencioso:
-```sql
-ALTER TABLE public.email_send_log DROP CONSTRAINT IF EXISTS email_send_log_status_check;
-ALTER TABLE public.email_send_log ADD CONSTRAINT email_send_log_status_check
-  CHECK (status IN ('pending', 'sent', 'suppressed', 'failed', 'bounced', 'complained', 'dlq', 'rate_limited'));
-```
-
-### 3. Desativar o sistema legado (email-worker-send)
-O cron do `email-worker-send` está fazendo requisições inúteis (401) a cada 5 minutos. Precisa ser desativado para não conflitar:
-```sql
-SELECT cron.unschedule('email-worker-send-every-5min');
-```
-Os 2 e-mails parados na `email_queue` serão processados manualmente ou marcados como expirados.
-
-### 4. Melhorar UX de cadastro — Fallback para quando o e-mail não chega
-- **Aviso no cadastro** (`CriarAcesso.tsx` / `VerifyEmailState`): Adicionar texto orientando a checar spam/promoções e um botão de reenvio mais visível
-- **Copiar link manual** (já existe no admin via `admin-resend-verification`): Garantir que está funcionando e visível na lista de clientes
-
-### 5. Monitoramento — Aba de Logs unificada
-A aba de Logs do admin (`EmailLogsTab`) consulta apenas `email_logs` (sistema legado). Precisa incluir também dados do `email_send_log` (sistema ativo) para dar visibilidade real ao admin sobre entregas e falhas.
-
----
-
-## Detalhes Técnicos
-
-**Arquivos afetados:**
-- Deploy: `supabase/functions/auth-email-hook/index.ts` (sem alteração de código, apenas re-deploy)
-- Migration: Corrigir constraint + desativar cron legado
-- Frontend: `src/pages/CriarAcesso.tsx` (melhorar VerifyEmailState com aviso de spam)
-- Frontend: `src/components/admin/email/EmailLogsTab.tsx` (incluir dados de `email_send_log`)
-- Frontend: `src/hooks/useEmailAdmin.ts` (adicionar query para `email_send_log`)
-
-**Resultado esperado:**
-- E-mails de signup/recovery voltam a chegar imediatamente após re-deploy
-- Se houver rate limit, o sistema loga corretamente em vez de crashar
-- Sistema legado para de gerar erros 401 inúteis
-- Usuários que não recebem e-mail veem orientação clara sobre spam
-- Admin tem visibilidade completa dos envios no painel
-
+Resultado esperado
+- Usuário pago nunca mais verá mensagem de “contratar plano” se houver entitlement ativo.
+- Trial expirado só bloqueia quem realmente não tem direito ativo.
+- A ativação fica consistente para os usuários atuais e para os próximos que estão chegando.
