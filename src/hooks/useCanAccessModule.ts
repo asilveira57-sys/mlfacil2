@@ -22,13 +22,19 @@ interface UserPlanModules {
 }
 
 export function useCanAccessModule() {
-  const { status } = useUserAccessState();
+  const { status, trialActive } = useUserAccessState();
   const userId = status?.user_id;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['user-plan-modules', userId],
+    queryKey: ['user-plan-modules', userId, trialActive],
     queryFn: async (): Promise<UserPlanModules> => {
       if (!userId) return { planCode: null, planGroup: null, allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
+
+      // Active trial must never hide modules. Trial users evaluate the full product,
+      // even if onboarding stored a restrictive plan like ZPL as a usage preference.
+      if (trialActive) {
+        return { planCode: 'trial-full-access', planGroup: 'full', allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
+      }
 
       // 1. Try user_plan_assignments first (active assignment)
       let planId: string | null = null;
