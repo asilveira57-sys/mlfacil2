@@ -103,6 +103,11 @@ export function AdminClientes() {
   const [trialDays, setTrialDays] = useState('7');
   const [trialClient, setTrialClient] = useState<AdminClient | null>(null);
 
+  // Plan change dialog
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planClient, setPlanClient] = useState<AdminClient | null>(null);
+  const [selectedTierId, setSelectedTierId] = useState('');
+
   const filtered = useMemo(() => {
     if (!clients) return [];
     let result = clients.filter((c) => {
