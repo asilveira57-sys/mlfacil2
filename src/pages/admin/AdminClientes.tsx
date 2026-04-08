@@ -439,6 +439,9 @@ export function AdminClientes() {
                             <DropdownMenuItem onClick={() => resetTrial.mutate({ userId: client.user_id, reason: 'Reset via Admin Clientes' }, { onSuccess: () => refetch() })}>
                               <RotateCcw className="h-4 w-4 mr-2" /> Resetar trial
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => resetOnboarding.mutate({ userId: client.user_id }, { onSuccess: () => refetch() })}>
+                              <RefreshCw className="h-4 w-4 mr-2" /> Resetar Onboarding
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {client.payment_status === 'blocked' ? (
                               <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: false, reason: 'Desbloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
