@@ -651,7 +651,7 @@ export function AdminClientes() {
                   <div><span className="text-muted-foreground">Início Trial:</span> {formatDate(selectedClient.trial_start_at)}</div>
                   <div><span className="text-muted-foreground">Fim Trial:</span> {formatDate(selectedClient.trial_end_at)}</div>
                   <div><span className="text-muted-foreground">Onboarding:</span> {selectedClient.onboarding_status || '—'}</div>
-                  <div><span className="text-muted-foreground">Plano:</span> {selectedClient.selected_plan_id ? selectedClient.selected_plan_id.slice(0, 8) + '...' : '—'}</div>
+                  <div><span className="text-muted-foreground">Plano:</span> {selectedClient.plan_name || (selectedClient.selected_plan_id ? selectedClient.selected_plan_id.slice(0, 8) + '...' : '—')}</div>
                 </div>
               </div>
 
