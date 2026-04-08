@@ -55,12 +55,24 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Email not found for user" }), { status: 404, headers: corsHeaders });
     }
 
-    const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
-      type: "signup",
+    // Try magiclink first (works for existing users), fallback to signup for new users
+    let linkData, linkError;
+
+    ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+      type: "magiclink",
       email: targetEmail,
-    });
+    }));
+
+    // If magiclink fails (user not found), try signup
+    if (linkError) {
+      ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+        type: "signup",
+        email: targetEmail,
+      }));
+    }
 
     if (linkError) {
+      // If both fail with "already registered", user is confirmed
       if (linkError.message?.includes("already confirmed") || linkError.message?.includes("already registered")) {
         return new Response(
           JSON.stringify({ success: true, message: "Usuário já confirmou o e-mail" }),
