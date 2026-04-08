@@ -754,6 +754,51 @@ export function AdminClientes() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Plan Change Dialog */}
+      <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Alterar Plano</DialogTitle>
+            <DialogDescription>
+              Alterar o plano de <strong>{planClient?.full_name || planClient?.email}</strong>.
+              {planClient?.plan_name && (
+                <> Plano atual: <Badge variant="secondary" className="ml-1">{planClient.plan_name}</Badge></>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium">Novo plano</label>
+              <Select value={selectedTierId} onValueChange={setSelectedTierId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Selecione o plano..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {PLAN_TIERS.map((tier) => (
+                    <SelectItem key={tier.id} value={tier.id}>{tier.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPlanOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!selectedTierId || changeUserPlan.isPending}
+              onClick={() => {
+                if (!planClient || !selectedTierId) return;
+                changeUserPlan.mutate(
+                  { userId: planClient.user_id, planTierId: selectedTierId },
+                  { onSuccess: () => { setPlanOpen(false); setPlanClient(null); refetch(); } }
+                );
+              }}
+            >
+              {changeUserPlan.isPending ? 'Alterando...' : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
