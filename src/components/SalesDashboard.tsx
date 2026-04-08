@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useSalesDataCache } from "@/hooks/useSalesDataCache";
+import { useUserAccess } from "@/contexts/UserAccessContext";
 
 // Auto-refresh interval when dashboard is visible (5 minutes)
 const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -161,6 +162,10 @@ export function SalesDashboard() {
 
   // Smart cache for sales data
   const { getCached, setCached, shouldRefreshRecent, getRecentDaysToRefresh } = useSalesDataCache();
+
+  // Unified access flags — override edge function TRIAL_EXPIRED if user has active sub
+  const { flags: accessFlags } = useUserAccess();
+  const userHasActiveSub = accessFlags?.has_active_subscription === true;
 
   // Sync state for onboarding
   const [isSyncing, setIsSyncing] = useState(false);
@@ -586,13 +591,19 @@ export function SalesDashboard() {
         </div>
       )}
       {metaState === 'BLOCKED' && (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 dark:border-amber-800/50 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+        !userHasActiveSub && <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 dark:border-amber-800/50 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>
             {metaReason === 'TRIAL_EXPIRED'
               ? 'Seu período de teste expirou. Ative um plano para continuar acessando os dados.'
               : 'Sua conta está conectada, mas ainda não possui acesso completo ao painel.'}
           </span>
+        </div>
+      )}
+      {metaState === 'BLOCKED' && userHasActiveSub && (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>Aguarde a sincronização dos dados. Seu plano está ativo.</span>
         </div>
       )}
 
