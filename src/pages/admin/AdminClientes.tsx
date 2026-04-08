@@ -53,7 +53,17 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan } = useAdminTrialManagement();
+
+  const PLAN_TIERS = [
+    { id: 'a0000000-0000-0000-0000-000000000001', name: 'ZPL Básico' },
+    { id: '26cf9f33-4e95-400b-a335-9b4d4b70f58a', name: 'Até 50 pedidos/mês' },
+    { id: 'd4fabfc5-99fe-4b5b-8459-0529ef93baf4', name: '51 a 300 pedidos/mês' },
+    { id: 'b7ffb1c9-223d-4a30-a7ca-68375982c17e', name: '301 a 700 pedidos/mês' },
+    { id: '85944f40-8c37-43c0-9609-df96742537ad', name: '701 a 1.500 pedidos/mês' },
+    { id: 'feab130a-f002-43ba-82a1-79c6371bbfea', name: '1.501 a 3.000 pedidos/mês' },
+    { id: '8243db6b-7498-4056-a9e4-53dfdeae8d0a', name: 'Acima de 3.000 pedidos/mês' },
+  ];
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
