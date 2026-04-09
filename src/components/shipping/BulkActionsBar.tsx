@@ -78,7 +78,7 @@ export function BulkActionsBar({
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'mlfacil_100x175_header')}>
                   <span className="font-medium">Com Cabeçalho</span>
-                  <span className="ml-2 text-xs text-muted-foreground">100×175mm</span>
+                  <span className="ml-2 text-xs text-muted-foreground">só etiquetas</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

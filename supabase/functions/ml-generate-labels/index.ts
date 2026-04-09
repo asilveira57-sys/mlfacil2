@@ -224,86 +224,154 @@ function buildHeaderLinesForOrder(
   return lines;
 }
 
-// Add headers to PDF pages
-async function addHeadersToPdf(
-  pdfBytes: Uint8Array,
+// ============================================================
+// SAFE per-shipment header pipeline
+// Downloads each shipment's PDF individually, applies header
+// ONLY to page 1 (label), and excludes DANFE pages entirely.
+// This eliminates the class of errors where headers leak onto
+// invoices or get swapped between orders.
+// ============================================================
+
+async function fetchSingleShipmentPdf(
+  shipmentId: string,
+  accessToken: string
+): Promise<Uint8Array | null> {
+  const url = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`;
+  
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      });
+      
+      if (res.status === 429 || res.status >= 500) {
+        if (attempt < 3) {
+          await sleep(getBackoffDelay(attempt));
+          continue;
+        }
+      }
+      
+      if (!res.ok) {
+        console.error(`Failed to fetch label for shipment ${shipmentId}: ${res.status}`);
+        return null;
+      }
+      
+      return new Uint8Array(await res.arrayBuffer());
+    } catch (err) {
+      console.error(`Error fetching shipment ${shipmentId} (attempt ${attempt}):`, err);
+      if (attempt < 3) await sleep(getBackoffDelay(attempt));
+    }
+  }
+  return null;
+}
+
+async function buildHeaderPdfSafe(
   shipmentIds: string[],
+  accessToken: string,
   headerDataMap: Map<string, string[]>,
-  fontSize: number
-): Promise<Uint8Array> {
-  const sourcePdf = await PDFDocument.load(pdfBytes);
+  fontSize: number,
+  updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>
+): Promise<{ pdfBytes: Uint8Array; processedCount: number; errorShipments: string[] }> {
   const resultPdf = await PDFDocument.create();
   const font = await resultPdf.embedFont(StandardFonts.Helvetica);
   const fontBold = await resultPdf.embedFont(StandardFonts.HelveticaBold);
   
-  const pageCount = sourcePdf.getPageCount();
+  let processedCount = 0;
+  const errorShipments: string[] = [];
   
-  // Detect pagination mode: ML API returns 2 pages per shipment (label + NF/DANFE)
-  const pagesPerShipment = pageCount === shipmentIds.length * 2 ? 2 : 1;
-  console.log(`Adding headers to ${pageCount} pages for ${shipmentIds.length} shipments (pagesPerShipment=${pagesPerShipment})`);
-
-  for (let i = 0; i < pageCount; i++) {
-    const embeddedPage = await resultPdf.embedPage(sourcePdf.getPage(i));
+  // Process each shipment individually — deterministic, no index guessing
+  for (let idx = 0; idx < shipmentIds.length; idx++) {
+    const shipmentId = shipmentIds[idx];
+    const headerLines = headerDataMap.get(shipmentId) || [];
+    
+    // Report progress every 10 shipments
+    if (idx % 10 === 0) {
+      await updateProgress(1, 'processing', 1);
+    }
+    
+    // Fetch this shipment's PDF individually
+    const pdfBytes = await fetchSingleShipmentPdf(shipmentId, accessToken);
+    if (!pdfBytes) {
+      console.error(`Skipping shipment ${shipmentId}: failed to download PDF`);
+      errorShipments.push(shipmentId);
+      continue;
+    }
+    
+    let sourcePdf: Awaited<ReturnType<typeof PDFDocument.load>>;
+    try {
+      sourcePdf = await PDFDocument.load(pdfBytes);
+    } catch (err) {
+      console.error(`Skipping shipment ${shipmentId}: invalid PDF`, err);
+      errorShipments.push(shipmentId);
+      continue;
+    }
+    
+    const pageCount = sourcePdf.getPageCount();
+    if (pageCount === 0) {
+      console.error(`Skipping shipment ${shipmentId}: PDF has 0 pages`);
+      errorShipments.push(shipmentId);
+      continue;
+    }
+    
+    // Only take page 0 (the label). Skip any additional pages (DANFE).
+    // This is the safest approach: header mode = labels only, no DANFE.
+    const embeddedPage = await resultPdf.embedPage(sourcePdf.getPage(0));
     const { width: origWidth, height: origHeight } = embeddedPage;
     
-    // In paired mode, odd pages are NF/DANFE - copy without any modification
-    const isNfPage = pagesPerShipment === 2 && i % 2 === 1;
-    if (isNfPage) {
-      const newPage = resultPdf.addPage([origWidth, origHeight]);
-      newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
-      continue;
-    }
-    
-    // Calculate correct shipment index
-    const shipmentIndex = pagesPerShipment === 2 ? Math.floor(i / 2) : i;
-    const shipmentId = shipmentIndex < shipmentIds.length ? shipmentIds[shipmentIndex] : null;
-    const headerLines = shipmentId ? (headerDataMap.get(shipmentId) || []) : [];
-    
-    if (headerLines.length === 0) {
-      // No header data - copy with original dimensions
-      const newPage = resultPdf.addPage([origWidth, origHeight]);
-      newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
-      continue;
-    }
-    
-    // Create taller page with header
-    const newHeight = origHeight + HEADER_HEIGHT_PT;
-    const newPage = resultPdf.addPage([origWidth, newHeight]);
-    
-    // Draw original label at the bottom
-    newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
-    
-    // Draw header text in the top area
-    const lineHeight = fontSize * HEADER_LINE_HEIGHT_FACTOR;
-    let textY = newHeight - HEADER_PADDING_TOP - fontSize;
-    
-    for (let j = 0; j < headerLines.length; j++) {
-      const line = headerLines[j];
+    if (headerLines.length > 0) {
+      // Create taller page with header
+      const newHeight = origHeight + HEADER_HEIGHT_PT;
+      const newPage = resultPdf.addPage([origWidth, newHeight]);
       
-      newPage.drawText(line, {
-        x: 8,
-        y: textY,
-        size: fontSize,
-        font: fontBold,
-        color: rgb(0, 0, 0),
-        maxWidth: origWidth - 16,
+      // Draw original label at the bottom
+      newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
+      
+      // Draw header text in the top area
+      const lineHeight = fontSize * HEADER_LINE_HEIGHT_FACTOR;
+      let textY = newHeight - HEADER_PADDING_TOP - fontSize;
+      
+      for (const line of headerLines) {
+        newPage.drawText(line, {
+          x: 8,
+          y: textY,
+          size: fontSize,
+          font: fontBold,
+          color: rgb(0, 0, 0),
+          maxWidth: origWidth - 16,
+        });
+        textY -= lineHeight;
+      }
+      
+      // Draw separator line between header and label
+      const separatorY = origHeight + SEPARATOR_LINE_Y_OFFSET;
+      newPage.drawLine({
+        start: { x: 4, y: separatorY },
+        end: { x: origWidth - 4, y: separatorY },
+        thickness: 1.2,
+        color: rgb(0.2, 0.2, 0.2),
       });
-      
-      textY -= lineHeight;
+    } else {
+      // No header data — copy label page as-is
+      const newPage = resultPdf.addPage([origWidth, origHeight]);
+      newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
     }
     
-    // Draw separator line between header and label
-    const separatorY = origHeight + SEPARATOR_LINE_Y_OFFSET;
-    newPage.drawLine({
-      start: { x: 4, y: separatorY },
-      end: { x: origWidth - 4, y: separatorY },
-      thickness: 1.2,
-      color: rgb(0.2, 0.2, 0.2),
-    });
+    processedCount++;
+    
+    // Small delay between individual fetches to avoid rate limiting
+    if (idx < shipmentIds.length - 1) {
+      await sleep(50);
+    }
   }
   
-  return await resultPdf.save();
+  return {
+    pdfBytes: await resultPdf.save(),
+    processedCount,
+    errorShipments,
+  };
 }
+
+// ============================================================
 
 async function processBatchWithRetry(
   batchId: number,
@@ -524,7 +592,6 @@ serve(async (req) => {
       console.log(`Re-checking ${staleOrderIds.length} orders with stale invoice status via ML API`);
       for (const orderId of staleOrderIds) {
         try {
-          // Try billing_info endpoint first
           const billingRes = await fetch(
             `https://api.mercadolibre.com/orders/${orderId}/billing_info`,
             { headers: { 'Authorization': `Bearer ${mlAccount.access_token}` } }
@@ -548,7 +615,6 @@ serve(async (req) => {
             }
           }
           
-          // Fallback: fiscal_documents endpoint
           if (freshStatus !== 'emitida') {
             try {
               const fiscalRes = await fetch(
@@ -567,11 +633,9 @@ serve(async (req) => {
             } catch { /* ignore */ }
           }
           
-          // Update cache and map if found
           if (freshStatus === 'emitida') {
             console.log(`Invoice found for order ${orderId} via live API check`);
             invoiceMap.set(orderId, { order_id: orderId, invoice_status: 'emitida' });
-            // Update cache in background (don't await)
             supabaseAdmin.from('meli_invoices_cache').upsert({
               user_id: user.id,
               seller_id,
@@ -627,8 +691,6 @@ serve(async (req) => {
         error_log: JSON.stringify(validationErrors),
       });
 
-      // Return 200 with success:false so the SDK can read validation details
-      // (non-2xx causes SDK to set error and discard the body)
       return new Response(
         JSON.stringify({ 
           success: false, 
@@ -641,13 +703,18 @@ serve(async (req) => {
       );
     }
 
-    // Split into batches of 50 (ML API limit)
-    const batches = chunkArray(validShipmentIds, MAX_BATCH_SIZE);
+    // Create job record
+    const isHeaderLayout = layout === 'mlfacil_100x175_header' && format === 'pdf';
+
+    // For header layout: we process per-shipment (no batching via ML API)
+    // For standard layout: we batch via ML API as before
+    const batches = isHeaderLayout
+      ? [validShipmentIds] // single "batch" covering all shipments
+      : chunkArray(validShipmentIds, MAX_BATCH_SIZE);
     const totalBatches = batches.length;
     
-    console.log(`Processing ${validShipmentIds.length} labels in ${totalBatches} batch(es)`);
+    console.log(`Processing ${validShipmentIds.length} labels in ${totalBatches} batch(es) (header=${isHeaderLayout})`);
 
-    // Create job record
     const batchesInitial = batches.map((batch, idx) => ({
       batch_id: idx + 1,
       shipment_ids: batch,
@@ -713,171 +780,207 @@ serve(async (req) => {
       }
     };
 
-    // Process all batches
-    const batchResults: BatchResult[] = [];
-    
-    for (let i = 0; i < batches.length; i++) {
-      const batchId = i + 1;
-      const result = await processBatchWithRetry(
-        batchId, batches[i], format, mlAccount.access_token, updateProgress
-      );
-      batchResults.push(result);
-
-      if (i < batches.length - 1) {
-        await sleep(DELAY_BETWEEN_BATCHES_MS);
-      }
-    }
-
-    // Check results
-    const successBatches = batchResults.filter(b => b.status === 'success');
-    const errorBatches = batchResults.filter(b => b.status === 'error');
-    
-    console.log(`Results: ${successBatches.length} success, ${errorBatches.length} errors`);
-
-    if (successBatches.length === 0) {
-      await supabaseAdmin.from('meli_print_queue').update({
-        status: 'erro',
-        error_log: JSON.stringify(errorBatches.map(b => ({
-          batch_id: b.batch_id, shipment_ids: b.shipment_ids, error: b.error_message,
-        }))),
-        job_completed_at: new Date().toISOString(),
-      }).eq('id', jobId);
-
-      return new Response(
-        JSON.stringify({ 
-          success: false, job_id: jobId, message: 'Todos os lotes falharam',
-          errors: errorBatches.map(b => ({ batch_id: b.batch_id, shipment_ids: b.shipment_ids, error: b.error_message })),
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Merge successful results
     let finalPdfBase64: string | null = null;
     let finalZplContent: string | null = null;
+    let totalSuccessLabels = 0;
+    let errorBatchCount = 0;
+    const batchResults: BatchResult[] = [];
 
-    if (format === 'pdf') {
-      const pdfDataArray = successBatches.filter(b => b.pdf_data).map(b => b.pdf_data!);
+    // ===== HEADER LAYOUT: safe per-shipment pipeline =====
+    if (isHeaderLayout) {
+      console.log(`[HEADER] Starting safe per-shipment pipeline for ${validShipmentIds.length} shipments`);
       
-      let mergedPdfBytes: Uint8Array;
-      if (pdfDataArray.length > 1) {
-        mergedPdfBytes = await mergePDFs(pdfDataArray);
-      } else {
-        mergedPdfBytes = pdfDataArray[0];
-      }
+      try {
+        // Load seller preferences
+        const { data: prefData } = await supabaseAdmin
+          .from('meli_label_header_preferences')
+          .select('*')
+          .eq('seller_id', seller_id)
+          .maybeSingle();
 
-      // ADD HEADERS if layout requires it
-      if (layout === 'mlfacil_100x175_header') {
-        console.log(`Adding headers to ${validShipmentIds.length} labels...`);
+        const prefs = prefData ? {
+          show_customer: prefData.show_customer,
+          show_products: prefData.show_products,
+          show_order_id: prefData.show_order_id,
+          show_shipment_id: prefData.show_shipment_id,
+          show_comment: prefData.show_comment,
+          line_order: prefData.line_order as string[],
+          max_product_lines: prefData.max_product_lines,
+          max_total_lines: prefData.max_total_lines,
+          font_size: prefData.font_size,
+        } : DEFAULT_HEADER_PREFS;
+
+        // Load order data for all valid shipments
+        const validOrderIds = validShipmentIds
+          .map(sid => shipmentToOrderId.get(sid))
+          .filter(Boolean) as string[];
+
+        const { data: ordersData } = await supabaseAdmin
+          .from('meli_orders_cache')
+          .select('order_id, pack_id, shipment_id, buyer_name, order_comment')
+          .eq('seller_id', seller_id)
+          .in('order_id', validOrderIds);
+
+        const { data: itemsData } = await supabaseAdmin
+          .from('meli_order_items_cache')
+          .select('order_id, sku, title_short, title, quantity')
+          .eq('seller_id', seller_id)
+          .in('order_id', validOrderIds);
+
+        // Group items by order_id
+        const itemsByOrder = new Map<string, typeof itemsData>();
+        for (const item of (itemsData || [])) {
+          const existing = itemsByOrder.get(item.order_id) || [];
+          existing.push(item);
+          itemsByOrder.set(item.order_id, existing);
+        }
+
+        // Build header lines for each shipment
+        const headerDataMap = new Map<string, string[]>();
+
+        for (const shipmentId of validShipmentIds) {
+          const orderId = shipmentToOrderId.get(shipmentId);
+          if (!orderId) continue;
+
+          const order = (ordersData || []).find(o => o.order_id === orderId);
+          if (!order) continue;
+
+          const items = (itemsByOrder.get(orderId) || []).map(i => ({
+            sku: i.sku,
+            title_short: i.title_short,
+            title: i.title,
+            quantity: i.quantity,
+          }));
+
+          const lines = buildHeaderLinesForOrder(prefs, {
+            order_id: order.pack_id || order.order_id,
+            shipment_id: order.shipment_id,
+            buyer_name: order.buyer_name,
+            order_comment: order.order_comment,
+          }, items);
+
+          headerDataMap.set(shipmentId, lines);
+        }
+
+        console.log(`[HEADER] Built headers for ${headerDataMap.size} shipments`);
+
+        // Build PDF with safe per-shipment pipeline
+        const headerResult = await buildHeaderPdfSafe(
+          validShipmentIds,
+          mlAccount.access_token,
+          headerDataMap,
+          prefs.font_size,
+          updateProgress
+        );
+
+        totalSuccessLabels = headerResult.processedCount;
         
-        try {
-          // Load seller preferences
-          const { data: prefData } = await supabaseAdmin
-            .from('meli_label_header_preferences')
-            .select('*')
-            .eq('seller_id', seller_id)
-            .maybeSingle();
+        if (headerResult.errorShipments.length > 0) {
+          console.warn(`[HEADER] ${headerResult.errorShipments.length} shipments failed: ${headerResult.errorShipments.join(', ')}`);
+          errorBatchCount = headerResult.errorShipments.length > 0 ? 1 : 0;
+        }
+        
+        if (totalSuccessLabels > 0) {
+          finalPdfBase64 = uint8ArrayToBase64(headerResult.pdfBytes);
+          batchResults.push({
+            batch_id: 1,
+            shipment_ids: validShipmentIds.filter(id => !headerResult.errorShipments.includes(id)),
+            status: 'success',
+            retry_count: 1,
+          });
+        }
+        
+        if (headerResult.errorShipments.length > 0) {
+          batchResults.push({
+            batch_id: 2,
+            shipment_ids: headerResult.errorShipments,
+            status: 'error',
+            retry_count: 1,
+            error_message: 'Falha ao baixar PDF individual do envio',
+          });
+        }
 
-          const prefs = prefData ? {
-            show_customer: prefData.show_customer,
-            show_products: prefData.show_products,
-            show_order_id: prefData.show_order_id,
-            show_shipment_id: prefData.show_shipment_id,
-            show_comment: prefData.show_comment,
-            line_order: prefData.line_order as string[],
-            max_product_lines: prefData.max_product_lines,
-            max_total_lines: prefData.max_total_lines,
-            font_size: prefData.font_size,
-          } : DEFAULT_HEADER_PREFS;
+        console.log(`[HEADER] Pipeline complete: ${totalSuccessLabels} labels generated`);
+      } catch (headerError) {
+        console.error('[HEADER] Fatal error in header pipeline:', headerError);
+        // Complete failure
+        batchResults.push({
+          batch_id: 1,
+          shipment_ids: validShipmentIds,
+          status: 'error',
+          retry_count: 1,
+          error_message: headerError instanceof Error ? headerError.message : 'Unknown error',
+        });
+        errorBatchCount = 1;
+      }
+    } else {
+      // ===== STANDARD LAYOUT: batch pipeline (unchanged) =====
+      for (let i = 0; i < batches.length; i++) {
+        const batchId = i + 1;
+        const result = await processBatchWithRetry(
+          batchId, batches[i], format, mlAccount.access_token, updateProgress
+        );
+        batchResults.push(result);
 
-          // Load order data for all valid shipments
-          const validOrderIds = validShipmentIds
-            .map(sid => shipmentToOrderId.get(sid))
-            .filter(Boolean) as string[];
-
-          const { data: ordersData } = await supabaseAdmin
-            .from('meli_orders_cache')
-            .select('order_id, pack_id, shipment_id, buyer_name, order_comment')
-            .eq('seller_id', seller_id)
-            .in('order_id', validOrderIds);
-
-          const { data: itemsData } = await supabaseAdmin
-            .from('meli_order_items_cache')
-            .select('order_id, sku, title_short, title, quantity')
-            .eq('seller_id', seller_id)
-            .in('order_id', validOrderIds);
-
-          // Group items by order_id
-          const itemsByOrder = new Map<string, typeof itemsData>();
-          for (const item of (itemsData || [])) {
-            const existing = itemsByOrder.get(item.order_id) || [];
-            existing.push(item);
-            itemsByOrder.set(item.order_id, existing);
-          }
-
-          // Build header lines for each shipment
-          const headerDataMap = new Map<string, string[]>();
-
-          for (const shipmentId of validShipmentIds) {
-            const orderId = shipmentToOrderId.get(shipmentId);
-            if (!orderId) continue;
-
-            const order = (ordersData || []).find(o => o.order_id === orderId);
-            if (!order) continue;
-
-            const items = (itemsByOrder.get(orderId) || []).map(i => ({
-              sku: i.sku,
-              title_short: i.title_short,
-              title: i.title,
-              quantity: i.quantity,
-            }));
-
-            const lines = buildHeaderLinesForOrder(prefs, {
-              order_id: order.pack_id || order.order_id,
-              shipment_id: order.shipment_id,
-              buyer_name: order.buyer_name,
-              order_comment: order.order_comment,
-            }, items);
-
-            headerDataMap.set(shipmentId, lines);
-          }
-
-          console.log(`Built headers for ${headerDataMap.size} shipments`);
-
-          // Add headers to PDF
-          mergedPdfBytes = await addHeadersToPdf(
-            mergedPdfBytes,
-            validShipmentIds,
-            headerDataMap,
-            prefs.font_size
-          );
-
-          console.log('Headers added successfully');
-        } catch (headerError) {
-          console.error('Error adding headers to PDF:', headerError);
-          // Continue without headers rather than failing the whole request
-          console.log('Falling back to labels without headers');
+        if (i < batches.length - 1) {
+          await sleep(DELAY_BETWEEN_BATCHES_MS);
         }
       }
 
-      finalPdfBase64 = uint8ArrayToBase64(mergedPdfBytes);
-    } else {
-      const zplDataArray = successBatches.filter(b => b.zpl_data).map(b => b.zpl_data!);
-      finalZplContent = mergeZPLs(zplDataArray);
+      const successBatches = batchResults.filter(b => b.status === 'success');
+      const errorBatches = batchResults.filter(b => b.status === 'error');
+      errorBatchCount = errorBatches.length;
+      
+      console.log(`Results: ${successBatches.length} success, ${errorBatches.length} errors`);
+
+      if (successBatches.length === 0) {
+        await supabaseAdmin.from('meli_print_queue').update({
+          status: 'erro',
+          error_log: JSON.stringify(errorBatches.map(b => ({
+            batch_id: b.batch_id, shipment_ids: b.shipment_ids, error: b.error_message,
+          }))),
+          job_completed_at: new Date().toISOString(),
+        }).eq('id', jobId);
+
+        return new Response(
+          JSON.stringify({ 
+            success: false, job_id: jobId, message: 'Todos os lotes falharam',
+            errors: errorBatches.map(b => ({ batch_id: b.batch_id, shipment_ids: b.shipment_ids, error: b.error_message })),
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (format === 'pdf') {
+        const pdfDataArray = successBatches.filter(b => b.pdf_data).map(b => b.pdf_data!);
+        
+        let mergedPdfBytes: Uint8Array;
+        if (pdfDataArray.length > 1) {
+          mergedPdfBytes = await mergePDFs(pdfDataArray);
+        } else {
+          mergedPdfBytes = pdfDataArray[0];
+        }
+        finalPdfBase64 = uint8ArrayToBase64(mergedPdfBytes);
+      } else {
+        const zplDataArray = successBatches.filter(b => b.zpl_data).map(b => b.zpl_data!);
+        finalZplContent = mergeZPLs(zplDataArray);
+      }
+
+      totalSuccessLabels = successBatches.reduce((sum, b) => sum + b.shipment_ids.length, 0);
     }
 
-    const totalSuccessLabels = successBatches.reduce((sum, b) => sum + b.shipment_ids.length, 0);
-
     // Update job as completed
-    const finalStatus = errorBatches.length > 0 ? 'parcial' : 'concluido';
+    const finalStatus = totalSuccessLabels === 0 ? 'erro' : errorBatchCount > 0 ? 'parcial' : 'concluido';
     
+    const errorBatchResults = batchResults.filter(b => b.status === 'error');
+
     await supabaseAdmin.from('meli_print_queue').update({
       status: finalStatus,
       processed_labels: totalSuccessLabels,
       batches: batchResults,
       job_completed_at: new Date().toISOString(),
-      error_log: errorBatches.length > 0 
-        ? JSON.stringify(errorBatches.map(b => ({ batch_id: b.batch_id, shipment_ids: b.shipment_ids, error: b.error_message })))
+      error_log: errorBatchResults.length > 0 
+        ? JSON.stringify(errorBatchResults.map(b => ({ batch_id: b.batch_id, shipment_ids: b.shipment_ids, error: b.error_message })))
         : null,
     }).eq('id', jobId);
 
@@ -885,16 +988,16 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({ 
-        success: true,
+        success: totalSuccessLabels > 0,
         job_id: jobId,
         total_batches: totalBatches,
-        success_batches: successBatches.length,
-        error_batches: errorBatches.length,
+        success_batches: batchResults.filter(b => b.status === 'success').length,
+        error_batches: errorBatchResults.length,
         total_labels: totalSuccessLabels,
         pdf_base64: finalPdfBase64,
         zpl_content: finalZplContent,
         validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
-        batch_errors: errorBatches.length > 0 ? errorBatches.map(b => ({
+        batch_errors: errorBatchResults.length > 0 ? errorBatchResults.map(b => ({
           batch_id: b.batch_id, shipment_ids: b.shipment_ids, error: b.error_message,
         })) : undefined,
       }),
