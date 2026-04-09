@@ -103,13 +103,17 @@ function drawFooter(doc: jsPDF, pageWidth: number, pageHeight: number) {
   }
 }
 
-export async function exportSeparationReport({
+/**
+ * Build separation report PDF in memory (does NOT save/download).
+ * Returns the jsPDF doc instance for further use (e.g. base64 conversion).
+ */
+export async function buildSeparationReportPdf({
   orders,
   orderItems,
   mode,
   logoBase64,
   sellerName,
-}: SeparationReportOptions) {
+}: SeparationReportOptions): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -146,7 +150,6 @@ export async function exportSeparationReport({
   };
 
   if (mode === 'per_order') {
-    // Per-order mode
     for (let oi = 0; oi < orders.length; oi++) {
       const order = orders[oi];
       const items = orderItems.get(order.order_id) || [];
@@ -154,7 +157,6 @@ export async function exportSeparationReport({
 
       ensureSpace(rowH + 8);
 
-      // Order header bar
       doc.setFillColor(235, 235, 240);
       doc.rect(margin, y, contentWidth, 7, 'F');
       doc.setFontSize(8);
@@ -169,17 +171,15 @@ export async function exportSeparationReport({
       }
       y += 9;
 
-      // Items
       for (const item of items) {
         ensureSpace(rowH + 2);
         drawItemRow(doc, item, thumbCache, margin, y, contentWidth, thumbSize, rowH);
         y += rowH + 1;
       }
 
-      y += 3; // gap between orders
+      y += 3;
     }
   } else {
-    // Accumulated mode – group by product_key (item_id + variation_id)
     const accMap = new Map<string, AccumulatedItem>();
     for (const order of orders) {
       const items = orderItems.get(order.order_id) || [];
@@ -202,10 +202,8 @@ export async function exportSeparationReport({
       }
     }
 
-    // Sort by quantity desc
     const accumulated = [...accMap.values()].sort((a, b) => b.quantity - a.quantity);
 
-    // Table header
     doc.setFillColor(235, 235, 240);
     doc.rect(margin, y, contentWidth, 7, 'F');
     doc.setFontSize(8);
@@ -221,7 +219,6 @@ export async function exportSeparationReport({
       const item = accumulated[i];
       ensureSpace(rowH + 2);
 
-      // Alternating bg
       if (i % 2 === 0) {
         doc.setFillColor(250, 250, 252);
         doc.rect(margin, y, contentWidth, rowH, 'F');
@@ -246,6 +243,11 @@ export async function exportSeparationReport({
 
   drawFooter(doc, pageWidth, pageHeight);
 
+  return doc;
+}
+
+export async function exportSeparationReport(options: SeparationReportOptions) {
+  const doc = await buildSeparationReportPdf(options);
   doc.save(`relatorio-separacao-${format(new Date(), 'yyyy-MM-dd-HHmm')}.pdf`);
 }
 
