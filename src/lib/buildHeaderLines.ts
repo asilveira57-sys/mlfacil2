@@ -7,6 +7,7 @@ const DEFAULT_PREFERENCES = {
   show_order_id: true,
   show_shipment_id: false,
   show_comment: true,
+  show_sku: true,
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
@@ -19,6 +20,7 @@ export interface HeaderPreferences {
   show_order_id: boolean;
   show_shipment_id: boolean;
   show_comment: boolean;
+  show_sku: boolean;
   line_order: string[];
   max_product_lines: number;
   max_total_lines: number;
@@ -69,13 +71,14 @@ function sanitize(text: string | null | undefined, maxLength = 90): string {
 }
 
 /**
- * Builds product lines from order items
- * Returns array of lines, respecting maxProductLines limit
- * If items don't fit, last line ends with "+N itens"
+ * Builds product lines from order items.
+ * Each item gets its own line: "Nx [SKU] Title"
+ * If items exceed maxProductLines, last line shows "+N itens"
  */
 function buildProductLines(
   items: OrderItem[],
   maxProductLines: number,
+  showSku: boolean,
   maxLineLength = 72
 ): string[] {
   if (items.length === 0) return [];
@@ -88,91 +91,49 @@ function buildProductLines(
     return textA.localeCompare(textB);
   });
 
-  // Format each item as "Nx SKU" or "Nx Title"
+  // Format each item: "Nx [SKU] Title" or "Nx Title"
   const formattedItems = sortedItems.map(item => {
+    const skuPart = showSku && item.sku ? `[${item.sku}] ` : '';
     const displayText = item.title_short || item.title || item.sku || 'Item';
-    const truncatedText = truncate(displayText, 60); // SKU/title max 60 chars
-    return `${item.quantity}x ${truncatedText}`;
+    // Reserve space for qty prefix + SKU bracket, truncate title to fit
+    const prefix = `${item.quantity}x ${skuPart}`;
+    const maxTitleLen = maxLineLength - prefix.length;
+    const truncatedTitle = truncate(displayText, Math.max(maxTitleLen, 15));
+    return `${prefix}${truncatedTitle}`;
   });
 
   const lines: string[] = [];
-  let currentLine = '';
-  let itemsPlaced = 0;
 
   for (let i = 0; i < formattedItems.length; i++) {
-    const item = formattedItems[i];
-    const separator = currentLine ? ' | ' : '';
-    const potentialLine = currentLine + separator + item;
-
-    // Check if we're at the line limit
-    if (lines.length === maxProductLines - 1 && i < formattedItems.length - 1) {
-      // This is the last allowed line and there are more items
-      const remainingCount = formattedItems.length - itemsPlaced;
-      
-      // Try to fit current item + remaining count
-      if (potentialLine.length + ` +${remainingCount - 1} itens`.length <= maxLineLength) {
-        currentLine = potentialLine;
-        itemsPlaced++;
-        
-        const remaining = formattedItems.length - itemsPlaced;
-        if (remaining > 0) {
-          currentLine += ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}`;
-        }
-        lines.push(currentLine);
-        break;
-      } else {
-        // Can't fit, finalize with remaining count
-        if (currentLine) {
-          const remaining = formattedItems.length - itemsPlaced;
-          currentLine += ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}`;
-          lines.push(currentLine);
-        } else {
-          // Edge case: single item too long
-          lines.push(truncate(item, maxLineLength - 10) + ` +${formattedItems.length - 1} itens`);
-        }
-        break;
-      }
-    }
-
-    // Normal case: try to add to current line
-    if (potentialLine.length <= maxLineLength) {
-      currentLine = potentialLine;
-      itemsPlaced++;
-    } else {
-      // Line is full, start new line
-      if (currentLine) {
-        lines.push(currentLine);
-        currentLine = item;
-        itemsPlaced++;
-      } else {
-        // Single item too long, truncate it
-        lines.push(truncate(item, maxLineLength));
-        itemsPlaced++;
-        currentLine = '';
-      }
-    }
-
-    // Check if we've used all allowed lines
     if (lines.length >= maxProductLines) {
-      // Add remaining count to last line if there are more items
-      const remaining = formattedItems.length - itemsPlaced;
+      // Add "+N itens" to last line
+      const remaining = formattedItems.length - i;
       if (remaining > 0 && lines.length > 0) {
-        const lastLine = lines[lines.length - 1];
         const suffix = ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}`;
+        const lastLine = lines[lines.length - 1];
         if (lastLine.length + suffix.length <= maxLineLength) {
           lines[lines.length - 1] = lastLine + suffix;
         } else {
-          // Truncate last line to fit suffix
           lines[lines.length - 1] = truncate(lastLine, maxLineLength - suffix.length) + suffix;
         }
       }
       break;
     }
-  }
 
-  // Push remaining line if not at limit
-  if (currentLine && lines.length < maxProductLines) {
-    lines.push(currentLine);
+    if (lines.length === maxProductLines - 1 && i < formattedItems.length - 1) {
+      // Last allowed line but more items remain
+      const remaining = formattedItems.length - i - 1;
+      const suffix = remaining > 0 ? ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}` : '';
+      const line = formattedItems[i];
+      if (line.length + suffix.length <= maxLineLength) {
+        lines.push(line + suffix);
+      } else {
+        lines.push(truncate(line, maxLineLength - suffix.length) + suffix);
+      }
+      break;
+    }
+
+    lines.push(truncate(formattedItems[i], maxLineLength));
   }
 
   return lines;
@@ -180,12 +141,7 @@ function buildProductLines(
 
 /**
  * Builds header lines for a shipping label based on order data and seller preferences.
- * Returns an object with the lines array and concatenated raw text for storage.
- * 
- * @param sellerId - The seller's Mercado Livre ID
- * @param order - Order data (order_id, shipment_id, buyer_name, order_comment)
- * @param items - Array of order items with sku, title, quantity
- * @returns Promise<HeaderLines> - Lines array, raw text, and preferences used
+ * Customer line is ALWAYS first, regardless of line_order configuration.
  */
 export async function buildHeaderLines(
   sellerId: string,
@@ -206,6 +162,7 @@ export async function buildHeaderLines(
         show_order_id: prefData.show_order_id,
         show_shipment_id: prefData.show_shipment_id,
         show_comment: prefData.show_comment,
+        show_sku: prefData.show_sku ?? true,
         line_order: prefData.line_order as string[],
         max_product_lines: prefData.max_product_lines,
         max_total_lines: prefData.max_total_lines,
@@ -227,9 +184,9 @@ export async function buildHeaderLines(
     lineContents.customer = [`Cliente: ${sanitize(order.buyer_name, 40)}`];
   }
 
-  // Products lines
+  // Products lines — one per item with SKU
   if (prefs.show_products && items.length > 0) {
-    lineContents.products = buildProductLines(items, prefs.max_product_lines);
+    lineContents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku);
   }
 
   // Order ID line (use pack_id if available, fallback to order_id)
@@ -250,10 +207,20 @@ export async function buildHeaderLines(
     }
   }
 
-  // Step 3: Assemble lines in configured order, respecting max_total_lines
+  // Step 3: Assemble lines — customer ALWAYS first, then remaining in configured order
   const allLines: string[] = [];
 
+  // Force customer first
+  if (lineContents.customer.length > 0) {
+    for (const line of lineContents.customer) {
+      if (allLines.length >= prefs.max_total_lines) break;
+      allLines.push(line);
+    }
+  }
+
+  // Then remaining sections in configured order (skip customer since already added)
   for (const lineType of prefs.line_order) {
+    if (lineType === 'customer') continue; // already added first
     const content = lineContents[lineType] || [];
     for (const line of content) {
       if (allLines.length >= prefs.max_total_lines) break;
@@ -274,17 +241,11 @@ export async function buildHeaderLines(
 
 /**
  * Builds header for an order using cached data from the database.
- * This is the main entry point - loads order and items from cache.
- * 
- * @param sellerId - The seller's Mercado Livre ID
- * @param orderId - The order ID to build header for
- * @returns Promise<HeaderLines | null> - Header lines or null if order not found
  */
 export async function buildHeaderLinesFromCache(
   sellerId: string,
   orderId: string
 ): Promise<HeaderLines | null> {
-  // Load order data
   const { data: orderData, error: orderError } = await supabase
     .from('meli_orders_cache')
     .select('order_id, pack_id, shipment_id, buyer_name, order_comment')
@@ -297,7 +258,6 @@ export async function buildHeaderLinesFromCache(
     return null;
   }
 
-  // Load order items
   const { data: itemsData, error: itemsError } = await supabase
     .from('meli_order_items_cache')
     .select('sku, title_short, title, quantity')
@@ -306,7 +266,6 @@ export async function buildHeaderLinesFromCache(
 
   if (itemsError) {
     console.error('Error loading items for header:', itemsError);
-    // Continue with empty items
   }
 
   const order: OrderData = {
@@ -329,7 +288,6 @@ export async function buildHeaderLinesFromCache(
 
 /**
  * Updates the internal_header field in meli_orders_cache for an order.
- * Call this after building header lines to cache the result.
  */
 export async function saveHeaderToCache(
   sellerId: string,
@@ -352,7 +310,6 @@ export async function saveHeaderToCache(
 
 /**
  * Builds and saves header for an order in one operation.
- * Returns the header lines or null if failed.
  */
 export async function buildAndSaveHeader(
   sellerId: string,

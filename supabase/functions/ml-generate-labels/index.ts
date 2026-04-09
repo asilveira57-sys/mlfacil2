@@ -40,6 +40,7 @@ const DEFAULT_HEADER_PREFS = {
   show_order_id: true,
   show_shipment_id: false,
   show_comment: true,
+  show_sku: true,
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
