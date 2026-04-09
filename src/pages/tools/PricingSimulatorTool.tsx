@@ -113,22 +113,24 @@ export default function PricingSimulatorTool() {
             <PricingCostsBlock input={input} onChange={handleChange} />
           </div>
 
-          {/* Right: Results + Scenarios (2 cols) */}
+          {/* Right: Results + CTA (2 cols) */}
           <div className="lg:col-span-2 space-y-4">
             <PricingResultsBlock result={result} salePrice={input.salePrice} />
-            <PricingScenariosBlock
-              simulations={simulations}
-              isLoading={isLoading}
-              isAuthenticated={isAuthenticated}
-              isSaving={isSaving}
-              currentInput={input}
-              currentResult={result}
-              onSave={handleSave}
-              onLoad={handleLoad}
-              onDuplicate={handleDuplicate}
-              onDelete={handleDelete}
-              onCompare={handleCompare}
-            />
+
+            {/* CTA suave para planos */}
+            <div className="rounded-lg border bg-gradient-to-br from-primary/5 to-accent/10 p-5 text-center space-y-3">
+              <p className="text-sm font-medium text-foreground">
+                💾 Quer salvar e comparar simulações?
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Com um plano ativo você pode salvar cenários, comparar lado a lado e acessar de qualquer dispositivo.
+              </p>
+              <a href="/planos">
+                <Button variant="outline" size="sm" className="mt-1">
+                  Conheça nossos planos
+                </Button>
+              </a>
+            </div>
           </div>
         </div>
 
