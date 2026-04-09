@@ -916,28 +916,25 @@ serve(async (req) => {
 
         totalSuccessLabels = headerResult.processedCount;
         
+        // BLOCK ALL: if any shipment failed, entire generation is blocked
         if (headerResult.errorShipments.length > 0) {
-          console.warn(`[HEADER] ${headerResult.errorShipments.length} shipments failed: ${headerResult.errorShipments.join(', ')}`);
-          errorBatchCount = headerResult.errorShipments.length > 0 ? 1 : 0;
-        }
-        
-        if (totalSuccessLabels > 0) {
+          console.error(`[HEADER] BLOCKED: ${headerResult.errorShipments.length} shipments failed: ${headerResult.errorShipments.join(', ')}`);
+          errorBatchCount = 1;
+          totalSuccessLabels = 0;
+          batchResults.push({
+            batch_id: 1,
+            shipment_ids: validShipmentIds,
+            status: 'error',
+            retry_count: 1,
+            error_message: `Geração bloqueada: falha no envio ${headerResult.errorShipments[0]}. Nenhum PDF foi gerado para evitar erros.`,
+          });
+        } else if (totalSuccessLabels > 0) {
           finalPdfBase64 = uint8ArrayToBase64(headerResult.pdfBytes);
           batchResults.push({
             batch_id: 1,
-            shipment_ids: validShipmentIds.filter(id => !headerResult.errorShipments.includes(id)),
+            shipment_ids: validShipmentIds,
             status: 'success',
             retry_count: 1,
-          });
-        }
-        
-        if (headerResult.errorShipments.length > 0) {
-          batchResults.push({
-            batch_id: 2,
-            shipment_ids: headerResult.errorShipments,
-            status: 'error',
-            retry_count: 1,
-            error_message: 'Falha ao baixar PDF individual do envio',
           });
         }
 
