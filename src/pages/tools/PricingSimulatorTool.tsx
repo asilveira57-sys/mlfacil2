@@ -17,12 +17,6 @@ import { calculateSimulation, DEFAULT_INPUT, type SimulationInput } from "@/lib/
 export default function PricingSimulatorTool() {
   const { t } = useTranslation('tools');
   const [input, setInput] = useState<SimulationInput>({ ...DEFAULT_INPUT });
-  const [editingId, setEditingId] = useState<string | null>(null);
-
-  const {
-    simulations, isLoading, isAuthenticated, isSaving,
-    save, update, duplicate, delete: deleteSim,
-  } = usePricingSimulations();
 
   // Auto-calculate on every input change
   const result = useMemo(() => calculateSimulation(input), [input]);
@@ -33,38 +27,6 @@ export default function PricingSimulatorTool() {
 
   const handleReset = useCallback(() => {
     setInput({ ...DEFAULT_INPUT });
-    setEditingId(null);
-  }, []);
-
-  const handleSave = useCallback(async () => {
-    if (editingId) {
-      await update({ id: editingId, input });
-    } else {
-      await save(input);
-    }
-  }, [input, editingId, save, update]);
-
-  const handleLoad = useCallback((sim: SavedSimulation) => {
-    if (sim.inputs) {
-      setInput(sim.inputs);
-      setEditingId(sim.id);
-    }
-  }, []);
-
-  const handleDuplicate = useCallback(async (sim: SavedSimulation) => {
-    await duplicate(sim);
-  }, [duplicate]);
-
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteSim(id);
-    if (editingId === id) {
-      setEditingId(null);
-      setInput({ ...DEFAULT_INPUT });
-    }
-  }, [deleteSim, editingId]);
-
-  const handleCompare = useCallback((_sim: SavedSimulation) => {
-    // Comparison is handled inside PricingScenariosBlock
   }, []);
 
   return (
@@ -88,19 +50,6 @@ export default function PricingSimulatorTool() {
 
         {/* Navigation Tabs */}
         <ToolsNavTabs />
-
-        {/* Editing indicator */}
-        {editingId && (
-          <Alert className="bg-primary/5 border-primary/20">
-            <Info className="h-4 w-4 text-primary" />
-            <AlertDescription className="text-sm">
-              {t('pricing.editing_simulation', 'Editando simulação')}: <strong>{input.productName || 'Sem nome'}</strong>
-              <Button variant="link" size="sm" className="ml-2 h-auto p-0" onClick={handleReset}>
-                {t('pricing.new_simulation', 'Nova simulação')}
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
 
         {/* Main Content - 2 columns */}
         <div className="grid lg:grid-cols-5 gap-4">
