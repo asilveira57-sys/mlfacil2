@@ -69,7 +69,7 @@ export function useOrderDetails(sellerId: string | null) {
 
       // Calculate final_status
       let finalStatus: string = 'outros';
-      const FULL_LOGISTIC_TYPES = ['fulfillment', 'cross_docking'];
+      const FULL_LOGISTIC_TYPES = ['fulfillment'];
       const COMPLETED_SHIPMENT_STATUSES = ['delivered', 'shipped', 'not_delivered'];
 
       if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
