@@ -910,7 +910,8 @@ serve(async (req) => {
           mlAccount.access_token,
           headerDataMap,
           prefs.font_size,
-          updateProgress
+          updateProgress,
+          separation_pdf_base64 || null,
         );
 
         totalSuccessLabels = headerResult.processedCount;
