@@ -1,56 +1,66 @@
 
 
-# Pedidos antigos com etiqueta pendente ficam ocultos pelo filtro de data
+# Melhorias no Cabeçalho da Etiqueta de Envio
 
-## Diagnóstico
+## Problemas identificados
 
-O ML mostra 9 etiquetas para imprimir (Coleta | Amanhã). O sistema mostra 6. Os dados no banco confirmam que existem **9 envios `ready_to_print`** com `label_available=true` para GUI_GOODMAN.
+1. **SKU ausente**: O formato atual é `1x Hélice Espargidor Superior Lava Louça...` — título abreviado e truncado, sem SKU visível, desperdiçando espaço
+2. **Carrinho (múltiplos itens)**: Cada produto precisa de linha própria com SKU + quantidade
+3. **Nome do cliente fixo na 1ª linha**: Independente da ordem configurada, o nome deve ser sempre a primeira informação
+4. **Etiqueta desalinhada**: A etiqueta original do ML é desenhada na posição `x: 0, y: 0` (canto inferior esquerdo da página), ficando encostada na borda direita em vez de centralizada
+5. **Código cortado**: Quando a etiqueta fica fora de centro, impressoras podem cortar conteúdo nas bordas
 
-A diferença: **3 pedidos foram criados há mais de 7 dias** (29/mar e 31/mar), e a usuária está com o filtro "7 dias" selecionado. O filtro usa `created_at_meli` (data da venda), não a data de despacho. Como esses pedidos ainda não foram despachados, o ML os mostra normalmente, mas o sistema os esconde.
+## Correções planejadas
 
-| Shipment | Criado em | Status | Visível em "7 dias"? |
-|---|---|---|---|
-| 46748206631 | 29/mar | ready_to_print | Não (11 dias) |
-| 46747695422 | 29/mar | ready_to_print | Não (11 dias) |
-| 46761648584 | 31/mar | ready_to_print | Não (9 dias) |
-| 6 outros | 6-9/abr | ready_to_print | Sim |
+### 1. Incluir SKU na linha de produto
+**Arquivo**: `supabase/functions/ml-generate-labels/index.ts` (função `buildProductLines`) e `src/lib/buildHeaderLines.ts`
 
-## Correção
+Formato atual: `1x Hélice Espargidor Superior Lava Louça...`
+Formato novo: `1x [SKU] Título do Produto`
 
-Alterar o RPC `get_shipping_orders` para **sempre incluir pedidos em status acionável** (pronta, aguardando_nf, reimprimir) independentemente do filtro de data. Pedidos que precisam de ação do vendedor nunca devem ser escondidos por um filtro temporal.
+Quando o item tem SKU, mostrar: `1x [W11310109] Hélice Espargidor Superior...`
+Quando não tem SKU: `1x Hélice Espargidor Superior Lava Louça...` (sem mudança)
 
-### Migration SQL
-No bloco `WHERE` do `base_orders`, mudar a lógica de data para:
-```sql
-AND (
-  CASE
-    WHEN p_period_type = 'today_dispatch' THEN
-      -- lógica existente de handling_limit (sem mudança)
-      ...
-    ELSE
-      -- Filtro de data aplica normalmente, MAS pedidos acionáveis
-      -- (ready_to_print, printed, ready_for_pickup, in_packing_list, invoice_pending)
-      -- são SEMPRE incluídos, independente da data de criação
-      (
-        (p_date_from IS NULL OR o.created_at_meli >= p_date_from)
-        AND (p_date_to IS NULL OR o.created_at_meli <= p_date_to)
-      )
-      OR (
-        s.shipment_status IN ('ready_to_ship', 'pending', 'handling')
-        AND s.logistic_type IS DISTINCT FROM 'fulfillment'
-        AND s.shipment_substatus IN ('ready_to_print', 'printed', 'ready_for_pickup', 'in_packing_list', 'invoice_pending')
-      )
-  END
-)
+Isso aproveita o espaço que sobra ao abreviar o título, inserindo o SKU entre a quantidade e o título.
+
+### 2. Carrinho: uma linha por produto
+Alterar `buildProductLines` para que, em vez de concatenar itens na mesma linha com `|`, cada produto ocupe sua própria linha:
 ```
+1x [W11310109] Hélice Espargidor Superior Lava Louça
+2x [XYZ-789] Calça Jeans 42
+```
+O separador `|` será removido. Se houver mais itens do que `max_product_lines`, a última linha continua com `+N itens`.
 
-Isso garante que qualquer pedido pendente de ação (imprimir, reimprimir, NF) aparece nos contadores, mesmo que a venda seja de 2 semanas atrás.
+### 3. Nome do cliente sempre na 1ª linha
+Na função `buildHeaderLinesForOrder` (edge function) e `buildHeaderLines` (frontend), forçar que `customer` seja sempre a primeira seção montada, independentemente da ordem configurada em `line_order`. As demais seções seguem a ordem do usuário.
 
-## Arquivo afetado
-- **Nova migration SQL** — atualizar RPC `get_shipping_orders`
+### 4. Centralizar etiqueta na página
+**Arquivo**: `supabase/functions/ml-generate-labels/index.ts` (função `buildHeaderPdfSafe`)
+
+Atualmente a etiqueta é desenhada em `x: 0, y: 0`. A página criada tem exatamente o tamanho da etiqueta original + cabeçalho, sem margem para centralização.
+
+Correção: calcular offset X para centralizar a etiqueta original dentro da página, caso a largura da página seja maior que o conteúdo. Se a etiqueta do ML já ocupa 100% da largura, não há o que centralizar — o problema pode ser que a página tem uma largura fixa (ex: A4) e a etiqueta é menor. Vou analisar as dimensões reais do PDF do ML para ajustar.
+
+Na prática, se `origWidth` < largura padrão da folha, adicionar margem simétrica: `xOffset = (pageWidth - origWidth) / 2`.
+
+### 5. Atualizar preview e configurações
+**Arquivo**: `src/pages/LabelHeaderSettings.tsx`
+
+- Atualizar `SAMPLE_ITEMS` para mostrar SKU no preview
+- Atualizar `generatePreviewLines` para usar o novo formato com SKU
+- Adicionar toggle "Exibir SKU" na seção de configurações (nova coluna `show_sku` na tabela `meli_label_header_preferences`)
+
+### 6. Migration: adicionar coluna `show_sku`
+Nova coluna `show_sku BOOLEAN DEFAULT true` na tabela `meli_label_header_preferences`.
+
+## Arquivos afetados
+- **`supabase/functions/ml-generate-labels/index.ts`** — `buildProductLines`, `buildHeaderLinesForOrder`, `buildHeaderPdfSafe` (SKU, linha por produto, cliente 1º, centralização)
+- **`src/lib/buildHeaderLines.ts`** — mesmas mudanças no código frontend (SKU, linha por produto, cliente 1º)
+- **`src/pages/LabelHeaderSettings.tsx`** — preview atualizado, toggle show_sku
+- **Nova migration SQL** — `ALTER TABLE meli_label_header_preferences ADD COLUMN show_sku boolean DEFAULT true`
 
 ## Resultado
-- "7 dias" mostra 9 para imprimir (não 6), porque inclui pedidos antigos ainda pendentes
-- Contadores batem com o ML
-- Pedidos já enviados/entregues continuam filtrados normalmente por data
+- Cabeçalho mostra: `Cliente: MRCIODURO` → `1x [W11310109] Hélice Espargidor...` → `Pedido: 200001590...`
+- Carrinho com múltiplos itens: cada um em linha separada com SKU
+- Etiqueta centralizada na folha, sem risco de código cortado
 
