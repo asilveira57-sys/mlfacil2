@@ -21453,6 +21453,20 @@ export type Database = {
               p_date_to?: string
               p_page?: number
               p_page_size?: number
+              p_search_query?: string
+              p_seller_id: string
+              p_sort_dir?: string
+              p_sort_field?: string
+              p_status_filter?: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_date_from?: string
+              p_date_to?: string
+              p_page?: number
+              p_page_size?: number
               p_period_type?: string
               p_search_query?: string
               p_seller_id: string
