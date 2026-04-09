@@ -101,10 +101,11 @@ function sanitize(text: string | null | undefined, maxLength = 90): string {
   );
 }
 
-// Build product display lines
+// Build product display lines — one item per line with SKU
 function buildProductLines(
   items: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[],
   maxProductLines: number,
+  showSku: boolean,
   maxLineLength = 58
 ): string[] {
   if (items.length === 0) return [];
@@ -114,56 +115,20 @@ function buildProductLines(
     return (a.sku || a.title_short || a.title || '').localeCompare(b.sku || b.title_short || b.title || '');
   });
 
+  // Format each item: "Nx [SKU] Title" — one per line
   const formatted = sorted.map(item => {
-    const text = truncate(item.title_short || item.title || item.sku || 'Item', 40);
-    return `${item.quantity}x ${text}`;
+    const skuPart = showSku && item.sku ? `[${item.sku}] ` : '';
+    const displayText = item.title_short || item.title || item.sku || 'Item';
+    const prefix = `${item.quantity}x ${skuPart}`;
+    const maxTitleLen = maxLineLength - prefix.length;
+    return `${prefix}${truncate(displayText, Math.max(maxTitleLen, 15))}`;
   });
 
   const lines: string[] = [];
-  let currentLine = '';
-  let placed = 0;
 
   for (let i = 0; i < formatted.length; i++) {
-    const item = formatted[i];
-    const sep = currentLine ? ' | ' : '';
-    const potential = currentLine + sep + item;
-
-    if (lines.length === maxProductLines - 1 && i < formatted.length - 1) {
-      const remaining = formatted.length - placed;
-      if (potential.length + ` +${remaining - 1} itens`.length <= maxLineLength) {
-        currentLine = potential;
-        placed++;
-        const left = formatted.length - placed;
-        if (left > 0) currentLine += ` +${left} ${left === 1 ? 'item' : 'itens'}`;
-        lines.push(currentLine);
-      } else {
-        if (currentLine) {
-          currentLine += ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}`;
-          lines.push(currentLine);
-        } else {
-          lines.push(truncate(item, maxLineLength - 10) + ` +${formatted.length - 1} itens`);
-        }
-      }
-      break;
-    }
-
-    if (potential.length <= maxLineLength) {
-      currentLine = potential;
-      placed++;
-    } else {
-      if (currentLine) {
-        lines.push(currentLine);
-        currentLine = item;
-        placed++;
-      } else {
-        lines.push(truncate(item, maxLineLength));
-        placed++;
-        currentLine = '';
-      }
-    }
-
     if (lines.length >= maxProductLines) {
-      const remaining = formatted.length - placed;
+      const remaining = formatted.length - i;
       if (remaining > 0 && lines.length > 0) {
         const suffix = ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}`;
         const last = lines[lines.length - 1];
@@ -173,16 +138,26 @@ function buildProductLines(
       }
       break;
     }
-  }
 
-  if (currentLine && lines.length < maxProductLines) {
-    lines.push(currentLine);
+    if (lines.length === maxProductLines - 1 && i < formatted.length - 1) {
+      const remaining = formatted.length - i - 1;
+      const suffix = remaining > 0 ? ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}` : '';
+      const line = formatted[i];
+      if (line.length + suffix.length <= maxLineLength) {
+        lines.push(line + suffix);
+      } else {
+        lines.push(truncate(line, maxLineLength - suffix.length) + suffix);
+      }
+      break;
+    }
+
+    lines.push(truncate(formatted[i], maxLineLength));
   }
 
   return lines;
 }
 
-// Build header lines for a single order
+// Build header lines for a single order — customer ALWAYS first
 function buildHeaderLinesForOrder(
   prefs: typeof DEFAULT_HEADER_PREFS,
   order: { order_id: string; shipment_id: string | null; buyer_name: string | null; order_comment: string | null },
@@ -200,7 +175,7 @@ function buildHeaderLinesForOrder(
     contents.customer = [`Cliente: ${sanitize(order.buyer_name, 40)}`];
   }
   if (prefs.show_products && items.length > 0) {
-    contents.products = buildProductLines(items, prefs.max_product_lines);
+    contents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku ?? true);
   }
   if (prefs.show_order_id) {
     contents.order = [`Pedido: ${order.order_id}`];
@@ -213,8 +188,16 @@ function buildHeaderLinesForOrder(
     if (clean) contents.comment = [`Obs: ${clean}`];
   }
 
+  // Customer ALWAYS first
   const lines: string[] = [];
+  if (contents.customer.length > 0) {
+    for (const line of contents.customer) {
+      if (lines.length >= prefs.max_total_lines) break;
+      lines.push(line);
+    }
+  }
   for (const lineType of prefs.line_order) {
+    if (lineType === 'customer') continue;
     for (const line of (contents[lineType] || [])) {
       if (lines.length >= prefs.max_total_lines) break;
       lines.push(line);
