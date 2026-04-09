@@ -12,7 +12,7 @@ const corsHeaders = {
 };
 
 // Substatus that indicate seller can/should print the label
-const SELLER_PRINTABLE_SUBSTATUSES = ['ready_to_print', 'printed'];
+const SELLER_PRINTABLE_SUBSTATUSES = ['ready_to_print', 'printed', 'ready_for_pickup', 'in_packing_list'];
 
 // Logistic types that are FULL (Mercado Livre handles shipping - seller doesn't print)
 const FULL_LOGISTIC_TYPES = ['fulfillment'];

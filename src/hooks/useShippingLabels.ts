@@ -156,7 +156,7 @@ const COMPLETED_ORDER_STATUSES = ['cancelled'];
 const COMPLETED_SHIPMENT_STATUSES = ['delivered', 'shipped', 'not_delivered'];
 
 // Logistic types where ML handles shipping (FULL - seller doesn't print)
-const FULL_LOGISTIC_TYPES = ['fulfillment', 'cross_docking'];
+const FULL_LOGISTIC_TYPES = ['fulfillment'];
 
 // Priority for final_status when deduplicating by shipment_id
 const STATUS_PRIORITY: Record<string, number> = {
