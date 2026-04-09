@@ -1,37 +1,48 @@
 
 
-# Correção URGENTE: Migration do RPC não foi aplicada + chaves incompatíveis
+# Corrigir classificação de status: ready_for_pickup/in_packing_list → Reimprimir
 
-## Diagnóstico
+## Problema
+O RPC `get_shipping_orders` classifica `ready_for_pickup` e `in_packing_list` como `pronta` (Para imprimir). Isso está errado: no fluxo do ML para cross_docking, esses substatuses vêm DEPOIS da impressão da etiqueta. A etiqueta já foi gerada e o envio está em fase de coleta. Qualquer impressão posterior é reimprimir.
 
-**Causa raiz**: A migration `20260409131518` que corrige o RPC `get_shipping_orders` **não foi aplicada no banco de dados**. O RPC rodando agora é a versão ANTIGA, sem:
-- Filtro `today_dispatch` (por isso "Envios de hoje" mostra 0)
-- Mapeamento de `ready_for_pickup`, `in_packing_list` → `pronta`
-- Mapeamento de `buffered` → `aguardando_nf`
-- Mapeamento de `in_hub` → `reimprimir`
-- Correção da precedência `fulfillment` vs `delivered`
+**Dados reais do GUI_GOODMAN:**
+- 19 pedidos (`ready_for_pickup` + `in_packing_list`) → aparecem como "Para imprimir 19"
+- 0 pedidos `printed` → único status mapeado para "Reimprimir"
+- Resultado: "Reimprimir 0" quando o usuário espera ver 19
 
-**Segundo problema**: A migration usa chaves **camelCase** (`totalCount`, `statusCounts`) mas o frontend espera **snake_case** (`total_count`, `status_counts`). Se a migration fosse aplicada do jeito que está, os contadores ficariam zerados.
-
-**Evidência no banco**: Existem agora mesmo 49 pedidos cross_docking `ready_to_print` com `label_available=true` que deveriam aparecer como "Para imprimir", mas o RPC antigo os ignora por causa da ordem de precedência errada ou filtro de data incorreto.
+## Mapeamento correto
+| Substatus ML | Status no sistema | Motivo |
+|---|---|---|
+| `ready_to_print` + label_available | `pronta` | Primeira impressão, etiqueta acabou de ficar disponível |
+| `ready_for_pickup` | `reimprimir` | Etiqueta já gerada, coleta agendada |
+| `in_packing_list` | `reimprimir` | Etiqueta já gerada, em preparação para coleta |
+| `printed` | `reimprimir` | Etiqueta já impressa (como já está) |
+| `invoice_pending` | `aguardando_nf` | Sem mudança |
+| `in_hub`, `dropped_off` | `enviado` | Sem mudança |
 
 ## Correção
+**Nova migration SQL** — Alterar o CASE do `final_status` no RPC `get_shipping_orders`:
 
-### 1. Recriar migration com chaves compatíveis com o frontend
-Criar nova migration SQL com o RPC corrigido, usando **snake_case** nas chaves do JSON retornado (`total_count`, `status_counts`) para manter compatibilidade com o frontend existente (linhas 321-328 do `useShippingLabels.ts`).
+```sql
+-- DE:
+WHEN s.shipment_substatus IN ('ready_for_pickup', 'in_packing_list') 
+     AND COALESCE(s.label_available, false) THEN 'pronta'
 
-A lógica do RPC será idêntica à da migration anterior que não foi aplicada, apenas corrigindo as chaves de retorno.
+-- PARA:
+WHEN s.shipment_substatus IN ('ready_for_pickup', 'in_packing_list') THEN 'reimprimir'
+```
 
-### 2. Nenhuma alteração de frontend necessária
-O frontend já está correto — já envia `p_period_type: 'today_dispatch'` e já lê `result.total_count` / `result.status_counts`.
+E igualmente no bloco `selectable`:
+```sql
+-- Manter selectable=true para reimprimir (ready_for_pickup, in_packing_list, printed)
+WHEN s.shipment_substatus IN ('printed', 'ready_for_pickup', 'in_packing_list') THEN true
+```
 
 ## Arquivo afetado
-- **Nova migration SQL** — recriar `get_shipping_orders` com todas as correções + chaves snake_case
+- **Nova migration SQL** — recriar RPC `get_shipping_orders` com mapeamento corrigido
 
 ## Resultado
-- Filtro "Envios de hoje" funciona por `estimated_handling_limit`
-- Pedidos coleta (`ready_for_pickup`, `in_packing_list`) aparecem como "Para imprimir"
-- Pedidos `buffered` aparecem como "Aguardando NF"
-- Pedidos `printed` e `in_hub` aparecem como "Reimprimir"
-- Contadores de status funcionam corretamente
+- GUI_GOODMAN verá "Para imprimir 0, Reimprimir 19" — correto e alinhado com ML
+- Pedidos `ready_to_print` continuam como "Para imprimir" (primeira vez)
+- Pedidos pós-impressão ficam em "Reimprimir" como o usuário espera
 
