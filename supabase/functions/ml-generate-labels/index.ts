@@ -828,6 +828,7 @@ serve(async (req) => {
           show_order_id: prefData.show_order_id,
           show_shipment_id: prefData.show_shipment_id,
           show_comment: prefData.show_comment,
+          show_sku: prefData.show_sku ?? true,
           line_order: prefData.line_order as string[],
           max_product_lines: prefData.max_product_lines,
           max_total_lines: prefData.max_total_lines,
