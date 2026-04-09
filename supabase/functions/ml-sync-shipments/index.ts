@@ -15,7 +15,7 @@ const corsHeaders = {
 const SELLER_PRINTABLE_SUBSTATUSES = ['ready_to_print', 'printed'];
 
 // Logistic types that are FULL (Mercado Livre handles shipping - seller doesn't print)
-const FULL_LOGISTIC_TYPES = ['fulfillment', 'cross_docking'];
+const FULL_LOGISTIC_TYPES = ['fulfillment'];
 
 // State name to UF mapping
 const STATE_TO_UF: Record<string, string> = {

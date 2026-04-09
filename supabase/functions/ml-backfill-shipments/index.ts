@@ -26,7 +26,7 @@ const STATE_TO_UF: Record<string, string> = {
 };
 
 const SELLER_PRINTABLE_SUBSTATUSES = ['ready_to_print', 'printed'];
-const FULL_LOGISTIC_TYPES = ['fulfillment', 'cross_docking'];
+const FULL_LOGISTIC_TYPES = ['fulfillment'];
 
 const BATCH_SIZE = 50;
 const MAX_PER_EXECUTION = 200;
