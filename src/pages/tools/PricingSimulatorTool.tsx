@@ -10,11 +10,9 @@ import {
   PricingLogisticsBlock,
   PricingCostsBlock,
   PricingResultsBlock,
-  PricingScenariosBlock,
   PricingVariationsBlock,
 } from "@/components/tools/pricing";
 import { calculateSimulation, DEFAULT_INPUT, type SimulationInput } from "@/lib/pricing-engine";
-import { usePricingSimulations, type SavedSimulation } from "@/hooks/usePricingSimulations";
 
 export default function PricingSimulatorTool() {
   const { t } = useTranslation('tools');
