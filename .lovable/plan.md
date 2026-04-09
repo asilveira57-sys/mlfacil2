@@ -1,62 +1,38 @@
 
 
-# Correção: Pedidos cross_docking não aparecem como "Para Imprimir"
+# Unificar Calculadora de Precificação (Frontend vs Backend)
 
-## Diagnóstico confirmado
+## Problema atual
+- **Frontend** (`/ferramentas/precificacao`): Calculadora completa (categoria, frete, variações) mas pede login para salvar — errado, é ambiente gratuito
+- **Backend** (`/precificacao`): Calculadora simples com apenas 6 campos — deveria ser igual à do frontend, com salvamento habilitado
 
-O problema é uma classificação errada do tipo logístico **cross_docking**. O sistema trata `cross_docking` como `fulfillment` (full), mas isso está incorreto:
+## Correções
 
-- **Fulfillment**: ML armazena, embala e despacha. Vendedor NÃO imprime etiqueta.
-- **Cross_docking**: Vendedor PRECISA imprimir etiqueta e levar ao ponto de coleta. ML só faz o transporte depois.
+### 1. Frontend — Remover opção de salvar, adicionar CTA de planos
+**Arquivo:** `src/components/tools/pricing/PricingScenariosBlock.tsx`
+- Remover o bloco de "Faça login para salvar" com botão "Entrar"
+- Substituir por CTA suave: "Quer salvar e comparar simulações? Conheça nossos planos" com link para `/planos`
+- Remover o botão "Salvar simulação atual" quando não autenticado
+- Manter a calculadora completa funcionando normalmente sem login
 
-### Dados do GUI_GOODMAN agora:
-- **8 pedidos** com `cross_docking` + `ready_to_print` → deveriam ser "Para Imprimir" mas estão como "Full"
-- **0 pedidos** aparecem como "Para Imprimir" no sistema
-- No Mercado Livre, esses mesmos pedidos aparecem em "Coleta | Amanhã" com "Etiquetas para imprimir"
+**Arquivo:** `src/pages/tools/PricingSimulatorTool.tsx`
+- Remover o bloco `PricingScenariosBlock` completamente do frontend (já que não faz sentido sem salvamento)
+- Substituir por um card simples com CTA para planos
 
-### Causa raiz (4 arquivos + 1 RPC SQL)
-Todos definem `FULL_LOGISTIC_TYPES = ['fulfillment', 'cross_docking']`, fazendo `label_available = false` para cross_docking e classificando como status `'full'`.
-
-## Correção
-
-### 1. Remover `cross_docking` de FULL_LOGISTIC_TYPES em 4 edge functions
-- `supabase/functions/shipping-labels-sync/index.ts`
-- `supabase/functions/ml-sync-shipments/index.ts`
-- `supabase/functions/ml-backfill-shipments/index.ts`
-- `supabase/functions/meli-shipping-cutoff-refresh/index.ts`
-
-Mudar para: `FULL_LOGISTIC_TYPES = ['fulfillment']`
-
-### 2. Corrigir RPC `get_shipping_orders` (migration SQL)
-Na classificação `final_status`, mudar:
-```sql
--- DE:
-WHEN s.logistic_type IN ('fulfillment','cross_docking') ... THEN 'full'
--- PARA:
-WHEN s.logistic_type = 'fulfillment' ... THEN 'full'
-```
-
-### 3. Corrigir dados existentes (migration SQL)
-Atualizar todos os registros `cross_docking` com `ready_to_print`/`printed` para `label_available = true`:
-```sql
-UPDATE meli_shipments_cache
-SET label_available = true
-WHERE logistic_type = 'cross_docking'
-  AND shipment_substatus IN ('ready_to_print', 'printed');
-```
-
-### 4. Re-deploy das edge functions
-Deploy automático das 4 funções corrigidas.
+### 2. Backend — Substituir calculadora simples pela completa
+**Arquivo:** `src/pages/Precificacao.tsx`
+- Remover toda a implementação atual (calculadora simples de 6 campos)
+- Importar e usar os mesmos componentes da ferramenta frontend: `PricingProductBlock`, `PricingLogisticsBlock`, `PricingCostsBlock`, `PricingResultsBlock`, `PricingVariationsBlock`, `PricingScenariosBlock`
+- Usar o mesmo `calculateSimulation` e `SimulationInput` do `pricing-engine`
+- Manter `PricingScenariosBlock` com salvamento habilitado (usuário já está logado)
+- Manter dentro do `PageContainer` existente (layout do backend)
 
 ## Arquivos afetados
-- `supabase/functions/shipping-labels-sync/index.ts` — remover `cross_docking` de FULL
-- `supabase/functions/ml-sync-shipments/index.ts` — idem
-- `supabase/functions/ml-backfill-shipments/index.ts` — idem
-- `supabase/functions/meli-shipping-cutoff-refresh/index.ts` — idem (para cutoff card)
-- **Migration SQL** — corrigir RPC + dados existentes
+- `src/pages/tools/PricingSimulatorTool.tsx` — trocar cenários por CTA de planos
+- `src/pages/Precificacao.tsx` — reescrever usando componentes completos + salvamento
+- `src/components/tools/pricing/PricingScenariosBlock.tsx` — sem alteração (usado no backend)
 
 ## Resultado
-- Os 8 pedidos cross_docking do GUI_GOODMAN passam a aparecer como "Para Imprimir"
-- Pedidos de coleta (amanhã ou hoje) ficam visíveis e imprimíveis no sistema
-- Fulfillment continua como "Full" (sem ação do vendedor)
+- Visitante usa calculadora completa sem pressão para cadastro, vê CTA suave para planos
+- Usuário logado tem a mesma calculadora completa + pode salvar, comparar e gerenciar cenários
 
