@@ -270,7 +270,8 @@ async function buildHeaderPdfSafe(
   accessToken: string,
   headerDataMap: Map<string, string[]>,
   fontSize: number,
-  updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>
+  updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>,
+  separationPdfBase64?: string | null,
 ): Promise<{ pdfBytes: Uint8Array; processedCount: number; errorShipments: string[] }> {
   const resultPdf = await PDFDocument.create();
   const font = await resultPdf.embedFont(StandardFonts.Helvetica);
@@ -292,29 +293,29 @@ async function buildHeaderPdfSafe(
     // Fetch this shipment's PDF individually
     const pdfBytes = await fetchSingleShipmentPdf(shipmentId, accessToken);
     if (!pdfBytes) {
-      console.error(`Skipping shipment ${shipmentId}: failed to download PDF`);
+      console.error(`BLOCKING: shipment ${shipmentId} failed to download PDF`);
       errorShipments.push(shipmentId);
-      continue;
+      // BLOCK ALL: any failure stops the entire generation
+      break;
     }
     
     let sourcePdf: Awaited<ReturnType<typeof PDFDocument.load>>;
     try {
       sourcePdf = await PDFDocument.load(pdfBytes);
     } catch (err) {
-      console.error(`Skipping shipment ${shipmentId}: invalid PDF`, err);
+      console.error(`BLOCKING: shipment ${shipmentId} has invalid PDF`, err);
       errorShipments.push(shipmentId);
-      continue;
+      break;
     }
     
     const pageCount = sourcePdf.getPageCount();
     if (pageCount === 0) {
-      console.error(`Skipping shipment ${shipmentId}: PDF has 0 pages`);
+      console.error(`BLOCKING: shipment ${shipmentId} PDF has 0 pages`);
       errorShipments.push(shipmentId);
-      continue;
+      break;
     }
     
-    // Only take page 0 (the label). Skip any additional pages (DANFE).
-    // This is the safest approach: header mode = labels only, no DANFE.
+    // === PAGE 0: Label — apply header ===
     const embeddedPage = await resultPdf.embedPage(sourcePdf.getPage(0));
     const { width: origWidth, height: origHeight } = embeddedPage;
     
@@ -356,11 +357,50 @@ async function buildHeaderPdfSafe(
       newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
     }
     
+    // === PAGES 1..N: DANFE/invoice — copy as-is, NO header ===
+    if (pageCount > 1) {
+      const danfeIndices = Array.from({ length: pageCount - 1 }, (_, i) => i + 1);
+      const copiedDanfePages = await resultPdf.copyPages(sourcePdf, danfeIndices);
+      for (const danfePage of copiedDanfePages) {
+        resultPdf.addPage(danfePage);
+      }
+    }
+    
     processedCount++;
     
     // Small delay between individual fetches to avoid rate limiting
     if (idx < shipmentIds.length - 1) {
       await sleep(50);
+    }
+  }
+  
+  // If any shipment failed, block entire generation
+  if (errorShipments.length > 0) {
+    return {
+      pdfBytes: new Uint8Array(0),
+      processedCount: 0,
+      errorShipments,
+    };
+  }
+  
+  // === APPEND SEPARATION REPORT as last page(s) ===
+  if (separationPdfBase64) {
+    try {
+      // Decode base64 to Uint8Array
+      const binaryStr = atob(separationPdfBase64);
+      const sepBytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        sepBytes[i] = binaryStr.charCodeAt(i);
+      }
+      const sepDoc = await PDFDocument.load(sepBytes);
+      const sepPages = await resultPdf.copyPages(sepDoc, sepDoc.getPageIndices());
+      for (const page of sepPages) {
+        resultPdf.addPage(page);
+      }
+      console.log(`[HEADER] Appended ${sepPages.length} separation report page(s)`);
+    } catch (err) {
+      console.error('[HEADER] Failed to append separation report:', err);
+      // Don't block generation for separation report failure
     }
   }
   
@@ -519,7 +559,7 @@ serve(async (req) => {
       return gate.response!;
     }
 
-    const { seller_id, shipment_ids, format, layout = 'meli_100x150' } = await req.json();
+    const { seller_id, shipment_ids, format, layout = 'meli_100x150', separation_pdf_base64 } = await req.json();
     
     if (!seller_id || !shipment_ids || shipment_ids.length === 0) {
       return new Response(
