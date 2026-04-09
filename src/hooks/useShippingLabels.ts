@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { buildSeparationReportPdf } from '@/utils/exportSeparationReport';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { startOfDay, endOfDay, subDays, subHours } from 'date-fns';
 import { toast as sonnerToast } from 'sonner';
@@ -892,6 +893,38 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         error_batches: 0,
       });
 
+      // For header layout, generate separation report and send as base64
+      let separation_pdf_base64: string | undefined;
+      if (layout === 'mlfacil_100x175_header' && format === 'pdf') {
+        try {
+          const selectedOrders = shipmentId
+            ? orders.filter(o => o.shipment_id === shipmentId)
+            : orders.filter(o => selectedIds.has(o.id));
+          
+          if (selectedOrders.length > 0) {
+            const sepDoc = await buildSeparationReportPdf({
+              orders: selectedOrders,
+              orderItems,
+              mode: 'per_order',
+              sellerName: undefined,
+            });
+            // Convert jsPDF output to base64
+            const sepArrayBuffer = sepDoc.output('arraybuffer');
+            const sepBytes = new Uint8Array(sepArrayBuffer);
+            let binary = '';
+            const chunkSize = 32768;
+            for (let i = 0; i < sepBytes.length; i += chunkSize) {
+              const chunk = sepBytes.subarray(i, i + chunkSize);
+              binary += String.fromCharCode.apply(null, Array.from(chunk));
+            }
+            separation_pdf_base64 = btoa(binary);
+          }
+        } catch (err) {
+          console.error('Failed to generate separation report for header layout:', err);
+          // Don't block label generation if separation report fails
+        }
+      }
+
       const response = await supabase.functions.invoke('ml-generate-labels', {
         headers,
         body: {
@@ -899,6 +932,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           shipment_ids: shipmentIds,
           format,
           layout,
+          ...(separation_pdf_base64 ? { separation_pdf_base64 } : {}),
         },
       });
 
