@@ -1,0 +1,1 @@
+ALTER TABLE public.meli_label_header_preferences ADD COLUMN IF NOT EXISTS show_sku boolean NOT NULL DEFAULT true;
