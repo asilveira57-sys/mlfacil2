@@ -18,6 +18,7 @@ const DEFAULT_PREFERENCES: HeaderPreferences = {
   show_order_id: true,
   show_shipment_id: false,
   show_comment: true,
+  show_sku: true,
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
@@ -40,7 +41,7 @@ const SAMPLE_ORDER: OrderData = {
 };
 
 const SAMPLE_ITEMS: OrderItem[] = [
-  { sku: null, title_short: 'Etiqueta Adesiva Couche 30x15 3 Colunas 32 Metros 6 Rolos', title: 'Etiqueta Adesiva Couche 30x15 3 Colunas 32 Metros 6 Rolos Branco', quantity: 1 },
+  { sku: 'W11310109', title_short: 'Hélice Espargidor Superior Lava Louça', title: 'Hélice Espargidor Superior Lava Louça Brastemp', quantity: 1 },
   { sku: 'XYZ-789', title_short: 'Calça Jeans 42', title: 'Calça Jeans Tamanho 42', quantity: 1 },
   { sku: 'DEF-456', title_short: 'Tênis Branco 40', title: 'Tênis Branco Tamanho 40', quantity: 1 },
   { sku: null, title_short: 'Meia Preta Kit 3 pares', title: 'Meia Preta Kit 3 pares', quantity: 3 },
@@ -52,13 +53,11 @@ export default function LabelHeaderSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
-  // Use global active account from context
   const { activeAccount, sellerId, loading: accountLoading, initialized } = useActiveAccount();
   
   const [preferences, setPreferences] = useState<HeaderPreferences>(DEFAULT_PREFERENCES);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Redirect if no account
   useEffect(() => {
     if (!accountLoading && initialized && !activeAccount) {
       toast({
@@ -70,7 +69,6 @@ export default function LabelHeaderSettings() {
     }
   }, [accountLoading, initialized, activeAccount, navigate, toast]);
 
-  // Fetch preferences when sellerId changes
   useEffect(() => {
     if (!sellerId) return;
     
@@ -88,6 +86,7 @@ export default function LabelHeaderSettings() {
           show_order_id: prefData.show_order_id,
           show_shipment_id: prefData.show_shipment_id,
           show_comment: prefData.show_comment,
+          show_sku: prefData.show_sku ?? true,
           line_order: prefData.line_order as string[],
           max_product_lines: prefData.max_product_lines,
           max_total_lines: prefData.max_total_lines,
@@ -100,7 +99,7 @@ export default function LabelHeaderSettings() {
     fetchPreferences();
   }, [sellerId]);
 
-  // Generate preview lines
+  // Generate preview lines — customer always first, one product per line with SKU
   const generatePreviewLines = useCallback((): string[] => {
     const lineContents: Record<string, string[]> = {
       customer: [],
@@ -109,70 +108,64 @@ export default function LabelHeaderSettings() {
       comment: [],
     };
 
-    // Customer line
     if (preferences.show_customer && SAMPLE_ORDER.buyer_name) {
       lineContents.customer = [`Cliente: ${SAMPLE_ORDER.buyer_name}`];
     }
 
-    // Products lines
     if (preferences.show_products && SAMPLE_ITEMS.length > 0) {
       const sortedItems = [...SAMPLE_ITEMS].sort((a, b) => b.quantity - a.quantity);
       const lines: string[] = [];
-      let currentLine = '';
-      let itemsPlaced = 0;
       const maxLineLength = 70;
 
       for (let i = 0; i < sortedItems.length; i++) {
-        const item = sortedItems[i];
-        const displayText = item.sku || item.title_short || item.title || 'Item';
-        const formatted = `${item.quantity}x ${displayText.substring(0, 60)}`;
-        const separator = currentLine ? ' | ' : '';
-        const potentialLine = currentLine + separator + formatted;
-
-        if (lines.length === preferences.max_product_lines - 1 && i < sortedItems.length - 1) {
-          const remaining = sortedItems.length - itemsPlaced;
-          if (currentLine) {
-            currentLine += ` +${remaining} itens`;
-            lines.push(currentLine);
+        if (lines.length >= preferences.max_product_lines) {
+          const remaining = sortedItems.length - i;
+          if (remaining > 0 && lines.length > 0) {
+            const suffix = ` +${remaining} itens`;
+            lines[lines.length - 1] = lines[lines.length - 1] + suffix;
           }
           break;
         }
 
-        if (potentialLine.length <= maxLineLength) {
-          currentLine = potentialLine;
-          itemsPlaced++;
-        } else {
-          if (currentLine) {
-            lines.push(currentLine);
-            currentLine = formatted;
-            itemsPlaced++;
-          }
+        const item = sortedItems[i];
+        const skuPart = preferences.show_sku && item.sku ? `[${item.sku}] ` : '';
+        const displayText = item.title_short || item.title || 'Item';
+        const prefix = `${item.quantity}x ${skuPart}`;
+        const maxTitleLen = maxLineLength - prefix.length;
+        const formatted = `${prefix}${displayText.substring(0, Math.max(maxTitleLen, 15))}`;
+
+        if (lines.length === preferences.max_product_lines - 1 && i < sortedItems.length - 1) {
+          const remaining = sortedItems.length - i - 1;
+          const suffix = remaining > 0 ? ` +${remaining} itens` : '';
+          lines.push(formatted + suffix);
+          break;
         }
 
-        if (lines.length >= preferences.max_product_lines) break;
-      }
-
-      if (currentLine && lines.length < preferences.max_product_lines) {
-        lines.push(currentLine);
+        lines.push(formatted);
       }
 
       lineContents.products = lines;
     }
 
-    // Order ID line
     if (preferences.show_order_id) {
       lineContents.order = [`Pedido: ${SAMPLE_ORDER.order_id}`];
     }
 
-    // Comment line
     if (preferences.show_comment && SAMPLE_ORDER.order_comment) {
       const cleanComment = SAMPLE_ORDER.order_comment.substring(0, 50);
       lineContents.comment = [`Obs: ${cleanComment}...`];
     }
 
-    // Assemble in order
+    // Customer ALWAYS first, then remaining in configured order
     const allLines: string[] = [];
+    if (lineContents.customer.length > 0) {
+      for (const line of lineContents.customer) {
+        if (allLines.length >= preferences.max_total_lines) break;
+        allLines.push(line);
+      }
+    }
     for (const lineType of preferences.line_order) {
+      if (lineType === 'customer') continue;
       const content = lineContents[lineType] || [];
       for (const line of content) {
         if (allLines.length >= preferences.max_total_lines) break;
@@ -184,11 +177,9 @@ export default function LabelHeaderSettings() {
     return allLines;
   }, [preferences]);
 
-  // Calculate estimated header height in mm
-  // Formula: line_height ≈ font_size * 1.4, convert pt to mm (1pt ≈ 0.353mm)
   const calculateHeaderHeight = useCallback((lines: number, fontSize: number): number => {
     const lineHeightMm = fontSize * 1.4 * 0.353;
-    const paddingMm = 2; // Top and bottom padding
+    const paddingMm = 2;
     return lines * lineHeightMm + paddingMm;
   }, []);
 
@@ -237,6 +228,7 @@ export default function LabelHeaderSettings() {
           show_order_id: preferences.show_order_id,
           show_shipment_id: preferences.show_shipment_id,
           show_comment: preferences.show_comment,
+          show_sku: preferences.show_sku,
           line_order: preferences.line_order,
           max_product_lines: preferences.max_product_lines,
           max_total_lines: preferences.max_total_lines,
@@ -332,6 +324,16 @@ export default function LabelHeaderSettings() {
                   />
                 </div>
                 <div className="flex items-center justify-between">
+                  <Label htmlFor="show_sku" className="flex-1">Exibir SKU nos Produtos</Label>
+                  <Switch
+                    id="show_sku"
+                    checked={preferences.show_sku}
+                    onCheckedChange={(checked) => 
+                      setPreferences(prev => ({ ...prev, show_sku: checked }))
+                    }
+                  />
+                </div>
+                <div className="flex items-center justify-between">
                   <Label htmlFor="show_order_id" className="flex-1">Número do Pedido</Label>
                   <Switch
                     id="show_order_id"
@@ -359,7 +361,7 @@ export default function LabelHeaderSettings() {
               <CardHeader>
                 <CardTitle>Ordem das Seções</CardTitle>
                 <CardDescription>
-                  Arraste para reorganizar a ordem de exibição
+                  Arraste para reorganizar (o nome do cliente aparece sempre em 1º)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -380,7 +382,7 @@ export default function LabelHeaderSettings() {
                         {LINE_TYPE_LABELS[lineType] || lineType}
                       </span>
                       <span className="text-sm text-muted-foreground">
-                        {index + 1}º
+                        {lineType === 'customer' ? '1º (fixo)' : `${index + 1}º`}
                       </span>
                     </div>
                   ))}
