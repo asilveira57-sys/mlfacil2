@@ -13,7 +13,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // Substatus that indicate seller can/should print the label
 const SELLER_PRINTABLE_SUBSTATUSES = ["ready_to_print", "printed"];
-const FULL_LOGISTIC_TYPES = ["fulfillment", "cross_docking"];
+const FULL_LOGISTIC_TYPES = ["fulfillment"];
 const ACTIVE_SHIPMENT_STATUSES = ["ready_to_ship", "handling", "pending"];
 
 const STATE_TO_UF: Record<string, string> = {

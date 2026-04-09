@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
 
         const agencyTypes = ["xd_drop_off", "drop_off"];
         const flexTypes = ["self_service"];
-        const fullTypes = ["fulfillment", "cross_docking"];
+        const fullTypes = ["fulfillment"];
 
         if (activeShipments && activeShipments.length > 0) {
           // First pass: try to get agency cutoff from estimated_schedule_limit (correct field)
