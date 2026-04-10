@@ -29,6 +29,7 @@ export interface ShippingOrder {
   user_id: string;
   seller_id: string;
   order_id: string;
+  pack_id: string | null;
   created_at_meli: string | null;
   order_status: string | null;
   shipment_id: string | null;
