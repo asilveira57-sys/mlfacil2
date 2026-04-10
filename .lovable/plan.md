@@ -1,65 +1,50 @@
 
 
-# Mascarar Link de Verificação — Remover "Lovable" e "Supabase" da URL
+# Corrigir Estrutura do PDF "Com Cabeçalho" — Eliminar Páginas de Separação Individuais
 
 ## Problema
 
-Quando você copia o link de verificação para enviar ao cliente, a URL expõe dois domínios internos:
-- `rfckrbqwdsejicjlxqdv.supabase.co` (verificação)
-- `mlfacil2.lovable.app` (redirect)
+O PDF da API do Mercado Livre retorna **3 páginas por envio**: etiqueta, DANFE e uma "lista de separação" do ML. O código atual copia TODAS as páginas após a etiqueta como se fossem DANFE (linhas 344-351), resultando em:
 
-O cliente vê nomes técnicos que não têm relação com o MKTP Fácil.
+- Página 1: Etiqueta + Cabeçalho ✓
+- Página 2: DANFE ✓
+- **Página 3: Lista de separação do ML** ✗ (indesejada, individual por pedido)
 
-## Solução
+Para 12 vendas, gera 36 páginas + separação custom = 37. O correto seria 24 + 1 = 25 (ou 24 sem separação).
 
-Criar um sistema de redirecionamento usando o domínio próprio `www.mktpfacil.com`. O fluxo:
+## Correção
 
-1. Admin clica "Copiar link de verificação"
-2. A edge function gera o link real do Supabase, salva numa tabela temporária com um token curto (UUID)
-3. O link copiado para a área de transferência é: `https://www.mktpfacil.com/verificar?t=abc123...`
-4. Cliente clica no link → página do app busca o link real → redireciona automaticamente para a verificação
+### 1. Limitar cópia a apenas 1 página extra (DANFE)
 
-O cliente nunca vê "Lovable" ou "Supabase" na URL.
+Na função `buildHeaderPdfSafe`, substituir a lógica que copia TODAS as páginas extras (linhas 344-351) por uma que copia **apenas a página 1** (DANFE), ignorando páginas 2+ do ML (listas de separação individuais):
 
-## Implementação
+```typescript
+// ANTES: copia TUDO após página 0
+if (pageCount > 1) {
+  const danfeIndices = Array.from({ length: pageCount - 1 }, (_, i) => i + 1);
+  ...
+}
 
-### 1. Migration — tabela `verification_links`
-```sql
-CREATE TABLE verification_links (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  verification_url TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  expires_at TIMESTAMPTZ DEFAULT now() + INTERVAL '72 hours',
-  used BOOLEAN DEFAULT false
-);
--- RLS: leitura pública (para o redirect funcionar), inserção apenas via service role
+// DEPOIS: copia SOMENTE página 1 (DANFE), ignora página 2+ (separação ML)
+if (pageCount > 1) {
+  const [danfePage] = await resultPdf.copyPages(sourcePdf, [1]);
+  resultPdf.addPage(danfePage);
+}
 ```
 
-### 2. Edge function `admin-resend-verification`
-Após gerar o `action_link`, salvar na tabela `verification_links` e retornar a URL mascarada:
-```
-https://www.mktpfacil.com/verificar?t={id}
-```
+### 2. Remover envio do relatório de separação
 
-### 3. Página frontend `/verificar`
-Nova rota React que:
-- Lê o parâmetro `t` da URL
-- Busca o `verification_url` na tabela `verification_links`
-- Se válido e não expirado, redireciona com `window.location.href`
-- Se inválido/expirado, mostra mensagem amigável
-
-### 4. Rota no App.tsx
-Adicionar `/verificar` como rota pública (sem auth gate).
-
-## Arquivos afetados
-- **Nova migration SQL** — criar tabela `verification_links`
-- **`supabase/functions/admin-resend-verification/index.ts`** — salvar link e retornar URL mascarada
-- **Novo `src/pages/Verificar.tsx`** — página de redirect
-- **`src/App.tsx`** — adicionar rota `/verificar`
+O relatório de separação custom (`separation_pdf_base64`) será removido do fluxo. O usuário confirmou que não é útil e pode corromper o resultado. Remover:
+- No frontend (`useShippingLabels.ts`): eliminar a geração de `buildSeparationReportPdf` e o envio de `separation_pdf_base64`
+- Na edge function: remover o parâmetro e o bloco de append (linhas 370-389)
 
 ## Resultado
-- Link copiado: `https://www.mktpfacil.com/verificar?t=abc123`
-- Zero menção a Lovable ou Supabase
-- Links expiram em 72h automaticamente
-- Funciona com o domínio personalizado já configurado
+
+Para 12 vendas: **24 páginas** (12 etiquetas + 12 DANFEs), sem nenhuma lista de separação individual ou acumulada.
+
+Estrutura limpa: Pág 1 = Etiqueta, Pág 2 = NF, Pág 3 = Etiqueta, Pág 4 = NF...
+
+## Arquivos afetados
+- **`supabase/functions/ml-generate-labels/index.ts`** — limitar cópia a 1 página DANFE, remover append de separação
+- **`src/hooks/useShippingLabels.ts`** — remover geração e envio de `separation_pdf_base64`
 
