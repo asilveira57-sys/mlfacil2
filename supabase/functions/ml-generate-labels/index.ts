@@ -603,7 +603,8 @@ serve(async (req) => {
       .in('order_id', orderIds);
 
     const invoiceMap = new Map((invoices || []).map(i => [i.order_id, i]));
-    const shipmentToOrderId = new Map<string, string>();
+    // 1:N mapping: one shipment can have multiple order_ids (pack/cart)
+    const shipmentToOrderIds = new Map<string, string[]>();
 
     // Identify orders with missing/stale invoice status and re-check via ML API
     const staleOrderIds = orderIds.filter(oid => {
@@ -696,7 +697,8 @@ serve(async (req) => {
       }
 
       validShipmentIds.push(shipment_id);
-      shipmentToOrderId.set(shipment_id, shipment.order_id);
+      // Store as array for 1:N support (will be enriched with pack siblings later)
+      shipmentToOrderIds.set(shipment_id, [shipment.order_id]);
     }
 
     console.log(`Validation: ${validShipmentIds.length} valid, ${validationErrors.length} errors`);
