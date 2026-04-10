@@ -1,62 +1,41 @@
 
 
-# Correção: Seleção "Todos" ignora filtro de logística
+# Nova Opção "Sem NF" no Menu de Etiquetas PDF
 
-## Problema
+## Resumo
 
-O bug está na função `selectAll` do hook `useShippingLabels.ts`. Ela seleciona **todos** os pedidos selecionáveis, ignorando o filtro de logística ativo (Coleta/Flex/Full). Resultado: mesmo com filtro "Coleta" ativo, pedidos Flex são selecionados invisívelmente, e na hora de gerar etiquetas, a validação detecta tipos mistos e bloqueia.
+Adicionar uma terceira opção no dropdown PDF: **"Sem NF"** — gera apenas as etiquetas, sem páginas de nota fiscal. Para 13 vendas = 13 páginas.
 
-**Raiz do problema (linha 1021-1023):**
-```typescript
-const selectAll = useCallback(() => {
-  const selectableOrders = orders.filter(o => o.selectable);
-  // ↑ NÃO filtra por logistic_type — seleciona tudo
-  setSelectedIds(new Set(selectableOrders.map(o => o.id)));
-}, [orders]);
-```
+## Implementação
 
-O filtro de logística é aplicado apenas na **renderização da tabela** (ShippingLabels.tsx linhas 257-262), mas a seleção opera sobre a lista completa.
+### 1. Novo layout type
 
-## Correção
-
-Duas mudanças:
-
-### 1. Passar o filtro de logística para o `selectAll`
-
-Em `ShippingLabels.tsx`, ao invés de passar `selectAll` direto do hook, criar um wrapper que filtra os pedidos visíveis:
+Adicionar `'meli_100x150_no_nf'` ao tipo `LabelLayout` em `useShippingLabels.ts`:
 
 ```typescript
-const handleSelectAll = useCallback(() => {
-  const visible = logisticFilter === 'all'
-    ? orders.filter(o => o.selectable)
-    : orders.filter(o => {
-        if (!o.selectable) return false;
-        if (logisticFilter === 'flex') return o.logistic_type === 'self_service';
-        if (logisticFilter === 'full') return o.logistic_type === 'fulfillment';
-        return o.logistic_type && o.logistic_type !== 'self_service' && o.logistic_type !== 'fulfillment';
-      });
-  setSelectedIds(new Set(visible.map(o => o.id)));
-}, [orders, logisticFilter]);
+export type LabelLayout = 'meli_100x150' | 'mlfacil_100x175_header' | 'meli_100x150_no_nf';
 ```
 
-Ou, expor `setSelectedIds` do hook e montar a seleção no page.
+### 2. Menu dropdown — nova opção
 
-### 2. Limpar seleção ao trocar filtro de logística
+Em `BulkActionsBar.tsx`, adicionar entre "Padrão ML" e "Com Cabeçalho":
 
-Quando o usuário muda de "Coleta" para "Flex" (ou vice-versa), limpar a seleção para evitar seleções fantasma:
-
-```typescript
-useEffect(() => {
-  clearSelection();
-}, [logisticFilter]);
+```
+Sem NF — somente etiquetas
 ```
 
-## Arquivos afetados
-- **`src/pages/ShippingLabels.tsx`** — wrapper `handleSelectAll` com filtro + limpar seleção ao trocar filtro
-- **`src/hooks/useShippingLabels.ts`** — expor `setSelectedIds` (ou aceitar filtro como parâmetro do `selectAll`)
+### 3. Edge function — pular DANFE
 
-## Resultado
-- Filtro "Coleta" → selecionar todos → gera apenas Coleta ✓
-- Filtro "Flex" → selecionar todos → gera apenas Flex ✓
-- Trocar filtro limpa a seleção, sem seleções fantasma
+Em `ml-generate-labels/index.ts`, quando `layout === 'meli_100x150_no_nf'`:
+- No fluxo padrão (não-header): copiar apenas a página 0 (etiqueta) de cada envio, ignorar página 1+ (DANFE)
+- Sem cabeçalho, sem NF — arquivo limpo só com etiquetas
+
+### Arquivos afetados
+- **`src/hooks/useShippingLabels.ts`** — tipo `LabelLayout` expandido
+- **`src/components/shipping/BulkActionsBar.tsx`** — nova opção no dropdown PDF
+- **`supabase/functions/ml-generate-labels/index.ts`** — lógica para pular DANFE quando layout = `meli_100x150_no_nf`
+
+### Resultado
+- Dropdown PDF: "Padrão ML" | "Sem NF" | "Com Cabeçalho"
+- 13 vendas com "Sem NF" = 13 páginas (só etiquetas)
 
