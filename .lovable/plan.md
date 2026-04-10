@@ -1,50 +1,62 @@
 
 
-# Corrigir Estrutura do PDF "Com Cabeçalho" — Eliminar Páginas de Separação Individuais
+# Correção: Seleção "Todos" ignora filtro de logística
 
 ## Problema
 
-O PDF da API do Mercado Livre retorna **3 páginas por envio**: etiqueta, DANFE e uma "lista de separação" do ML. O código atual copia TODAS as páginas após a etiqueta como se fossem DANFE (linhas 344-351), resultando em:
+O bug está na função `selectAll` do hook `useShippingLabels.ts`. Ela seleciona **todos** os pedidos selecionáveis, ignorando o filtro de logística ativo (Coleta/Flex/Full). Resultado: mesmo com filtro "Coleta" ativo, pedidos Flex são selecionados invisívelmente, e na hora de gerar etiquetas, a validação detecta tipos mistos e bloqueia.
 
-- Página 1: Etiqueta + Cabeçalho ✓
-- Página 2: DANFE ✓
-- **Página 3: Lista de separação do ML** ✗ (indesejada, individual por pedido)
+**Raiz do problema (linha 1021-1023):**
+```typescript
+const selectAll = useCallback(() => {
+  const selectableOrders = orders.filter(o => o.selectable);
+  // ↑ NÃO filtra por logistic_type — seleciona tudo
+  setSelectedIds(new Set(selectableOrders.map(o => o.id)));
+}, [orders]);
+```
 
-Para 12 vendas, gera 36 páginas + separação custom = 37. O correto seria 24 + 1 = 25 (ou 24 sem separação).
+O filtro de logística é aplicado apenas na **renderização da tabela** (ShippingLabels.tsx linhas 257-262), mas a seleção opera sobre a lista completa.
 
 ## Correção
 
-### 1. Limitar cópia a apenas 1 página extra (DANFE)
+Duas mudanças:
 
-Na função `buildHeaderPdfSafe`, substituir a lógica que copia TODAS as páginas extras (linhas 344-351) por uma que copia **apenas a página 1** (DANFE), ignorando páginas 2+ do ML (listas de separação individuais):
+### 1. Passar o filtro de logística para o `selectAll`
+
+Em `ShippingLabels.tsx`, ao invés de passar `selectAll` direto do hook, criar um wrapper que filtra os pedidos visíveis:
 
 ```typescript
-// ANTES: copia TUDO após página 0
-if (pageCount > 1) {
-  const danfeIndices = Array.from({ length: pageCount - 1 }, (_, i) => i + 1);
-  ...
-}
-
-// DEPOIS: copia SOMENTE página 1 (DANFE), ignora página 2+ (separação ML)
-if (pageCount > 1) {
-  const [danfePage] = await resultPdf.copyPages(sourcePdf, [1]);
-  resultPdf.addPage(danfePage);
-}
+const handleSelectAll = useCallback(() => {
+  const visible = logisticFilter === 'all'
+    ? orders.filter(o => o.selectable)
+    : orders.filter(o => {
+        if (!o.selectable) return false;
+        if (logisticFilter === 'flex') return o.logistic_type === 'self_service';
+        if (logisticFilter === 'full') return o.logistic_type === 'fulfillment';
+        return o.logistic_type && o.logistic_type !== 'self_service' && o.logistic_type !== 'fulfillment';
+      });
+  setSelectedIds(new Set(visible.map(o => o.id)));
+}, [orders, logisticFilter]);
 ```
 
-### 2. Remover envio do relatório de separação
+Ou, expor `setSelectedIds` do hook e montar a seleção no page.
 
-O relatório de separação custom (`separation_pdf_base64`) será removido do fluxo. O usuário confirmou que não é útil e pode corromper o resultado. Remover:
-- No frontend (`useShippingLabels.ts`): eliminar a geração de `buildSeparationReportPdf` e o envio de `separation_pdf_base64`
-- Na edge function: remover o parâmetro e o bloco de append (linhas 370-389)
+### 2. Limpar seleção ao trocar filtro de logística
 
-## Resultado
+Quando o usuário muda de "Coleta" para "Flex" (ou vice-versa), limpar a seleção para evitar seleções fantasma:
 
-Para 12 vendas: **24 páginas** (12 etiquetas + 12 DANFEs), sem nenhuma lista de separação individual ou acumulada.
-
-Estrutura limpa: Pág 1 = Etiqueta, Pág 2 = NF, Pág 3 = Etiqueta, Pág 4 = NF...
+```typescript
+useEffect(() => {
+  clearSelection();
+}, [logisticFilter]);
+```
 
 ## Arquivos afetados
-- **`supabase/functions/ml-generate-labels/index.ts`** — limitar cópia a 1 página DANFE, remover append de separação
-- **`src/hooks/useShippingLabels.ts`** — remover geração e envio de `separation_pdf_base64`
+- **`src/pages/ShippingLabels.tsx`** — wrapper `handleSelectAll` com filtro + limpar seleção ao trocar filtro
+- **`src/hooks/useShippingLabels.ts`** — expor `setSelectedIds` (ou aceitar filtro como parâmetro do `selectAll`)
+
+## Resultado
+- Filtro "Coleta" → selecionar todos → gera apenas Coleta ✓
+- Filtro "Flex" → selecionar todos → gera apenas Flex ✓
+- Trocar filtro limpa a seleção, sem seleções fantasma
 
