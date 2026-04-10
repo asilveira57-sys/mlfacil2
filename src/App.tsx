@@ -27,6 +27,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import CriarAcesso from "./pages/CriarAcesso";
+import Verificar from "./pages/Verificar";
 import PrimeiroAcesso from "./pages/PrimeiroAcesso";
 import Reconnecting from "./pages/Reconnecting";
 import Sincronizando from "./pages/Sincronizando";
