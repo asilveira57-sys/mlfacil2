@@ -76,6 +76,10 @@ export function BulkActionsBar({
                   <span className="font-medium">Padrão ML</span>
                   <span className="ml-2 text-xs text-muted-foreground">100×150mm</span>
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'meli_100x150_no_nf')}>
+                  <span className="font-medium">Sem NF</span>
+                  <span className="ml-2 text-xs text-muted-foreground">somente etiquetas</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'mlfacil_100x175_header')}>
                   <span className="font-medium">Com Cabeçalho</span>
                   <span className="ml-2 text-xs text-muted-foreground">etiqueta + NF</span>

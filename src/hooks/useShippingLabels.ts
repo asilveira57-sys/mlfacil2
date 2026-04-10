@@ -66,7 +66,7 @@ export interface OrderItemSummary {
   thumbnail: string | null;
 }
 
-export type LabelLayout = 'meli_100x150' | 'mlfacil_100x175_header';
+export type LabelLayout = 'meli_100x150' | 'mlfacil_100x175_header' | 'meli_100x150_no_nf';
 
 export interface PrintQueueEntry {
   id: string;

@@ -536,9 +536,9 @@ serve(async (req) => {
       );
     }
 
-    if (!['meli_100x150', 'mlfacil_100x175_header'].includes(layout)) {
+    if (!['meli_100x150', 'mlfacil_100x175_header', 'meli_100x150_no_nf'].includes(layout)) {
       return new Response(
-        JSON.stringify({ error: 'layout must be meli_100x150 or mlfacil_100x175_header' }),
+        JSON.stringify({ error: 'layout must be meli_100x150, mlfacil_100x175_header or meli_100x150_no_nf' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
