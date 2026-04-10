@@ -1,66 +1,58 @@
 
 
-# Melhorias no Cabeçalho da Etiqueta de Envio
+# Diagnóstico e Correção Definitiva do Sistema de E-mails
 
-## Problemas identificados
+## Situação Atual — Dois Sistemas Conflitantes
 
-1. **SKU ausente**: O formato atual é `1x Hélice Espargidor Superior Lava Louça...` — título abreviado e truncado, sem SKU visível, desperdiçando espaço
-2. **Carrinho (múltiplos itens)**: Cada produto precisa de linha própria com SKU + quantidade
-3. **Nome do cliente fixo na 1ª linha**: Independente da ordem configurada, o nome deve ser sempre a primeira informação
-4. **Etiqueta desalinhada**: A etiqueta original do ML é desenhada na posição `x: 0, y: 0` (canto inferior esquerdo da página), ficando encostada na borda direita em vez de centralizada
-5. **Código cortado**: Quando a etiqueta fica fora de centro, impressoras podem cortar conteúdo nas bordas
+O projeto tem **dois sistemas de e-mail independentes**, o que explica o comportamento inconsistente:
 
-## Correções planejadas
+| Sistema | Função | Como envia |
+|---|---|---|
+| **Lovable Cloud** (`auth-email-hook` → `process-email-queue`) | E-mails de autenticação (signup, recovery, etc.) | Fila pgmq → API Lovable |
+| **Resend legado** (`email-worker-send` + tabela `email_queue`) | E-mails de campanhas/comunicações admin | Direto via Resend API |
 
-### 1. Incluir SKU na linha de produto
-**Arquivo**: `supabase/functions/ml-generate-labels/index.ts` (função `buildProductLines`) e `src/lib/buildHeaderLines.ts`
+Os e-mails de **cadastro e recuperação de senha** passam pelo sistema Lovable Cloud (correto). O Resend é usado apenas para comunicações administrativas (campanhas). Porém:
 
-Formato atual: `1x Hélice Espargidor Superior Lava Louça...`
-Formato novo: `1x [SKU] Título do Produto`
+- **Sem logs nas funções** — `auth-email-hook`, `process-email-queue` e `email-worker-send` não mostram logs recentes, indicando possível falha na execução ou deployment desatualizado
+- **Incoerência de tempo** — o botão "Reenviar" aparece após 30 segundos, mas a instrução diz "aguarde até 2 minutos"
+- **Possível conflito DNS** — O Resend e o Lovable Cloud compartilham o mesmo subdomínio `notify.notifica.mktpfacil.com`, o que pode causar falhas de entrega
 
-Quando o item tem SKU, mostrar: `1x [W11310109] Hélice Espargidor Superior...`
-Quando não tem SKU: `1x Hélice Espargidor Superior Lava Louça...` (sem mudança)
+## Plano de Correção
 
-Isso aproveita o espaço que sobra ao abreviar o título, inserindo o SKU entre a quantidade e o título.
+### 1. Redeployar as funções de e-mail do Lovable Cloud
+As funções `auth-email-hook` e `process-email-queue` podem estar com deploy antigo ou falhando silenciosamente. Redeployar ambas para garantir que o código atual está ativo.
 
-### 2. Carrinho: uma linha por produto
-Alterar `buildProductLines` para que, em vez de concatenar itens na mesma linha com `|`, cada produto ocupe sua própria linha:
-```
-1x [W11310109] Hélice Espargidor Superior Lava Louça
-2x [XYZ-789] Calça Jeans 42
-```
-O separador `|` será removido. Se houver mais itens do que `max_product_lines`, a última linha continua com `+N itens`.
+### 2. Testar o fluxo de recuperação de senha de ponta a ponta
+Invocar `auth-email-hook` via curl para verificar se a cadeia completa (hook → fila → envio) está funcionando. Verificar os logs após o teste.
 
-### 3. Nome do cliente sempre na 1ª linha
-Na função `buildHeaderLinesForOrder` (edge function) e `buildHeaderLines` (frontend), forçar que `customer` seja sempre a primeira seção montada, independentemente da ordem configurada em `line_order`. As demais seções seguem a ordem do usuário.
+### 3. Desativar e remover o sistema Resend
+- Remover a edge function `email-worker-send` (envia via Resend API diretamente)
+- Remover a edge function `email-test-provider` (testa via Resend)
+- Limpar referências ao Resend no frontend (`EmailProviderTab.tsx`, `useEmailAdmin`)
+- O secret `RESEND_API_KEY` deixará de ser usado
 
-### 4. Centralizar etiqueta na página
-**Arquivo**: `supabase/functions/ml-generate-labels/index.ts` (função `buildHeaderPdfSafe`)
+**Nota:** As funções de campanha (`email-campaign-send`, `email-enqueue-event`, `email-render-template`, `email-schedule-evaluate`) que usam a tabela `email_queue` serão avaliadas — se dependem do Resend, serão migradas para usar a API Lovable ou desativadas.
 
-Atualmente a etiqueta é desenhada em `x: 0, y: 0`. A página criada tem exatamente o tamanho da etiqueta original + cabeçalho, sem margem para centralização.
+### 4. Corrigir incoerência de tempo (30s vs 2min)
+Na tela de verificação de e-mail (`CriarAcesso.tsx`), alinhar a mensagem:
+- Manter o countdown de 30 segundos para o botão reenviar (é adequado)
+- Alterar o texto de "Aguarde até 2 minutos" para "Aguarde alguns segundos" — e-mails pelo Lovable Cloud chegam em segundos, não minutos
 
-Correção: calcular offset X para centralizar a etiqueta original dentro da página, caso a largura da página seja maior que o conteúdo. Se a etiqueta do ML já ocupa 100% da largura, não há o que centralizar — o problema pode ser que a página tem uma largura fixa (ex: A4) e a etiqueta é menor. Vou analisar as dimensões reais do PDF do ML para ajustar.
-
-Na prática, se `origWidth` < largura padrão da folha, adicionar margem simétrica: `xOffset = (pageWidth - origWidth) / 2`.
-
-### 5. Atualizar preview e configurações
-**Arquivo**: `src/pages/LabelHeaderSettings.tsx`
-
-- Atualizar `SAMPLE_ITEMS` para mostrar SKU no preview
-- Atualizar `generatePreviewLines` para usar o novo formato com SKU
-- Adicionar toggle "Exibir SKU" na seção de configurações (nova coluna `show_sku` na tabela `meli_label_header_preferences`)
-
-### 6. Migration: adicionar coluna `show_sku`
-Nova coluna `show_sku BOOLEAN DEFAULT true` na tabela `meli_label_header_preferences`.
+### 5. Garantir mascaramento correto
+O `auth-email-hook` já envia como `MKTP Fácil <noreply@notifica.mktpfacil.com>` — sem menção a "Lovable". Confirmar que o `process-email-queue` preserva esse remetente na entrega final. Os templates já estão em português.
 
 ## Arquivos afetados
-- **`supabase/functions/ml-generate-labels/index.ts`** — `buildProductLines`, `buildHeaderLinesForOrder`, `buildHeaderPdfSafe` (SKU, linha por produto, cliente 1º, centralização)
-- **`src/lib/buildHeaderLines.ts`** — mesmas mudanças no código frontend (SKU, linha por produto, cliente 1º)
-- **`src/pages/LabelHeaderSettings.tsx`** — preview atualizado, toggle show_sku
-- **Nova migration SQL** — `ALTER TABLE meli_label_header_preferences ADD COLUMN show_sku boolean DEFAULT true`
+- `supabase/functions/auth-email-hook/index.ts` — redeploy (sem alteração de código)
+- `supabase/functions/process-email-queue/index.ts` — redeploy (sem alteração de código)
+- `supabase/functions/email-worker-send/` — remover
+- `supabase/functions/email-test-provider/` — remover
+- `src/components/admin/email/EmailProviderTab.tsx` — remover referências ao Resend
+- `src/pages/CriarAcesso.tsx` — corrigir texto "2 minutos" → "alguns segundos"
 
-## Resultado
-- Cabeçalho mostra: `Cliente: MRCIODURO` → `1x [W11310109] Hélice Espargidor...` → `Pedido: 200001590...`
-- Carrinho com múltiplos itens: cada um em linha separada com SKU
-- Etiqueta centralizada na folha, sem risco de código cortado
+## Resultado esperado
+- E-mails de cadastro e recuperação de senha chegam em segundos, sem spam
+- Remetente mostra "MKTP Fácil" (sem Lovable)
+- Mensagens em português
+- Sistema único e confiável (Lovable Cloud), sem conflito com Resend
+- Interface coerente entre countdown e instrução textual
 
