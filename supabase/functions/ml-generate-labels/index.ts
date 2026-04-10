@@ -979,6 +979,12 @@ serve(async (req) => {
         } else {
           mergedPdfBytes = pdfDataArray[0];
         }
+        
+        // For no_nf layout: strip DANFE pages, keep only labels
+        if (layout === 'meli_100x150_no_nf') {
+          mergedPdfBytes = new Uint8Array(await stripDanfePages(mergedPdfBytes));
+        }
+        
         finalPdfBase64 = uint8ArrayToBase64(mergedPdfBytes);
       } else {
         const zplDataArray = successBatches.filter(b => b.zpl_data).map(b => b.zpl_data!);
