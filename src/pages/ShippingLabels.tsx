@@ -118,6 +118,22 @@ export default function ShippingLabels() {
     }
   }, [accountLoading, initialized, activeAccount, navigate, toast]);
 
+  // Clear selection when logistic filter changes
+  useEffect(() => {
+    clearSelection();
+  }, [logisticFilter, clearSelection]);
+
+  // Compute filtered orders based on logistic filter
+  const filteredOrders = logisticFilter === 'all' ? orders : orders.filter(o => {
+    if (logisticFilter === 'flex') return o.logistic_type === 'self_service';
+    if (logisticFilter === 'full') return o.logistic_type === 'fulfillment';
+    return o.logistic_type && o.logistic_type !== 'self_service' && o.logistic_type !== 'fulfillment';
+  });
+
+  const handleSelectAll = useCallback(() => {
+    selectAll(filteredOrders);
+  }, [selectAll, filteredOrders]);
+
   const handleViewDetails = (order: ShippingOrder) => {
     setSelectedOrder(order);
     setDrawerOpen(true);
@@ -254,15 +270,10 @@ export default function ShippingLabels() {
 
         {/* Table - shows loading only for initial load, not during sync */}
         <ShippingTable
-          orders={logisticFilter === 'all' ? orders : orders.filter(o => {
-            if (logisticFilter === 'flex') return o.logistic_type === 'self_service';
-            if (logisticFilter === 'full') return o.logistic_type === 'fulfillment';
-            // coleta = everything else that has a logistic_type and isn't flex/full
-            return o.logistic_type && o.logistic_type !== 'self_service' && o.logistic_type !== 'fulfillment';
-          })}
+          orders={filteredOrders}
           selectedIds={selectedIds}
           onToggleSelection={toggleSelection}
-          onSelectAll={selectAll}
+          onSelectAll={handleSelectAll}
           onViewDetails={handleViewDetails}
           isLoading={isLoading}
           sortField={sortField}

@@ -1018,8 +1018,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     });
   }, []);
 
-  const selectAll = useCallback(() => {
-    const selectableOrders = orders.filter(o => o.selectable);
+  const selectAll = useCallback((visibleOrders?: ShippingOrder[]) => {
+    const source = visibleOrders ?? orders;
+    const selectableOrders = source.filter(o => o.selectable);
     setSelectedIds(new Set(selectableOrders.map(o => o.id)));
   }, [orders]);
 
