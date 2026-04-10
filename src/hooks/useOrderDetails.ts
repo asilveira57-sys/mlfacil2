@@ -91,6 +91,7 @@ export function useOrderDetails(sellerId: string | null) {
         user_id: orderData.user_id,
         seller_id: orderData.seller_id,
         order_id: orderData.order_id,
+        pack_id: (orderData as any).pack_id ?? null,
         created_at_meli: orderData.created_at_meli,
         order_status: orderData.order_status,
         shipment_id: orderData.shipment_id,
