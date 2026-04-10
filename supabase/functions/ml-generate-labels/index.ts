@@ -466,6 +466,26 @@ async function mergePDFs(pdfDataArray: Uint8Array[]): Promise<Uint8Array> {
   return await mergedPdf.save();
 }
 
+// Strip DANFE pages: ML returns 2 pages per shipment (label + DANFE).
+// This keeps only even-indexed pages (0, 2, 4...) = labels only.
+async function stripDanfePages(pdfBytes: Uint8Array): Promise<Uint8Array> {
+  const sourcePdf = await PDFDocument.load(pdfBytes);
+  const resultPdf = await PDFDocument.create();
+  const totalPages = sourcePdf.getPageCount();
+  
+  // Keep only pages at index 0, 2, 4... (the label pages)
+  const labelIndices: number[] = [];
+  for (let i = 0; i < totalPages; i += 2) {
+    labelIndices.push(i);
+  }
+  
+  const copiedPages = await resultPdf.copyPages(sourcePdf, labelIndices);
+  copiedPages.forEach(page => resultPdf.addPage(page));
+  
+  console.log(`[NO_NF] Stripped DANFE: ${totalPages} pages → ${labelIndices.length} pages`);
+  return await resultPdf.save();
+}
+
 function mergeZPLs(zplDataArray: string[]): string {
   return zplDataArray.join('\n\n');
 }
@@ -536,9 +556,9 @@ serve(async (req) => {
       );
     }
 
-    if (!['meli_100x150', 'mlfacil_100x175_header'].includes(layout)) {
+    if (!['meli_100x150', 'mlfacil_100x175_header', 'meli_100x150_no_nf'].includes(layout)) {
       return new Response(
-        JSON.stringify({ error: 'layout must be meli_100x150 or mlfacil_100x175_header' }),
+        JSON.stringify({ error: 'layout must be meli_100x150, mlfacil_100x175_header or meli_100x150_no_nf' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -959,6 +979,12 @@ serve(async (req) => {
         } else {
           mergedPdfBytes = pdfDataArray[0];
         }
+        
+        // For no_nf layout: strip DANFE pages, keep only labels
+        if (layout === 'meli_100x150_no_nf') {
+          mergedPdfBytes = new Uint8Array(await stripDanfePages(mergedPdfBytes));
+        }
+        
         finalPdfBase64 = uint8ArrayToBase64(mergedPdfBytes);
       } else {
         const zplDataArray = successBatches.filter(b => b.zpl_data).map(b => b.zpl_data!);
