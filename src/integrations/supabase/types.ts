@@ -19981,6 +19981,30 @@ export type Database = {
         }
         Relationships: []
       }
+      verification_links: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          used: boolean
+          verification_url: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          used?: boolean
+          verification_url: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          used?: boolean
+          verification_url?: string
+        }
+        Relationships: []
+      }
       visual_category_groups: {
         Row: {
           ativo: boolean

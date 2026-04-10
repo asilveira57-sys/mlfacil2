@@ -84,13 +84,39 @@ Deno.serve(async (req) => {
 
     const verificationLink = linkData?.properties?.action_link || null;
 
+    if (!verificationLink) {
+      return new Response(
+        JSON.stringify({ success: true, message: "Verificação processada" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Save the real link in verification_links table and return a masked URL
+    const { data: record, error: insertError } = await adminClient
+      .from("verification_links")
+      .insert({ verification_url: verificationLink })
+      .select("id")
+      .single();
+
+    if (insertError || !record) {
+      // Fallback: return raw link if insert fails
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Link de verificação gerado.",
+          verification_link: verificationLink,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const maskedLink = `https://www.mktpfacil.com/verificar?t=${record.id}`;
+
     return new Response(
-      JSON.stringify({ 
-        success: true, 
-        message: verificationLink 
-          ? "Link de verificação gerado. Use o botão 'Copiar Link' para enviar manualmente ao cliente." 
-          : "Verificação processada",
-        ...(verificationLink ? { verification_link: verificationLink } : {}),
+      JSON.stringify({
+        success: true,
+        message: "Link de verificação gerado. Use o botão 'Copiar Link' para enviar ao cliente.",
+        verification_link: maskedLink,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
