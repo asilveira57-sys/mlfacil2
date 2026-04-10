@@ -392,7 +392,7 @@ function VerifyEmailState({ email, t }: { email: string; t: any }) {
         <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-0.5 list-disc list-inside">
           <li>Verifique a pasta <strong>Spam</strong> ou <strong>Lixo eletrônico</strong></li>
           <li>No Gmail, cheque a aba <strong>Promoções</strong></li>
-          <li>Aguarde até 2 minutos para o e-mail chegar</li>
+          <li>Aguarde alguns segundos para o e-mail chegar</li>
         </ul>
       </div>
       
