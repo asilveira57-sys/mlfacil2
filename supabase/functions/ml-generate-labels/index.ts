@@ -255,7 +255,6 @@ async function buildHeaderPdfSafe(
   headerDataMap: Map<string, string[]>,
   fontSize: number,
   updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>,
-  separationPdfBase64?: string | null,
 ): Promise<{ pdfBytes: Uint8Array; processedCount: number; errorShipments: string[] }> {
   const resultPdf = await PDFDocument.create();
   const font = await resultPdf.embedFont(StandardFonts.Helvetica);
@@ -341,13 +340,11 @@ async function buildHeaderPdfSafe(
       newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
     }
     
-    // === PAGES 1..N: DANFE/invoice — copy as-is, NO header ===
+    // === PAGE 1: DANFE/invoice — copy as-is, NO header ===
+    // Only copy page index 1 (DANFE). Ignore pages 2+ (ML internal separation lists).
     if (pageCount > 1) {
-      const danfeIndices = Array.from({ length: pageCount - 1 }, (_, i) => i + 1);
-      const copiedDanfePages = await resultPdf.copyPages(sourcePdf, danfeIndices);
-      for (const danfePage of copiedDanfePages) {
-        resultPdf.addPage(danfePage);
-      }
+      const [danfePage] = await resultPdf.copyPages(sourcePdf, [1]);
+      resultPdf.addPage(danfePage);
     }
     
     processedCount++;
@@ -367,26 +364,6 @@ async function buildHeaderPdfSafe(
     };
   }
   
-  // === APPEND SEPARATION REPORT as last page(s) ===
-  if (separationPdfBase64) {
-    try {
-      // Decode base64 to Uint8Array
-      const binaryStr = atob(separationPdfBase64);
-      const sepBytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        sepBytes[i] = binaryStr.charCodeAt(i);
-      }
-      const sepDoc = await PDFDocument.load(sepBytes);
-      const sepPages = await resultPdf.copyPages(sepDoc, sepDoc.getPageIndices());
-      for (const page of sepPages) {
-        resultPdf.addPage(page);
-      }
-      console.log(`[HEADER] Appended ${sepPages.length} separation report page(s)`);
-    } catch (err) {
-      console.error('[HEADER] Failed to append separation report:', err);
-      // Don't block generation for separation report failure
-    }
-  }
   
   return {
     pdfBytes: await resultPdf.save(),
@@ -543,7 +520,7 @@ serve(async (req) => {
       return gate.response!;
     }
 
-    const { seller_id, shipment_ids, format, layout = 'meli_100x150', separation_pdf_base64 } = await req.json();
+    const { seller_id, shipment_ids, format, layout = 'meli_100x150' } = await req.json();
     
     if (!seller_id || !shipment_ids || shipment_ids.length === 0) {
       return new Response(
@@ -896,7 +873,6 @@ serve(async (req) => {
           headerDataMap,
           prefs.font_size,
           updateProgress,
-          separation_pdf_base64 || null,
         );
 
         totalSuccessLabels = headerResult.processedCount;
