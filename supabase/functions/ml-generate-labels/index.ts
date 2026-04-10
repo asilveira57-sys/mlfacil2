@@ -255,6 +255,7 @@ async function buildHeaderPdfSafe(
   headerDataMap: Map<string, string[]>,
   fontSize: number,
   updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>,
+  skipDanfe: boolean = false,
 ): Promise<{ pdfBytes: Uint8Array; processedCount: number; errorShipments: string[] }> {
   const resultPdf = await PDFDocument.create();
   const font = await resultPdf.embedFont(StandardFonts.Helvetica);
@@ -342,7 +343,8 @@ async function buildHeaderPdfSafe(
     
     // === PAGE 1: DANFE/invoice — copy as-is, NO header ===
     // Only copy page index 1 (DANFE). Ignore pages 2+ (ML internal separation lists).
-    if (pageCount > 1) {
+    // Skip DANFE entirely when skipDanfe is true (layout meli_100x150_no_nf)
+    if (!skipDanfe && pageCount > 1) {
       const [danfePage] = await resultPdf.copyPages(sourcePdf, [1]);
       resultPdf.addPage(danfePage);
     }
@@ -725,7 +727,7 @@ serve(async (req) => {
     }
 
     // Create job record
-    const isHeaderLayout = layout === 'mlfacil_100x175_header' && format === 'pdf';
+    const isHeaderLayout = (layout === 'mlfacil_100x175_header' || layout === 'meli_100x150_no_nf') && format === 'pdf';
 
     // For header layout: we process per-shipment (no batching via ML API)
     // For standard layout: we batch via ML API as before
@@ -887,12 +889,14 @@ serve(async (req) => {
         console.log(`[HEADER] Built headers for ${headerDataMap.size} shipments`);
 
         // Build PDF with safe per-shipment pipeline
+        const skipDanfe = layout === 'meli_100x150_no_nf';
         const headerResult = await buildHeaderPdfSafe(
           validShipmentIds,
           mlAccount.access_token,
           headerDataMap,
           prefs.font_size,
           updateProgress,
+          skipDanfe,
         );
 
         totalSuccessLabels = headerResult.processedCount;
