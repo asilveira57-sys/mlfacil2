@@ -466,6 +466,26 @@ async function mergePDFs(pdfDataArray: Uint8Array[]): Promise<Uint8Array> {
   return await mergedPdf.save();
 }
 
+// Strip DANFE pages: ML returns 2 pages per shipment (label + DANFE).
+// This keeps only even-indexed pages (0, 2, 4...) = labels only.
+async function stripDanfePages(pdfBytes: Uint8Array): Promise<Uint8Array> {
+  const sourcePdf = await PDFDocument.load(pdfBytes);
+  const resultPdf = await PDFDocument.create();
+  const totalPages = sourcePdf.getPageCount();
+  
+  // Keep only pages at index 0, 2, 4... (the label pages)
+  const labelIndices: number[] = [];
+  for (let i = 0; i < totalPages; i += 2) {
+    labelIndices.push(i);
+  }
+  
+  const copiedPages = await resultPdf.copyPages(sourcePdf, labelIndices);
+  copiedPages.forEach(page => resultPdf.addPage(page));
+  
+  console.log(`[NO_NF] Stripped DANFE: ${totalPages} pages → ${labelIndices.length} pages`);
+  return await resultPdf.save();
+}
+
 function mergeZPLs(zplDataArray: string[]): string {
   return zplDataArray.join('\n\n');
 }
