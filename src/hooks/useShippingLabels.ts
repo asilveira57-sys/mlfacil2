@@ -29,6 +29,7 @@ export interface ShippingOrder {
   user_id: string;
   seller_id: string;
   order_id: string;
+  pack_id: string | null;
   created_at_meli: string | null;
   order_status: string | null;
   shipment_id: string | null;
@@ -339,29 +340,75 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const totalCount = ordersData?.totalCount ?? 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  // Fetch order items for displayed orders
+  // Fetch order items for displayed orders (including all pack siblings)
   const { data: orderItemsData } = useQuery({
-    queryKey: ['order-items', sellerId, orders.map(o => o.order_id).join(',')],
+    queryKey: ['order-items', sellerId, orders.map(o => o.order_id).join(','), orders.map(o => o.pack_id || '').join(',')],
     queryFn: async () => {
       if (!sellerId || orders.length === 0) return new Map<string, OrderItemSummary[]>();
 
-      const orderIds = orders.map(o => o.order_id);
+      // For pack orders, we need to find ALL order_ids sharing the same shipment_id
+      const packShipmentIds = orders
+        .filter(o => o.pack_id && o.shipment_id)
+        .map(o => o.shipment_id!);
+
+      let allOrderIds = orders.map(o => o.order_id);
+
+      // If there are packs, fetch sibling order_ids from the same shipment
+      if (packShipmentIds.length > 0) {
+        const { data: siblingOrders } = await supabase
+          .from('meli_orders_cache')
+          .select('order_id, shipment_id')
+          .eq('seller_id', sellerId)
+          .in('shipment_id', packShipmentIds);
+
+        if (siblingOrders) {
+          const siblingIds = siblingOrders.map(s => s.order_id);
+          allOrderIds = [...new Set([...allOrderIds, ...siblingIds])];
+        }
+      }
       
       const { data: items, error } = await supabase
         .from('meli_order_items_cache')
         .select('order_id, item_id, variation_id, variation_attributes, sku, title_short, title, quantity, unit_price, permalink, catalog_product_id, thumbnail')
         .eq('seller_id', sellerId)
-        .in('order_id', orderIds);
+        .in('order_id', allOrderIds);
 
       if (error) {
         console.error('Error fetching order items:', error);
         return new Map<string, OrderItemSummary[]>();
       }
 
-      // Group items by order_id
-      const itemsMap = new Map<string, OrderItemSummary[]>();
+      // Build a shipment→order_ids map for packs
+      const shipmentToOrderIds = new Map<string, string[]>();
+      for (const o of orders) {
+        if (o.shipment_id) {
+          const existing = shipmentToOrderIds.get(o.shipment_id) || [];
+          if (!existing.includes(o.order_id)) existing.push(o.order_id);
+          shipmentToOrderIds.set(o.shipment_id, existing);
+        }
+      }
+      // Add sibling order_ids for pack shipments
+      if (packShipmentIds.length > 0) {
+        const { data: siblingOrders } = await supabase
+          .from('meli_orders_cache')
+          .select('order_id, shipment_id')
+          .eq('seller_id', sellerId)
+          .in('shipment_id', packShipmentIds);
+
+        if (siblingOrders) {
+          for (const s of siblingOrders) {
+            if (!s.shipment_id) continue;
+            const existing = shipmentToOrderIds.get(s.shipment_id) || [];
+            if (!existing.includes(s.order_id)) existing.push(s.order_id);
+            shipmentToOrderIds.set(s.shipment_id, existing);
+          }
+        }
+      }
+
+      // Group items by order_id first
+      const rawItemsByOrder = new Map<string, OrderItemSummary[]>();
       (items || []).forEach(item => {
-        const existing = itemsMap.get(item.order_id) || [];
+        const existing = rawItemsByOrder.get(item.order_id) || [];
         existing.push({
           item_id: item.item_id,
           variation_id: item.variation_id,
@@ -375,13 +422,30 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           catalog_product_id: item.catalog_product_id,
           thumbnail: item.thumbnail,
         });
-        itemsMap.set(item.order_id, existing);
+        rawItemsByOrder.set(item.order_id, existing);
       });
+
+      // For each displayed order, aggregate items from ALL sibling order_ids in the pack
+      const itemsMap = new Map<string, OrderItemSummary[]>();
+      for (const o of orders) {
+        if (o.pack_id && o.shipment_id) {
+          // Pack order: gather items from all sibling order_ids
+          const siblingOrderIds = shipmentToOrderIds.get(o.shipment_id) || [o.order_id];
+          const allItems: OrderItemSummary[] = [];
+          for (const oid of siblingOrderIds) {
+            allItems.push(...(rawItemsByOrder.get(oid) || []));
+          }
+          itemsMap.set(o.order_id, allItems);
+        } else {
+          // Normal order: just its own items
+          itemsMap.set(o.order_id, rawItemsByOrder.get(o.order_id) || []);
+        }
+      }
 
       return itemsMap;
     },
     enabled: !!sellerId && orders.length > 0,
-    staleTime: 60000, // 1 minute
+    staleTime: 60000,
   });
 
   const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();

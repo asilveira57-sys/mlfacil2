@@ -603,7 +603,8 @@ serve(async (req) => {
       .in('order_id', orderIds);
 
     const invoiceMap = new Map((invoices || []).map(i => [i.order_id, i]));
-    const shipmentToOrderId = new Map<string, string>();
+    // 1:N mapping: one shipment can have multiple order_ids (pack/cart)
+    const shipmentToOrderIds = new Map<string, string[]>();
 
     // Identify orders with missing/stale invoice status and re-check via ML API
     const staleOrderIds = orderIds.filter(oid => {
@@ -696,7 +697,8 @@ serve(async (req) => {
       }
 
       validShipmentIds.push(shipment_id);
-      shipmentToOrderId.set(shipment_id, shipment.order_id);
+      // Store as array for 1:N support (will be enriched with pack siblings later)
+      shipmentToOrderIds.set(shipment_id, [shipment.order_id]);
     }
 
     console.log(`Validation: ${validShipmentIds.length} valid, ${validationErrors.length} errors`);
@@ -834,22 +836,37 @@ serve(async (req) => {
           font_size: prefData.font_size,
         } : DEFAULT_HEADER_PREFS;
 
-        // Load order data for all valid shipments
-        const validOrderIds = validShipmentIds
-          .map(sid => shipmentToOrderId.get(sid))
-          .filter(Boolean) as string[];
+        // Load order data for all valid shipments — including pack siblings
+        const knownOrderIds = validShipmentIds
+          .flatMap(sid => shipmentToOrderIds.get(sid) || []);
 
-        const { data: ordersData } = await supabaseAdmin
+        // First, find all orders for these shipments to discover pack siblings
+        const { data: allShipmentOrders } = await supabaseAdmin
           .from('meli_orders_cache')
           .select('order_id, pack_id, shipment_id, buyer_name, order_comment')
           .eq('seller_id', seller_id)
-          .in('order_id', validOrderIds);
+          .in('shipment_id', validShipmentIds);
+
+        // Enrich shipmentToOrderIds with ALL sibling order_ids
+        for (const o of (allShipmentOrders || [])) {
+          if (!o.shipment_id) continue;
+          const existing = shipmentToOrderIds.get(o.shipment_id) || [];
+          if (!existing.includes(o.order_id)) {
+            existing.push(o.order_id);
+            shipmentToOrderIds.set(o.shipment_id, existing);
+          }
+        }
+
+        // Collect all unique order_ids (including siblings)
+        const allOrderIds = [...new Set(
+          validShipmentIds.flatMap(sid => shipmentToOrderIds.get(sid) || [])
+        )];
 
         const { data: itemsData } = await supabaseAdmin
           .from('meli_order_items_cache')
           .select('order_id, sku, title_short, title, quantity')
           .eq('seller_id', seller_id)
-          .in('order_id', validOrderIds);
+          .in('order_id', allOrderIds);
 
         // Group items by order_id
         const itemsByOrder = new Map<string, typeof itemsData>();
@@ -859,34 +876,41 @@ serve(async (req) => {
           itemsByOrder.set(item.order_id, existing);
         }
 
-        // Build header lines for each shipment
+        // Build header lines for each shipment — aggregate items from ALL sibling orders
         const headerDataMap = new Map<string, string[]>();
 
         for (const shipmentId of validShipmentIds) {
-          const orderId = shipmentToOrderId.get(shipmentId);
-          if (!orderId) continue;
+          const siblingOrderIds = shipmentToOrderIds.get(shipmentId) || [];
+          if (siblingOrderIds.length === 0) continue;
 
-          const order = (ordersData || []).find(o => o.order_id === orderId);
-          if (!order) continue;
+          // Use the first order's metadata for buyer info
+          const primaryOrder = (allShipmentOrders || []).find(o => o.shipment_id === shipmentId);
+          if (!primaryOrder) continue;
 
-          const items = (itemsByOrder.get(orderId) || []).map(i => ({
-            sku: i.sku,
-            title_short: i.title_short,
-            title: i.title,
-            quantity: i.quantity,
-          }));
+          // Aggregate items from ALL sibling orders in this pack
+          const allItems: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[] = [];
+          for (const oid of siblingOrderIds) {
+            for (const i of (itemsByOrder.get(oid) || [])) {
+              allItems.push({
+                sku: i.sku,
+                title_short: i.title_short,
+                title: i.title,
+                quantity: i.quantity,
+              });
+            }
+          }
 
           const lines = buildHeaderLinesForOrder(prefs, {
-            order_id: order.pack_id || order.order_id,
-            shipment_id: order.shipment_id,
-            buyer_name: order.buyer_name,
-            order_comment: order.order_comment,
-          }, items);
+            order_id: primaryOrder.pack_id || primaryOrder.order_id,
+            shipment_id: primaryOrder.shipment_id,
+            buyer_name: primaryOrder.buyer_name,
+            order_comment: primaryOrder.order_comment,
+          }, allItems);
 
           headerDataMap.set(shipmentId, lines);
         }
 
-        console.log(`[HEADER] Built headers for ${headerDataMap.size} shipments`);
+        console.log(`[HEADER] Built headers for ${headerDataMap.size} shipments (pack-aware)`);
 
         // Build PDF with safe per-shipment pipeline
         const skipDanfe = layout === 'meli_100x150_no_nf';
