@@ -1,51 +1,70 @@
 
+Correção urgente: etiquetas ZPL da Shopee saindo todas iguais
 
-# Correção: Vendas de Carrinho (Pack) — Itens Duplicados e Cabeçalho Incompleto
+Diagnóstico
+- Eu encontrei a causa no código atual, e você não precisa mandar mais nada para eu corrigir.
+- O problema está em `src/hooks/useZPLSettings.ts`, na função `splitShopeeLabels`.
+- Hoje ela faz isso:
+  1. pega tudo antes do primeiro `^XA` como se fosse um “header” único;
+  2. depois separa os blocos `^XA...^XZ`;
+  3. reaplica esse mesmo header em todas as etiquetas.
+- No arquivo que você enviou, cada etiqueta da Shopee já vem completa e independente, neste formato:
+  `~DGR:DEMO.GRF... ^XA ... ^XGR:DEMO.GRF ... ^XZ ^XA ^IDR:DEMO.GRF^FS^XZ`
+- Ou seja: cada etiqueta tem seu próprio `~DGR...` com a imagem/arte daquela venda.
+- Como o código reaproveita só o `~DGR` da primeira etiqueta em todas as outras, o PDF final repete a primeira etiqueta em todas as páginas. Isso explica exatamente o caso do “Alexandre Nóbrega” repetido.
 
-## Problema
+Solução
+1. Reescrever o split da Shopee
+- Alterar `splitShopeeLabels` para preservar cada etiqueta completa da Shopee como um bloco fechado.
+- Em vez de tratar apenas o primeiro `~DGR` como cabeçalho global, a função vai separar por etiquetas reais, mantendo:
+  - o `~DGR` daquela etiqueta;
+  - o `^XA...^XZ` de impressão;
+  - o `^XA...^XZ` de limpeza (`^IDR:...`) correspondente.
 
-Quando um comprador faz uma venda de carrinho (ex: 2 produtos no mesmo pedido), o Mercado Livre cria **dois `order_id`** com um único `shipment_id` e `pack_id`. O sistema trata cada `order_id` separadamente:
+2. Usar estratégia compatível com o arquivo real
+- Implementar a extração nesta ordem:
+  - primeiro tentar separar por linhas/blocos completos de Shopee (`~DGR...` até o próximo `~DGR...`);
+  - validar que cada bloco contém impressão + fechamento;
+  - se não bater, usar um fallback seguro.
+- Isso evita quebrar outros arquivos antigos enquanto corrige o formato real da Shopee que você mandou.
 
-1. **Na tabela**: O dedup do RPC mantém apenas 1 `order_id`. A busca de itens usa somente esse `order_id`, mostrando apenas 1 produto do carrinho.
-2. **No cabeçalho**: O mapa `shipmentToOrderId` armazena apenas 1 `order_id` por `shipment_id`. O cabeçalho lista apenas os itens de 1 pedido, ignorando os demais.
-3. **Pack_id ausente**: O RPC não retorna `pack_id`, impedindo a UI de agrupar corretamente.
+3. Manter o restante da conversão
+- O problema principal não está no loop de geração do PDF.
+- Depois que cada bloco vier correto, `ZPLConverter.tsx` pode continuar convertendo etiqueta por etiqueta normalmente.
+- Cada request para o conversor externo passará a receber a etiqueta certa, não uma cópia da primeira.
 
-## Correção em 3 Frentes
+4. Ajustar a contagem de etiquetas
+- Garantir que `detectLabelCount` use a nova separação correta.
+- Assim o total mostrado na tela e o total de páginas do PDF ficam coerentes com o arquivo real.
 
-### 1. RPC `get_shipping_orders` — Retornar `pack_id`
+5. Validar com o seu arquivo
+- Teste obrigatório com `thermal_zpl_shipping_label.txt`.
+- Resultado esperado:
+  - 26 etiquetas detectadas;
+  - PDF com 26 páginas;
+  - páginas com destinatários diferentes;
+  - a primeira página podendo ser “Alexandre Nóbrega”, mas as demais com os dados corretos de cada venda.
 
-Adicionar `o.pack_id` à query e ao JSON de saída do RPC, permitindo que a UI identifique vendas de carrinho.
+Arquivos afetados
+- `src/hooks/useZPLSettings.ts` — correção da lógica de split da Shopee
+- `src/pages/ZPLConverter.tsx` — no máximo ajuste leve para usar a nova separação e manter preview/contagem consistentes
 
-### 2. Frontend — Buscar itens por TODOS os `order_id` do mesmo `shipment_id`
-
-Em `useShippingLabels.ts`, após obter os pedidos deduplicados:
-- Para cada pedido com `pack_id`, buscar todos os `order_id` que compartilham o mesmo `shipment_id`
-- Buscar itens de TODOS esses `order_id`
-- Agrupar todos os itens sob o `order_id` principal (deduplicado)
-
+Resumo técnico
 ```text
-Antes:  orderItems.get("2000015905836748") → [Etiqueta Redonda]
-Depois: orderItems.get("2000015905836748") → [Etiqueta Redonda, Ribbon Dourado]
+Erro atual:
+arquivo inteiro
+  -> pega só o 1º ~DGR
+  -> separa por ^XA/^XZ
+  -> reaplica o 1º gráfico em todas as páginas
+
+Correto:
+cada etiqueta Shopee
+  = seu próprio ~DGR
+  + seu próprio bloco de impressão
+  + seu próprio bloco de limpeza
 ```
 
-### 3. Edge Function — Cabeçalho com todos os itens do pack
-
-Em `ml-generate-labels/index.ts`:
-- Trocar `shipmentToOrderId` (1:1) por `shipmentToOrderIds` (1:N)
-- Buscar TODOS os `order_id` do mesmo `shipment_id` via `meli_orders_cache`
-- Buscar itens de TODOS os `order_id` do pack
-- Montar cabeçalho com a lista completa de produtos
-
-## Arquivos afetados
-
-- **Nova migration SQL** — `get_shipping_orders`: adicionar `pack_id` ao output
-- **`src/hooks/useShippingLabels.ts`** — buscar itens de todos os order_ids do pack
-- **`src/hooks/useShippingLabels.ts`** — adicionar `pack_id` ao tipo `ShippingOrder`
-- **`supabase/functions/ml-generate-labels/index.ts`** — usar mapeamento 1:N para shipment→orders, buscar todos os itens
-
-## Resultado
-
-- Tabela: Carrinho com 2 produtos mostra os 2 itens na mesma linha
-- Cabeçalho: Lista completa de todos os produtos do carrinho
-- Uma única etiqueta por envio, independente de quantos order_ids o pack tem
-
+Resultado esperado após a correção
+- Shopee deixa de repetir a primeira etiqueta em todas as páginas
+- Cada página do PDF passa a refletir a etiqueta real correspondente
+- O módulo volta a se comportar como no seu sistema antigo para esse tipo de arquivo
