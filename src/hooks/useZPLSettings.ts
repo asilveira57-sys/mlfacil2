@@ -30,6 +30,11 @@ export const detectLabelCount = (zplCode: string, labelType?: string): number =>
   
   // Padrão: conta quantas vezes aparece ^XA (início de etiqueta ZPL)
   const matches = code.match(/\^XA/gi);
+  // Se tem ~DGR, cada ~DGR = 1 etiqueta real (ex: Shopee genérico)
+  const dgrMatches = code.match(/~DGR/gi);
+  if (dgrMatches && dgrMatches.length > 1) {
+    return dgrMatches.length;
+  }
   return matches ? matches.length : 1;
 };
 
@@ -74,6 +79,30 @@ export const splitShopeeLabels = (zplCode: string): string[] => {
 
   if (!normalized) return [];
 
+  // Estratégia principal: separar por blocos ~DGR (cada etiqueta Shopee tem seu próprio ~DGR com a imagem/arte)
+  // Padrão real: ~DGR:DEMO.GRF,... ^XA...^XZ ^XA...^XZ ~DGR:DEMO.GRF,... ^XA...^XZ ^XA...^XZ ...
+  const dgrPositions: number[] = [];
+  const dgrRegex = /~DGR/gi;
+  let dgrMatch: RegExpExecArray | null;
+  while ((dgrMatch = dgrRegex.exec(normalized)) !== null) {
+    dgrPositions.push(dgrMatch.index);
+  }
+
+  // Se tem múltiplos ~DGR, cada um é uma etiqueta independente
+  if (dgrPositions.length > 1) {
+    const labels: string[] = [];
+    for (let i = 0; i < dgrPositions.length; i++) {
+      const start = dgrPositions[i];
+      const end = i + 1 < dgrPositions.length ? dgrPositions[i + 1] : normalized.length;
+      const block = normalized.slice(start, end).trim();
+      if (block.length > 0) {
+        labels.push(block);
+      }
+    }
+    return labels;
+  }
+
+  // Fallback: arquivo sem ~DGR ou com apenas 1 — usar lógica de ^XA/^XZ
   const firstXAIndex = normalized.search(/\^XA/i);
 
   if (firstXAIndex === -1) {
@@ -98,7 +127,7 @@ export const splitShopeeLabels = (zplCode: string): string[] => {
     return [normalized];
   }
 
-  // Em muitos arquivos Shopee, cada etiqueta lógica é composta por 2 blocos ^XA...^XZ
+  // Em muitos arquivos Shopee antigos, cada etiqueta lógica é composta por 2 blocos ^XA...^XZ
   let groupedLabels: string[] = [];
   if (rawBlocks.length % 2 === 0) {
     for (let i = 0; i < rawBlocks.length; i += 2) {
