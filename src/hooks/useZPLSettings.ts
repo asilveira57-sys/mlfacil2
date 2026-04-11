@@ -30,6 +30,11 @@ export const detectLabelCount = (zplCode: string, labelType?: string): number =>
   
   // Padrão: conta quantas vezes aparece ^XA (início de etiqueta ZPL)
   const matches = code.match(/\^XA/gi);
+  // Se tem ~DGR, cada ~DGR = 1 etiqueta real (ex: Shopee genérico)
+  const dgrMatches = code.match(/~DGR/gi);
+  if (dgrMatches && dgrMatches.length > 1) {
+    return dgrMatches.length;
+  }
   return matches ? matches.length : 1;
 };
 
