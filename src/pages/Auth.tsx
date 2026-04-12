@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
-import { BarChart3, DollarSign, Target, TrendingUp, Lightbulb, Eye, EyeOff, Loader2 } from "lucide-react";
+import { BarChart3, DollarSign, Target, TrendingUp, Lightbulb, Eye, EyeOff, Loader2, MailCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -118,6 +118,17 @@ const Auth = () => {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
 
+  // State for unconfirmed email resend flow
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState("");
+  const [resendingVerification, setResendingVerification] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
+
+  useEffect(() => {
+    if (resendCountdown <= 0) return;
+    const timer = setTimeout(() => setResendCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCountdown]);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
@@ -145,7 +156,13 @@ const Auth = () => {
       const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         if (error.message.includes("Email not confirmed")) {
-          toast.error("E-mail não verificado. Verifique sua caixa de entrada.");
+          // Show inline resend UI instead of just a toast
+          setUnconfirmedEmail(email);
+          // Auto-trigger a resend
+          try {
+            await supabase.auth.resend({ type: 'signup', email });
+            setResendCountdown(30);
+          } catch { /* silent */ }
         } else {
           toast.error(t("auth:invalid_credentials"));
         }
@@ -178,6 +195,24 @@ const Auth = () => {
       toast.error("Erro inesperado ao fazer login.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!unconfirmedEmail || resendCountdown > 0) return;
+    setResendingVerification(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: unconfirmedEmail,
+      });
+      if (error) throw error;
+      toast.success('E-mail de verificação reenviado!');
+      setResendCountdown(30);
+    } catch (err: any) {
+      toast.error(`Erro ao reenviar: ${err.message}`);
+    } finally {
+      setResendingVerification(false);
     }
   };
 
@@ -225,7 +260,68 @@ const Auth = () => {
           </div>
 
           <div className="bg-card p-8 sm:p-10 rounded-2xl shadow-lg border border-border/50">
-            {forgotMode ? (
+            {unconfirmedEmail ? (
+              <div className="text-center space-y-4 py-6">
+                <div className="flex justify-center">
+                  <div className="w-14 h-14 bg-primary/10 rounded-full flex items-center justify-center">
+                    <MailCheck className="w-7 h-7 text-primary" />
+                  </div>
+                </div>
+                <h2 className="text-xl font-bold text-card-foreground">Verifique seu e-mail</h2>
+                <p className="text-muted-foreground text-sm max-w-xs mx-auto">
+                  Enviamos um link de verificação para confirmar sua conta. Verifique sua caixa de entrada.
+                </p>
+                <p className="text-sm font-medium text-foreground">{unconfirmedEmail}</p>
+
+                {/* Spam/Promotions warning */}
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-left max-w-sm mx-auto">
+                  <p className="text-xs text-amber-800 dark:text-amber-200 font-medium mb-1">⚠️ Não encontrou o e-mail?</p>
+                  <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-0.5 list-disc list-inside">
+                    <li>Verifique a pasta <strong>Spam</strong> ou <strong>Lixo eletrônico</strong></li>
+                    <li>No Gmail, cheque a aba <strong>Promoções</strong></li>
+                    <li>Aguarde alguns segundos para o e-mail chegar</li>
+                  </ul>
+                </div>
+
+                <div className="pt-2">
+                  {resendCountdown > 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Reenviar em <span className="font-mono font-semibold text-foreground">{resendCountdown}s</span>
+                    </p>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleResendVerification}
+                      disabled={resendingVerification}
+                    >
+                      {resendingVerification ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          Reenviando...
+                        </>
+                      ) : (
+                        <>
+                          <MailCheck className="h-4 w-4 mr-1" />
+                          Reenviar e-mail de verificação
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+
+                <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+                  Se ainda não receber, entre em contato pelo WhatsApp no canto inferior direito.
+                </p>
+
+                <button
+                  onClick={() => setUnconfirmedEmail("")}
+                  className="text-sm text-primary hover:underline mt-4 inline-block font-medium"
+                >
+                  Voltar ao login
+                </button>
+              </div>
+            ) : forgotMode ? (
               forgotSent ? (
                 <div className="text-center space-y-4 py-4">
                   <h2 className="text-xl font-bold text-card-foreground">{t("auth:email_sent")}</h2>
