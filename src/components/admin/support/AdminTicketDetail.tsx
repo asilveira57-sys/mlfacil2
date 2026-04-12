@@ -73,6 +73,11 @@ interface TicketData {
   workspace_id: string;
 }
 
+interface ClientProfile {
+  full_name: string | null;
+  email: string | null;
+}
+
 interface AdminTicketDetailProps {
   ticketId: string;
   onBack: () => void;
@@ -93,6 +98,8 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
   const [ticket, setTicket] = useState<TicketData | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [clientProfile, setClientProfile] = useState<ClientProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -109,9 +116,41 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
         ]);
 
         if (ticketRes.error) throw ticketRes.error;
-        setTicket(ticketRes.data as TicketData);
+        const ticketData = ticketRes.data as TicketData;
+        setTicket(ticketData);
         setMessages((messagesRes.data || []).map(m => ({ ...m, sender_type: m.sender_type as Message['sender_type'] })));
-        setAttachments(attachmentsRes.data || []);
+        
+        const atts = (attachmentsRes.data || []) as Attachment[];
+        setAttachments(atts);
+
+        // Fetch signed URLs for all attachments (private bucket)
+        if (atts.length > 0) {
+          const urlMap: Record<string, string> = {};
+          await Promise.all(
+            atts.map(async (att) => {
+              try {
+                const { data, error } = await supabase.storage
+                  .from('support-attachments')
+                  .createSignedUrl(att.storage_path, 3600);
+                if (!error && data?.signedUrl) {
+                  urlMap[att.id] = data.signedUrl;
+                }
+              } catch (e) {
+                console.warn('[AdminTicketDetail] Signed URL error for', att.file_name, e);
+              }
+            })
+          );
+          setSignedUrls(urlMap);
+        }
+
+        // Fetch client profile
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', ticketData.user_id)
+          .single();
+        
+        setClientProfile(profileData as ClientProfile | null);
       } catch (error) {
         console.error('[AdminTicketDetail] Error:', error);
         toast({ title: 'Erro ao carregar chamado', variant: 'destructive' });
@@ -169,7 +208,6 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Não autenticado');
 
-      // Insert support message
       const { data: msgData, error: msgError } = await supabase
         .from('support_messages')
         .insert([{
@@ -187,7 +225,6 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
       setMessages(prev => [...prev, { ...msgData, sender_type: 'support' as const }]);
       setNewMessage('');
 
-      // Update ticket status to waiting_response
       if (ticket.status !== 'resolved' && ticket.status !== 'closed') {
         await supabase
           .from('support_tickets')
@@ -196,7 +233,6 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
         setTicket(prev => prev ? { ...prev, status: 'waiting_response' } : null);
       }
 
-      // Send notification to the ticket owner
       await supabase.from('app_notifications').insert({
         user_id: ticket.user_id,
         workspace_id: ticket.workspace_id,
@@ -210,7 +246,6 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
         priority: 'normal',
       });
 
-      // Trigger email notification to seller
       try {
         await supabase.functions.invoke('support-notify', {
           body: { type: 'reply', ticket_id: ticket.id },
@@ -254,6 +289,7 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
 
   const statusConfig = STATUS_CONFIG[ticket.status];
   const StatusIcon = statusConfig.icon;
+  const clientName = clientProfile?.full_name || clientProfile?.email || 'Seller';
 
   return (
     <div className="space-y-4">
@@ -274,6 +310,11 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
               </div>
               <CardTitle className="text-lg">{ticket.subject}</CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
+                <span className="font-medium text-foreground">{clientName}</span>
+                {clientProfile?.email && clientProfile?.full_name && (
+                  <span className="ml-1">({clientProfile.email})</span>
+                )}
+                {' • '}
                 Aberto {formatDistanceToNow(new Date(ticket.created_at), { addSuffix: true, locale: ptBR })}
                 {ticket.current_module && ` • ${ticket.current_module}`}
                 {ticket.current_route && ` • ${ticket.current_route}`}
@@ -290,11 +331,15 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
               <p className="text-sm font-medium">Anexos</p>
               <div className="flex flex-wrap gap-2">
                 {attachments.map(att => {
-                  const { data: urlData } = supabase.storage
-                    .from('support-attachments')
-                    .getPublicUrl(att.storage_path);
-                  const url = urlData?.publicUrl;
+                  const url = signedUrls[att.id];
                   const isImage = att.file_type.startsWith('image/');
+                  if (!url) return (
+                    <Badge key={att.id} variant="outline" className="gap-1.5 py-1.5 text-muted-foreground">
+                      <FileText className="h-3 w-3" />
+                      <span className="max-w-[100px] truncate">{att.file_name}</span>
+                      <span className="text-xs">(carregando...)</span>
+                    </Badge>
+                  );
                   return (
                     <a
                       key={att.id}
@@ -371,7 +416,7 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
                   <div className={`max-w-[80%] ${message.sender_type === 'support' ? 'items-end' : ''}`}>
                     <div className="flex items-center gap-1 mb-0.5">
                       <span className="text-xs font-medium">
-                        {message.sender_type === 'user' ? 'Seller' : message.sender_type === 'support' ? 'Suporte' : 'Sistema'}
+                        {message.sender_type === 'user' ? clientName : message.sender_type === 'support' ? 'Suporte' : 'Sistema'}
                       </span>
                     </div>
                     <div
