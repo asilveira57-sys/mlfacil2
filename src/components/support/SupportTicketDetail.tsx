@@ -96,6 +96,7 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
   const [ticket, setTicket] = useState<TicketData | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [logs, setLogs] = useState<TicketLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [newMessage, setNewMessage] = useState('');
@@ -105,7 +106,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
     const fetchTicketData = async () => {
       setLoading(true);
       try {
-        // Fetch ticket
         const { data: ticketData, error: ticketError } = await supabase
           .from('support_tickets')
           .select('*')
@@ -115,7 +115,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
         if (ticketError) throw ticketError;
         setTicket(ticketData);
 
-        // Fetch messages
         const { data: messagesData } = await supabase
           .from('support_messages')
           .select('*')
@@ -127,15 +126,34 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
           sender_type: m.sender_type as 'user' | 'support' | 'system',
         })));
 
-        // Fetch attachments
         const { data: attachmentsData } = await supabase
           .from('support_attachments')
           .select('*')
           .eq('ticket_id', ticketId);
 
-        setAttachments(attachmentsData || []);
+        const atts = (attachmentsData || []) as Attachment[];
+        setAttachments(atts);
 
-        // Fetch logs
+        // Fetch signed URLs for all attachments (private bucket)
+        if (atts.length > 0) {
+          const urlMap: Record<string, string> = {};
+          await Promise.all(
+            atts.map(async (att) => {
+              try {
+                const { data, error } = await supabase.storage
+                  .from('support-attachments')
+                  .createSignedUrl(att.storage_path, 3600);
+                if (!error && data?.signedUrl) {
+                  urlMap[att.id] = data.signedUrl;
+                }
+              } catch (e) {
+                console.warn('[SupportTicketDetail] Signed URL error for', att.file_name, e);
+              }
+            })
+          );
+          setSignedUrls(urlMap);
+        }
+
         const { data: logsData } = await supabase
           .from('support_ticket_logs')
           .select('*')
@@ -157,7 +175,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
     fetchTicketData();
   }, [ticketId, toast]);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -201,7 +218,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
       setMessages(prev => [...prev, typedMessage]);
       setNewMessage('');
 
-      // Update ticket status if it was waiting_response
       if (ticket.status === 'waiting_response') {
         await supabase
           .from('support_tickets')
@@ -218,11 +234,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
     } finally {
       setSending(false);
     }
-  };
-
-  const getAttachmentIcon = (fileType: string) => {
-    if (fileType.startsWith('image/')) return Image;
-    return FileText;
   };
 
   const formatFileSize = (bytes: number | null) => {
@@ -303,11 +314,15 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
               <p className="text-sm font-medium">Anexos</p>
               <div className="flex flex-wrap gap-2">
                 {attachments.map(attachment => {
-                  const { data: urlData } = supabase.storage
-                    .from('support-attachments')
-                    .getPublicUrl(attachment.storage_path);
-                  const url = urlData?.publicUrl;
+                  const url = signedUrls[attachment.id];
                   const isImage = attachment.file_type.startsWith('image/');
+                  if (!url) return (
+                    <Badge key={attachment.id} variant="outline" className="gap-1.5 py-1.5 text-muted-foreground">
+                      <FileText className="h-3 w-3" />
+                      <span className="max-w-[100px] truncate">{attachment.file_name}</span>
+                      <span className="text-xs">(carregando...)</span>
+                    </Badge>
+                  );
                   return (
                     <a
                       key={attachment.id}
@@ -350,7 +365,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
         <CardContent>
           <ScrollArea ref={scrollRef} className="h-[400px] pr-4">
             <div className="space-y-4">
-              {/* Initial log */}
               {logs.filter(log => log.action === 'created').map(log => (
                 <div key={log.id} className="flex items-center gap-2 text-xs text-muted-foreground">
                   <div className="h-2 w-2 rounded-full bg-muted-foreground/50" />
@@ -360,7 +374,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
                 </div>
               ))}
 
-              {/* Messages */}
               {messages.map(message => (
                 <div
                   key={message.id}
@@ -409,7 +422,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
                 </div>
               ))}
 
-              {/* Status change logs */}
               {logs.filter(log => log.action === 'status_changed').map(log => (
                 <div key={log.id} className="flex items-center gap-2 text-xs text-muted-foreground">
                   <div className="h-2 w-2 rounded-full bg-muted-foreground/50" />
@@ -422,7 +434,6 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
             </div>
           </ScrollArea>
 
-          {/* Reply box */}
           {!isClosed && (
             <>
               <Separator className="my-4" />
