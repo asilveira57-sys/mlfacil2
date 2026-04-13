@@ -1029,6 +1029,7 @@ serve(async (req) => {
 
       if (format === 'pdf') {
         const pdfDataArray = successBatches.filter(b => b.pdf_data).map(b => b.pdf_data!);
+        const totalShipments = successBatches.reduce((sum, b) => sum + b.shipment_ids.length, 0);
         
         let mergedPdfBytes: Uint8Array;
         if (pdfDataArray.length > 1) {
@@ -1037,9 +1038,11 @@ serve(async (req) => {
           mergedPdfBytes = pdfDataArray[0];
         }
         
-        // For no_nf layout: strip DANFE pages, keep only labels
+        // Strip separation list pages for all layouts
         if (layout === 'meli_100x150_no_nf') {
-          mergedPdfBytes = new Uint8Array(await stripDanfePages(mergedPdfBytes));
+          mergedPdfBytes = new Uint8Array(await stripExtraPages(mergedPdfBytes, totalShipments, 'no_nf'));
+        } else if (layout === 'meli_100x150') {
+          mergedPdfBytes = new Uint8Array(await stripExtraPages(mergedPdfBytes, totalShipments, 'standard'));
         }
         
         finalPdfBase64 = uint8ArrayToBase64(mergedPdfBytes);
