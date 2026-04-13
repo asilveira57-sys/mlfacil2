@@ -42,7 +42,114 @@ serve(async (req) => {
     }
 
     const url = new URL(req.url);
-    const action = url.searchParams.get("action");
+    const body = req.method === "POST" ? await req.json().catch(() => ({})) : null;
+    const action = url.searchParams.get("action") || body?.action;
+
+    if (req.method === "POST" && action === "list-activity") {
+      const { data: subscriptionsRaw, error: subscriptionsError } = await supabase
+        .from("tenant_entitlements")
+        .select(`
+          id,
+          tenant_id,
+          status,
+          created_at,
+          current_period_end,
+          last_payment_id,
+          plan_tiers(code, name),
+          plan_addons(code, name),
+          tenants!inner(owner_user_id)
+        `)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (subscriptionsError) throw subscriptionsError;
+
+      const { data: paymentsRaw, error: paymentsError } = await supabase
+        .from("tenant_payments")
+        .select(`
+          id,
+          tenant_id,
+          payment_id,
+          external_reference,
+          amount_brl,
+          status,
+          created_at,
+          paid_at,
+          tenants!inner(owner_user_id)
+        `)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (paymentsError) throw paymentsError;
+
+      const ownerIds = Array.from(new Set([
+        ...(subscriptionsRaw || []).map((item: any) => item.tenants?.owner_user_id).filter(Boolean),
+        ...(paymentsRaw || []).map((item: any) => item.tenants?.owner_user_id).filter(Boolean),
+      ]));
+
+      const profileMap = new Map<string, { full_name: string | null; email: string | null }>();
+
+      if (ownerIds.length > 0) {
+        const { data: profiles, error: profilesError } = await supabase
+          .from("profiles")
+          .select("user_id, full_name, email")
+          .in("user_id", ownerIds);
+
+        if (profilesError) throw profilesError;
+
+        for (const profile of profiles || []) {
+          profileMap.set(profile.user_id, {
+            full_name: profile.full_name,
+            email: profile.email,
+          });
+        }
+      }
+
+      const subscriptions = (subscriptionsRaw || []).map((item: any) => {
+        const ownerUserId = item.tenants?.owner_user_id || item.tenant_id;
+        const profile = profileMap.get(ownerUserId) || { full_name: null, email: null };
+        const tier = Array.isArray(item.plan_tiers) ? item.plan_tiers[0] : item.plan_tiers;
+        const addon = Array.isArray(item.plan_addons) ? item.plan_addons[0] : item.plan_addons;
+
+        return {
+          id: item.id,
+          mp_preapproval_id: item.last_payment_id || "—",
+          user_id: ownerUserId,
+          user_name: profile.full_name,
+          user_email: profile.email,
+          plan_id: tier?.code || addon?.code || null,
+          plan_name: tier?.name || addon?.name || null,
+          status: item.status || "unknown",
+          created_at: item.created_at,
+          current_period_end: item.current_period_end,
+          tenant_id: item.tenant_id,
+        };
+      });
+
+      const payments = (paymentsRaw || []).map((item: any) => {
+        const ownerUserId = item.tenants?.owner_user_id || item.tenant_id;
+        const profile = profileMap.get(ownerUserId) || { full_name: null, email: null };
+
+        return {
+          id: item.id,
+          mp_payment_id: item.payment_id || "—",
+          user_id: ownerUserId,
+          user_name: profile.full_name,
+          user_email: profile.email,
+          amount: Number(item.amount_brl || 0),
+          status: item.status || "unknown",
+          created_at: item.created_at,
+          paid_at: item.paid_at,
+          external_reference: item.external_reference,
+          tenant_id: item.tenant_id,
+        };
+      });
+
+      return new Response(
+        JSON.stringify({ subscriptions, payments }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // GET: List all plans with prices (including unpublished)
     if (req.method === "GET" && action === "list") {
@@ -77,7 +184,6 @@ serve(async (req) => {
 
     // POST: Update plan
     if (req.method === "POST" && action === "update-plan") {
-      const body = await req.json();
       const { id, name, description, features, is_active } = body;
 
       const { error } = await supabase
@@ -95,7 +201,6 @@ serve(async (req) => {
 
     // POST: Update price
     if (req.method === "POST" && action === "update-price") {
-      const body = await req.json();
       const { id, amount_cents, badge_text, label_sub, is_visible, ui_order } = body;
 
       const { error } = await supabase
@@ -113,7 +218,6 @@ serve(async (req) => {
 
     // POST: Publish price
     if (req.method === "POST" && action === "publish-price") {
-      const body = await req.json();
       const { id } = body;
 
       const { error } = await supabase
@@ -131,7 +235,6 @@ serve(async (req) => {
 
     // POST: Unpublish price
     if (req.method === "POST" && action === "unpublish-price") {
-      const body = await req.json();
       const { id } = body;
 
       const { error } = await supabase
@@ -149,7 +252,6 @@ serve(async (req) => {
 
     // POST: Update settings
     if (req.method === "POST" && action === "update-settings") {
-      const body = await req.json();
       const { key, value } = body;
 
       const { error } = await supabase
