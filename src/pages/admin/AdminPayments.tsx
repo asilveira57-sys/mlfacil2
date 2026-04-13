@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useWebhookLogs, type WebhookLogData } from '@/hooks/useAdmin';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/edgeFunctionClient';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -37,69 +38,52 @@ interface SubscriptionData {
   id: string;
   mp_preapproval_id: string;
   user_id: string;
+  user_name?: string | null;
+  user_email?: string | null;
   plan_id: string | null;
+  plan_name?: string | null;
   status: string;
   created_at: string;
+  current_period_end?: string | null;
+  tenant_id?: string;
 }
 
 interface PaymentData {
   id: string;
   mp_payment_id: string;
   user_id: string;
+  user_name?: string | null;
+  user_email?: string | null;
   amount: number;
   status: string;
   created_at: string;
+  paid_at?: string | null;
+  external_reference?: string | null;
+  tenant_id?: string;
 }
 
 export function AdminPayments() {
   const { data: webhooks, isLoading: webhooksLoading } = useWebhookLogs();
-  
-  // Fetch real payments from tenant_payments
-  const { data: rawPayments = [], isLoading: paymentsLoading } = useQuery({
-    queryKey: ['admin', 'tenant-payments'],
+
+  const { data: billingActivity, isLoading: billingLoading } = useQuery({
+    queryKey: ['admin', 'billing-activity'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('tenant_payments')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      return data || [];
+      const result = await invokeEdgeFunction<{ payments: PaymentData[]; subscriptions: SubscriptionData[] }>('billing-admin', {
+        body: { action: 'list-activity' },
+      });
+
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Falha ao carregar pagamentos');
+      }
+
+      return result.data;
     },
   });
 
-  // Fetch subscriptions from tenant_entitlements
-  const { data: rawSubs = [], isLoading: subsLoading } = useQuery({
-    queryKey: ['admin', 'tenant-entitlements'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('tenant_entitlements')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
-  // Map to display types
-  const payments: PaymentData[] = rawPayments.map((p: any) => ({
-    id: p.id,
-    mp_payment_id: p.payment_id || '—',
-    user_id: p.tenant_id || '—',
-    amount: p.amount_brl || 0,
-    status: p.status || 'unknown',
-    created_at: p.created_at,
-  }));
-
-  const subscriptions: SubscriptionData[] = rawSubs.map((s: any) => ({
-    id: s.id,
-    mp_preapproval_id: s.last_payment_id || '—',
-    user_id: s.tenant_id || '—',
-    plan_id: s.tier_code || s.addon_code || null,
-    status: s.status || 'unknown',
-    created_at: s.created_at,
-  }));
+  const payments = billingActivity?.payments || [];
+  const subscriptions = billingActivity?.subscriptions || [];
+  const paymentsLoading = billingLoading;
+  const subsLoading = billingLoading;
 
   const [detailDialog, setDetailDialog] = useState<{ open: boolean; data: unknown }>({
     open: false,
@@ -109,14 +93,14 @@ export function AdminPayments() {
   const getPaymentStatusBadge = (status: string) => {
     switch (status) {
       case 'approved':
-        return <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Aprovado</Badge>;
+        return <Badge variant="default">Aprovado</Badge>;
       case 'pending':
-        return <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">Pendente</Badge>;
+        return <Badge variant="secondary">Pendente</Badge>;
       case 'cancelled':
       case 'rejected':
         return <Badge variant="destructive">Cancelado</Badge>;
       case 'refunded':
-        return <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Estornado</Badge>;
+        return <Badge variant="outline">Estornado</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -127,9 +111,9 @@ export function AdminPayments() {
       return <Badge variant="destructive">Erro</Badge>;
     }
     if (webhook.processed_at) {
-      return <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Processado</Badge>;
+      return <Badge variant="default">Processado</Badge>;
     }
-    return <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">Pendente</Badge>;
+    return <Badge variant="secondary">Pendente</Badge>;
   };
 
   return (
@@ -193,10 +177,15 @@ export function AdminPayments() {
                     {subscriptions.map((sub) => (
                       <TableRow key={sub.id}>
                         <TableCell className="font-mono text-xs">
-                          {sub.mp_preapproval_id?.slice(0, 12)}...
+                          {sub.mp_preapproval_id === '—' ? '—' : `${sub.mp_preapproval_id?.slice(0, 12)}...`}
                         </TableCell>
-                        <TableCell>{sub.user_id?.slice(0, 8)}...</TableCell>
-                        <TableCell>{sub.plan_id || 'N/A'}</TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <div>{sub.user_name || `${sub.user_id?.slice(0, 8)}...`}</div>
+                            {sub.user_email && <div className="text-xs text-muted-foreground">{sub.user_email}</div>}
+                          </div>
+                        </TableCell>
+                        <TableCell>{sub.plan_name || sub.plan_id || 'N/A'}</TableCell>
                         <TableCell>{getPaymentStatusBadge(sub.status)}</TableCell>
                         <TableCell>
                           {format(new Date(sub.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
@@ -257,7 +246,12 @@ export function AdminPayments() {
                         <TableCell className="font-mono text-xs">
                           {payment.mp_payment_id}
                         </TableCell>
-                        <TableCell>{payment.user_id?.slice(0, 8)}...</TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <div>{payment.user_name || `${payment.user_id?.slice(0, 8)}...`}</div>
+                            {payment.user_email && <div className="text-xs text-muted-foreground">{payment.user_email}</div>}
+                          </div>
+                        </TableCell>
                         <TableCell>
                           R$ {payment.amount?.toFixed(2) || '0.00'}
                         </TableCell>
