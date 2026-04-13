@@ -1,53 +1,33 @@
 
 
-## Diagnóstico
+## Atualização em massa de prazo de utilização — 95 clientes
 
-O pagamento R$17.90 (transação 154604698714) do usuário **NOVAVIDA C.** (overlordcomerciobrasil@gmail.com) foi feito via **assinatura recorrente** (preapproval) do plano ZPL Básico Mensal.
+### Contexto
+A planilha contém 95 clientes com nome, email e dias de acesso restantes. O cliente **Nova Vida** (overlordcomerciobrasil@gmail.com) **não está na lista** e já tem `payment_status: active` — não será afetado.
 
-### Causa raiz: `notification_url` ausente para assinaturas recorrentes
+### O que será feito
 
-No `billing-checkout/index.ts`, a `notification_url` do webhook só é configurada para pagamentos **one-time** (linha 204):
+Usar a Edge Function `import-users` já existente para processar os 95 clientes em lote. Essa função já faz exatamente o necessário:
 
-```text
-ONE-TIME (preferência):  notification_url: ".../mercadopago-webhook"  ✅
-RECURRING (preapproval): notification_url: NÃO DEFINIDA              ❌
-```
+- Para **usuários que já existem** no sistema: atualiza `trial_status = active`, `trial_start_at = agora`, `trial_end_at = agora + dias`, e marca tag como `VETERANO`
+- Para **usuários que não existem**: cria o usuário no auth (sem senha, email confirmado), cria profile e user_access_state com o trial customizado
 
-Sem `notification_url`, o Mercado Pago nunca notifica o sistema sobre o pagamento aprovado. Confirmado pelos logs: **zero chamadas** ao `mercadopago-webhook` para este pagamento.
+### Execução
 
-Resultado: pagamento aprovado no MP, mas `tenant_payments` vazio e `tenant_entitlements` vazio para este tenant. O `user_access_state` ainda mostra `payment_status: trial` com trial expirado em 12/abr.
+1. **Extrair os dados da planilha** para JSON (95 registros com `nome`, `email`, `dias`)
+2. **Chamar a Edge Function `import-users`** via `supabase.functions.invoke` com o array de usuários
+3. **Verificar o resultado** — a função retorna contagem de criados, atualizados e erros, além de gravar logs em `user_import_logs`
 
----
+### Observações
+- Clientes com poucos dias (1-2 dias) terão trial expirando em breve — isso reflete os dados da planilha
+- Nenhuma alteração de código é necessária — a função `import-users` já suporta esse fluxo
+- Os logs ficam registrados em `user_import_logs` com batch_id para rastreabilidade
 
-## Plano de Correção
-
-### 1. Ativar manualmente o plano do usuário Nova Vida (imediato)
-
-Usar o insert tool para:
-- Inserir registro em `tenant_payments` com os dados do pagamento aprovado
-- Chamar `rpc_activate_entitlement` para o tenant `bebfe712-a911-42e5-b44a-818ca99c75c7` com tier `zpl-basico`, offer `rec_1m`
-- Atualizar `user_access_state.payment_status` para `active`
-
-### 2. Corrigir billing-checkout — adicionar `notification_url` nas assinaturas
-
-**Arquivo:** `supabase/functions/billing-checkout/index.ts`
-
-Adicionar `notification_url: \`\${supabaseUrl}/functions/v1/mercadopago-webhook\`` nos dois caminhos de criação de preapproval:
-- Linha ~134 (preapproval com `mp_product_ref`)
-- Linha ~163 (preapproval ad-hoc)
-
-### 3. Verificar se a oferta rec_1m requer `mp_product_ref`
-
-A oferta `rec_1m` tem `mp_product_ref: null`, então usa o caminho ad-hoc. O fix no passo 2 cobre ambos os caminhos.
-
----
-
-## Resumo de alterações
-
-| Ação | Tipo |
+### Resumo
+| Ação | Detalhes |
 |---|---|
-| Ativar plano Nova Vida manualmente | Insert/RPC no banco |
-| Adicionar `notification_url` em preapprovals | Edição em `billing-checkout/index.ts` |
-
-Isso corrige o problema para este usuário e previne que todos os futuros pagamentos por assinatura recorrente fiquem sem processamento.
+| Clientes processados | 95 |
+| Nova Vida | Excluído (não está na planilha, já ativo) |
+| Método | Edge Function `import-users` existente |
+| Alterações de código | Nenhuma |
 
