@@ -110,7 +110,16 @@ export function useUserAccessState(): UseUserAccessStateReturn {
         setStatus(null);
         setIsAuthenticated(false);
         initialLoadDoneRef.current = false;
+        // Clear persisted React Query cache to prevent stale data on next login
+        try { localStorage.removeItem('mlfacil-rq-cache'); } catch {}
       } else if (event === 'SIGNED_IN') {
+        // Clear stale persisted cache from previous sessions — prevents white screen
+        // when logging in on a window that still has old cached user/onboarding data
+        try {
+          localStorage.removeItem('mlfacil-rq-cache');
+          localStorage.removeItem('mktp_onboarding_progress');
+        } catch {}
+        initialLoadDoneRef.current = false;
         // Re-fetch after login so ProtectedRoute sees correct requiresOnboarding
         fetchStatus();
       }
