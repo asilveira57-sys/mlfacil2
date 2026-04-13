@@ -382,6 +382,54 @@ export function AdminUsers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Reset Link Dialog */}
+      <Dialog
+        open={resetLinkDialog.open}
+        onOpenChange={(open) => {
+          if (!open) setResetLinkDialog({ open: false, email: '', link: '', loading: false });
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link de Redefinição de Senha</DialogTitle>
+            <DialogDescription>
+              {resetLinkDialog.email}
+            </DialogDescription>
+          </DialogHeader>
+          {resetLinkDialog.loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : resetLinkDialog.link ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Copie e envie este link para o cliente via WhatsApp. O link expira em poucos minutos.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  readOnly
+                  value={resetLinkDialog.link}
+                  className="text-xs font-mono"
+                />
+                <Button onClick={handleCopyResetLink} size="icon" variant="outline">
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-destructive">Não foi possível gerar o link.</p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setResetLinkDialog({ open: false, email: '', link: '', loading: false })}
+            >
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
