@@ -1,34 +1,37 @@
 
 
-# Correção: Ticket Admin — Imagem Não Carrega + Nome do Cliente Ausente
+# Correção: Remover páginas de lista de separação em TODAS as modalidades
 
-## Problemas
+## Diagnóstico
 
-1. **Imagem não carrega**: O bucket `support-attachments` é **privado**, mas o código usa `getPublicUrl()` que só funciona para buckets públicos. Resultado: URL quebrada.
-2. **Nome do cliente ausente**: O ticket tem `user_id` mas nenhuma busca ao `profiles` é feita — aparece apenas "Seller" genérico.
+A API do Mercado Livre retorna **3 páginas por envio**: etiqueta (0), DANFE (1), lista de separação (2). O código atual tem dois problemas:
+
+1. **Layout "Padrão ML" (`meli_100x150`)**: a função `mergePDFs` copia TODAS as páginas sem filtrar — inclui a lista de separação.
+2. **Layout "Sem NF" (`meli_100x150_no_nf`) via pipeline padrão**: a função `stripDanfePages` assume 2 páginas por envio (pula índices ímpares), mas com 3 páginas por envio, ela mantém a separação (índice 2) e remove a DANFE (índice 1) — resultado errado.
+3. **Layout "Com Cabeçalho" (`mlfacil_100x175_header`)**: já está correto — `buildHeaderPdfSafe` copia apenas página 0 e opcionalmente página 1.
 
 ## Solução
 
-### 1. Usar `createSignedUrl` para anexos (AdminTicketDetail.tsx)
+Arquivo: `supabase/functions/ml-generate-labels/index.ts`
 
-Substituir `getPublicUrl` por `createSignedUrl` com expiração de 1h. Como é assíncrono, buscar as URLs assinadas no `useEffect` junto com os dados do ticket e armazenar em um state map.
+### 1. Criar função `stripExtraPages` inteligente
 
-### 2. Buscar nome do cliente via `profiles` (AdminTicketDetail.tsx)
+Substitui `stripDanfePages`. Detecta automaticamente quantas páginas por envio a API retornou (total_pages / num_shipments). Mantém apenas as páginas desejadas de cada grupo:
+- **Padrão ML**: mantém páginas 0 e 1 (etiqueta + DANFE), descarta página 2+ (separação)
+- **Sem NF**: mantém apenas página 0 (etiqueta), descarta todo o resto
 
-Após carregar o ticket, fazer um `select('full_name, email')` na tabela `profiles` usando `ticket.user_id`. Exibir o nome no cabeçalho do chamado e nas mensagens do tipo "user".
+### 2. Aplicar no pipeline padrão (linhas ~1001-1020)
 
-### 3. Aplicar a mesma correção no SupportTicketDetail.tsx (lado seller)
+- Após o merge de PDFs do layout `meli_100x150`, chamar `stripExtraPages(merged, shipmentCount, 'standard')` para remover as listas de separação
+- Para `meli_100x150_no_nf`, chamar `stripExtraPages(merged, shipmentCount, 'no_nf')` (substitui a atual `stripDanfePages`)
 
-O componente do seller também usa `getPublicUrl` — corrigir para `createSignedUrl` para consistência.
+### 3. Remover a função `stripDanfePages` antiga
 
-## Arquivo afetado
+Será substituída pela nova `stripExtraPages`.
 
-- `src/components/admin/support/AdminTicketDetail.tsx` — signed URLs + busca do perfil do cliente
-- `src/components/support/SupportTicketDetail.tsx` — signed URLs para anexos
+## Resultado esperado
 
-## Resultado
-
-- Imagens anexadas aparecem corretamente no painel admin
-- Nome e email do cliente visíveis no cabeçalho do chamado
-- Mensagens do tipo "user" mostram o nome real em vez de "Seller"
+- **Padrão ML**: 10 envios → 20 páginas (etiqueta + DANFE), sem separação
+- **Sem NF**: 10 envios → 10 páginas (só etiquetas)
+- **Com Cabeçalho**: já funciona corretamente, sem mudança
 
