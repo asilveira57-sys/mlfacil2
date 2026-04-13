@@ -1,133 +1,140 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2 } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useEmailLogs } from '@/hooks/useEmailAdmin';
+import { Input } from '@/components/ui/input';
+import { Loader2, Search } from 'lucide-react';
 import { useEmailSendLog } from '@/hooks/useEmailSendLog';
 
-const actionColors: Record<string, string> = {
+const statusColors: Record<string, string> = {
   sent: 'bg-green-100 text-green-800',
-  fail: 'bg-red-100 text-red-800',
   failed: 'bg-red-100 text-red-800',
   dlq: 'bg-red-100 text-red-800',
-  enqueue: 'bg-blue-100 text-blue-800',
   pending: 'bg-blue-100 text-blue-800',
-  send_attempt: 'bg-yellow-100 text-yellow-800',
-  skip_opt_out: 'bg-orange-100 text-orange-800',
   suppressed: 'bg-orange-100 text-orange-800',
-  cancel: 'bg-gray-100 text-gray-800',
-  invalid_email: 'bg-amber-100 text-amber-800',
-  dedup_block: 'bg-purple-100 text-purple-800',
-  throttle_block: 'bg-pink-100 text-pink-800',
   rate_limited: 'bg-pink-100 text-pink-800',
   bounced: 'bg-red-100 text-red-800',
   complained: 'bg-red-100 text-red-800',
 };
 
-const actionLabels: Record<string, string> = {
+const statusLabels: Record<string, string> = {
   sent: 'Enviado',
-  fail: 'Falha',
   failed: 'Falha',
   dlq: 'DLQ',
-  enqueue: 'Enfileirado',
   pending: 'Pendente',
-  send_attempt: 'Tentativa',
-  skip_opt_out: 'Opt-out',
   suppressed: 'Suprimido',
-  cancel: 'Cancelado',
-  invalid_email: 'Sem e-mail',
-  dedup_block: 'Duplicado',
-  throttle_block: 'Limite/dia',
   rate_limited: 'Rate limit',
   bounced: 'Bounce',
   complained: 'Reclamação',
 };
 
+const templateLabels: Record<string, string> = {
+  recovery: '🔑 Recuperação',
+  signup: '📧 Cadastro',
+  auth_emails: '🔐 Auth',
+};
+
+const STATUS_FILTERS = ['', 'sent', 'pending', 'failed', 'dlq', 'rate_limited', 'suppressed'] as const;
+
 export function EmailLogsTab() {
-  const [subTab, setSubTab] = useState<'cloud' | 'legacy'>('cloud');
-  const { data: sendLogs, isLoading: loadingSend } = useEmailSendLog();
-  const { data: legacyLogs, isLoading: loadingLegacy } = useEmailLogs();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const { data: logs, isLoading } = useEmailSendLog({
+    search: search.length >= 3 ? search : undefined,
+    status: statusFilter || undefined,
+  });
+
+  // Summary counts
+  const counts = logs?.reduce(
+    (acc, l) => {
+      acc.total++;
+      if (l.status === 'sent') acc.sent++;
+      else if (['failed', 'dlq', 'rate_limited'].includes(l.status)) acc.failed++;
+      else if (l.status === 'pending') acc.pending++;
+      return acc;
+    },
+    { total: 0, sent: 0, failed: 0, pending: 0 }
+  ) || { total: 0, sent: 0, failed: 0, pending: 0 };
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Logs de E-mail</CardTitle>
+          <CardTitle className="text-base">Logs de E-mail (Pipeline Ativo)</CardTitle>
         </CardHeader>
-        <CardContent>
-          <Tabs value={subTab} onValueChange={(v) => setSubTab(v as 'cloud' | 'legacy')}>
-            <TabsList className="mb-3">
-              <TabsTrigger value="cloud" className="text-xs">
-                Lovable Cloud ({sendLogs?.length || 0})
-              </TabsTrigger>
-              <TabsTrigger value="legacy" className="text-xs">
-                Sistema legado ({legacyLogs?.length || 0})
-              </TabsTrigger>
-            </TabsList>
+        <CardContent className="space-y-3">
+          {/* Summary stats */}
+          <div className="flex gap-3 text-xs">
+            <span className="px-2 py-1 rounded bg-muted">{counts.total} total</span>
+            <span className="px-2 py-1 rounded bg-green-100 text-green-800">{counts.sent} enviados</span>
+            <span className="px-2 py-1 rounded bg-blue-100 text-blue-800">{counts.pending} pendentes</span>
+            <span className="px-2 py-1 rounded bg-red-100 text-red-800">{counts.failed} falhas</span>
+          </div>
 
-            <TabsContent value="cloud">
-              {loadingSend ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : (!sendLogs || sendLogs.length === 0) ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">Nenhum log do sistema ativo ainda.</p>
-              ) : (
-                <div className="divide-y max-h-[500px] overflow-y-auto">
-                  {sendLogs.map((log) => (
-                    <div key={log.id} className="py-2.5 flex items-start gap-3">
-                      <Badge className={`text-[10px] shrink-0 ${actionColors[log.status] || 'bg-muted text-muted-foreground'}`}>
-                        {actionLabels[log.status] || log.status}
-                      </Badge>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs truncate">
-                          {log.recipient_email || '—'}
-                          {log.template_name && <span className="text-muted-foreground ml-2">({log.template_name})</span>}
-                        </p>
-                        <div className="flex gap-2 text-[10px] text-muted-foreground mt-0.5">
-                          {log.error_message && (
-                            <span className="text-red-600 dark:text-red-400 truncate max-w-[200px]">{log.error_message}</span>
-                          )}
-                          {log.message_id && <span className="font-mono truncate max-w-[120px]">{log.message_id}</span>}
-                          <span>{new Date(log.created_at).toLocaleString('pt-BR')}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
+          {/* Filters */}
+          <div className="flex gap-2 flex-wrap items-center">
+            <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por e-mail..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 h-8 text-xs"
+              />
+            </div>
+            <div className="flex gap-1">
+              {STATUS_FILTERS.map((s) => (
+                <button
+                  key={s || 'all'}
+                  onClick={() => setStatusFilter(s)}
+                  className={`px-2 py-1 text-[10px] rounded border transition-colors ${
+                    statusFilter === s
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+                  }`}
+                >
+                  {s ? statusLabels[s] || s : 'Todos'}
+                </button>
+              ))}
+            </div>
+          </div>
 
-            <TabsContent value="legacy">
-              {loadingLegacy ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : (!legacyLogs || legacyLogs.length === 0) ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">Nenhum log do sistema legado.</p>
-              ) : (
-                <div className="divide-y max-h-[500px] overflow-y-auto">
-                  {legacyLogs.map((log) => (
-                    <div key={log.id} className="py-2.5 flex items-start gap-3">
-                      <Badge className={`text-[10px] shrink-0 ${actionColors[log.action] || 'bg-muted text-muted-foreground'}`}>
-                        {actionLabels[log.action] || log.action}
-                      </Badge>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs truncate">{log.message || '—'}</p>
-                        <div className="flex gap-2 text-[10px] text-muted-foreground mt-0.5">
-                          {log.email && <span>{log.email}</span>}
-                          {log.source_type && <span>via {log.source_type}</span>}
-                          {log.event_key && <span className="font-mono">{log.event_key}</span>}
-                          <span>{new Date(log.created_at).toLocaleString('pt-BR')}</span>
-                        </div>
-                      </div>
+          {/* Log list */}
+          {isLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (!logs || logs.length === 0) ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">
+              {search ? `Nenhum resultado para "${search}"` : 'Nenhum log encontrado.'}
+            </p>
+          ) : (
+            <div className="divide-y max-h-[500px] overflow-y-auto">
+              {logs.map((log) => (
+                <div key={log.message_id} className="py-2.5 flex items-start gap-3">
+                  <Badge className={`text-[10px] shrink-0 ${statusColors[log.status] || 'bg-muted text-muted-foreground'}`}>
+                    {statusLabels[log.status] || log.status}
+                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs truncate">
+                      {log.recipient_email || '—'}
+                      {log.template_name && (
+                        <span className="text-muted-foreground ml-2">
+                          {templateLabels[log.template_name] || log.template_name}
+                        </span>
+                      )}
+                    </p>
+                    <div className="flex gap-2 text-[10px] text-muted-foreground mt-0.5">
+                      {log.error_message && (
+                        <span className="text-red-600 dark:text-red-400 truncate max-w-[250px]">{log.error_message}</span>
+                      )}
+                      <span>{new Date(log.created_at).toLocaleString('pt-BR')}</span>
                     </div>
-                  ))}
+                  </div>
                 </div>
-              )}
-            </TabsContent>
-          </Tabs>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

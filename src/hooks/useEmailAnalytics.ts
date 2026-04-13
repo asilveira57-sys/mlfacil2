@@ -1,97 +1,83 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
-export interface EmailAnalyticsDay {
-  id: string;
-  metric_date: string;
-  total_queued: number;
-  total_sent: number;
-  total_failed: number;
-  total_retried: number;
-  total_cancelled: number;
-  total_events: number;
-  total_schedules: number;
-  total_campaigns: number;
-  top_template_id: string | null;
-  top_event_key: string | null;
-}
-
-export function useEmailAnalytics(days = 30) {
-  return useQuery({
-    queryKey: ['admin', 'email-analytics', days],
-    queryFn: async () => {
-      const fromDate = new Date();
-      fromDate.setDate(fromDate.getDate() - days);
-
-      const { data, error } = await (supabase as any)
-        .from('email_analytics_daily')
-        .select('*')
-        .gte('metric_date', fromDate.toISOString().split('T')[0])
-        .order('metric_date', { ascending: true });
-      if (error) throw error;
-      return (data || []) as EmailAnalyticsDay[];
-    },
-  });
+export interface EmailAnalyticsSummaryData {
+  today: { pending: number; sent: number; failed: number };
+  pendingQueue: number;
+  month: { sent: number; failed: number; total: number };
+  deliveryRate: number;
 }
 
 export function useEmailAnalyticsSummary() {
   return useQuery({
     queryKey: ['admin', 'email-analytics-summary'],
-    queryFn: async () => {
-      // Get today's live stats from email_logs
+    queryFn: async (): Promise<EmailAnalyticsSummaryData> => {
       const today = new Date().toISOString().split('T')[0];
 
-      const { count: todayQueued } = await (supabase as any)
-        .from('email_logs')
+      // Today's stats from email_send_log (the real pipeline)
+      const { count: todayPending } = await supabase
+        .from('email_send_log')
         .select('*', { count: 'exact', head: true })
-        .eq('action', 'enqueue')
+        .eq('status', 'pending')
         .gte('created_at', `${today}T00:00:00`);
 
-      const { count: todaySent } = await (supabase as any)
-        .from('email_logs')
+      const { count: todaySent } = await supabase
+        .from('email_send_log')
         .select('*', { count: 'exact', head: true })
-        .eq('action', 'sent')
+        .eq('status', 'sent')
         .gte('created_at', `${today}T00:00:00`);
 
-      const { count: todayFailed } = await (supabase as any)
-        .from('email_logs')
+      const { count: todayFailed } = await supabase
+        .from('email_send_log')
         .select('*', { count: 'exact', head: true })
-        .eq('action', 'fail')
+        .in('status', ['failed', 'dlq', 'rate_limited'])
         .gte('created_at', `${today}T00:00:00`);
 
-      const { count: pendingQueue } = await (supabase as any)
-        .from('email_queue')
+      // Pending in queue right now (pending without a corresponding sent)
+      const { count: pendingQueue } = await supabase
+        .from('email_send_log')
         .select('*', { count: 'exact', head: true })
-        .eq('status', 'queued');
+        .eq('status', 'pending')
+        .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString());
 
-      // Get 30-day totals from analytics
+      // 30-day totals from email_send_log
       const fromDate = new Date();
       fromDate.setDate(fromDate.getDate() - 30);
-      const { data: monthly } = await (supabase as any)
-        .from('email_analytics_daily')
-        .select('total_sent, total_failed, total_queued')
-        .gte('metric_date', fromDate.toISOString().split('T')[0]);
 
-      const monthTotals = (monthly || []).reduce(
-        (acc: any, d: any) => ({
-          sent: acc.sent + (d.total_sent || 0),
-          failed: acc.failed + (d.total_failed || 0),
-          queued: acc.queued + (d.total_queued || 0),
-        }),
-        { sent: 0, failed: 0, queued: 0 }
-      );
+      const { count: monthSent } = await supabase
+        .from('email_send_log')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'sent')
+        .gte('created_at', fromDate.toISOString());
+
+      const { count: monthFailed } = await supabase
+        .from('email_send_log')
+        .select('*', { count: 'exact', head: true })
+        .in('status', ['failed', 'dlq', 'rate_limited'])
+        .gte('created_at', fromDate.toISOString());
+
+      const { count: monthTotal } = await supabase
+        .from('email_send_log')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .gte('created_at', fromDate.toISOString());
+
+      const sent = monthSent || 0;
+      const total = (monthTotal || 0);
 
       return {
         today: {
-          queued: todayQueued || 0,
+          pending: todayPending || 0,
           sent: todaySent || 0,
           failed: todayFailed || 0,
         },
         pendingQueue: pendingQueue || 0,
-        month: monthTotals,
-        deliveryRate: monthTotals.queued > 0
-          ? Math.round((monthTotals.sent / monthTotals.queued) * 100)
-          : 0,
+        month: {
+          sent,
+          failed: monthFailed || 0,
+          total,
+        },
+        deliveryRate: total > 0 ? Math.round((sent / total) * 100) : sent > 0 ? 100 : 0,
       };
     },
   });
