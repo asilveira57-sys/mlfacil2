@@ -468,23 +468,52 @@ async function mergePDFs(pdfDataArray: Uint8Array[]): Promise<Uint8Array> {
   return await mergedPdf.save();
 }
 
-// Strip DANFE pages: ML returns 2 pages per shipment (label + DANFE).
-// This keeps only even-indexed pages (0, 2, 4...) = labels only.
-async function stripDanfePages(pdfBytes: Uint8Array): Promise<Uint8Array> {
+// Strip extra pages (separation lists) from merged ML PDFs.
+// ML API returns N pages per shipment (typically 3: label, DANFE, separation list).
+// mode 'standard' keeps pages 0,1 per shipment (label + DANFE).
+// mode 'no_nf' keeps only page 0 per shipment (label only).
+async function stripExtraPages(pdfBytes: Uint8Array, shipmentCount: number, mode: 'standard' | 'no_nf'): Promise<Uint8Array> {
   const sourcePdf = await PDFDocument.load(pdfBytes);
-  const resultPdf = await PDFDocument.create();
   const totalPages = sourcePdf.getPageCount();
   
-  // Keep only pages at index 0, 2, 4... (the label pages)
-  const labelIndices: number[] = [];
-  for (let i = 0; i < totalPages; i += 2) {
-    labelIndices.push(i);
+  // If we can't determine pages-per-shipment, fallback: keep all for standard, even-only for no_nf
+  if (shipmentCount <= 0) {
+    console.warn(`[stripExtraPages] shipmentCount=0, returning as-is`);
+    return pdfBytes;
+  }
+
+  const pagesPerShipment = Math.floor(totalPages / shipmentCount);
+  
+  // If 1 page per shipment or can't divide evenly, nothing to strip
+  if (pagesPerShipment <= 1) {
+    if (mode === 'no_nf') {
+      console.log(`[stripExtraPages] Already 1 page/shipment, nothing to strip`);
+    }
+    return pdfBytes;
+  }
+
+  // For standard: keep pages 0,1 per group; for no_nf: keep only page 0
+  const keepIndices = mode === 'no_nf' ? [0] : [0, 1];
+  
+  const resultPdf = await PDFDocument.create();
+  const indicesToKeep: number[] = [];
+  
+  for (let s = 0; s < shipmentCount; s++) {
+    const groupStart = s * pagesPerShipment;
+    for (const idx of keepIndices) {
+      const pageIdx = groupStart + idx;
+      if (pageIdx < totalPages) {
+        indicesToKeep.push(pageIdx);
+      }
+    }
   }
   
-  const copiedPages = await resultPdf.copyPages(sourcePdf, labelIndices);
-  copiedPages.forEach(page => resultPdf.addPage(page));
+  if (indicesToKeep.length > 0) {
+    const copiedPages = await resultPdf.copyPages(sourcePdf, indicesToKeep);
+    copiedPages.forEach(page => resultPdf.addPage(page));
+  }
   
-  console.log(`[NO_NF] Stripped DANFE: ${totalPages} pages → ${labelIndices.length} pages`);
+  console.log(`[stripExtraPages][${mode}] ${pagesPerShipment} pages/shipment, ${totalPages} → ${indicesToKeep.length} pages`);
   return await resultPdf.save();
 }
 
