@@ -63,6 +63,7 @@ export function AdminClientes() {
     { id: '85944f40-8c37-43c0-9609-df96742537ad', name: '701 a 1.500 pedidos/mês' },
     { id: 'feab130a-f002-43ba-82a1-79c6371bbfea', name: '1.501 a 3.000 pedidos/mês' },
     { id: '8243db6b-7498-4056-a9e4-53dfdeae8d0a', name: 'Acima de 3.000 pedidos/mês' },
+    { id: 'f1e2d3c4-b5a6-7890-abcd-ef1234567890', name: '🏅 Veterano (ilimitado)' },
   ];
 
   const [search, setSearch] = useState('');
