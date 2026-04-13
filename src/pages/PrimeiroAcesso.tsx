@@ -347,7 +347,19 @@ const PrimeiroAcesso = () => {
     goTo("done");
   };
 
-  if (loading || accessLoading) {
+  // Safety timeout: if accessLoading takes too long, fail open (RLS protects data)
+  const [accessTimedOut, setAccessTimedOut] = useState(false);
+  useEffect(() => {
+    if (!accessLoading) { setAccessTimedOut(false); return; }
+    setAccessTimedOut(false);
+    const t = window.setTimeout(() => {
+      console.warn("[PrimeiroAcesso] accessLoading timed out after 5s, failing open");
+      setAccessTimedOut(true);
+    }, 5_000);
+    return () => window.clearTimeout(t);
+  }, [accessLoading]);
+
+  if (loading || (accessLoading && !accessTimedOut)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
