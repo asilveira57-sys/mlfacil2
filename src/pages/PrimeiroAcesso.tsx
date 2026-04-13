@@ -68,6 +68,18 @@ const PrimeiroAcesso = () => {
   const [importProgress, setImportProgress] = useState({ phase: 1, processed: 0, total: 0 });
   const importPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Safety timeout: if accessLoading takes too long, fail open (RLS protects data)
+  const [accessTimedOut, setAccessTimedOut] = useState(false);
+  useEffect(() => {
+    if (!accessLoading) { setAccessTimedOut(false); return; }
+    setAccessTimedOut(false);
+    const t = window.setTimeout(() => {
+      console.warn("[PrimeiroAcesso] accessLoading timed out after 5s, failing open");
+      setAccessTimedOut(true);
+    }, 5_000);
+    return () => window.clearTimeout(t);
+  }, [accessLoading]);
+
   useEffect(() => { saveState(state); }, [state]);
 
   // Detect ml_connected param from OAuth callback
@@ -347,7 +359,8 @@ const PrimeiroAcesso = () => {
     goTo("done");
   };
 
-  if (loading || accessLoading) {
+
+  if (loading || (accessLoading && !accessTimedOut)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
