@@ -38,13 +38,18 @@ import {
   RotateCcw,
   Ban,
   CheckCircle,
-  Filter
+  Filter,
+  KeyRound,
+  Copy,
+  Loader2
 } from 'lucide-react';
 import { useAdminUsers, useAdminUserRole, useAdminTrialManagement } from '@/hooks/useAdmin';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 export function AdminUsers() {
   const { data: users, isLoading } = useAdminUsers();
@@ -62,6 +67,12 @@ export function AdminUsers() {
     email: '',
   });
   const [daysToAdjust, setDaysToAdjust] = useState(7);
+  const [resetLinkDialog, setResetLinkDialog] = useState<{ open: boolean; email: string; link: string; loading: boolean }>({
+    open: false,
+    email: '',
+    link: '',
+    loading: false,
+  });
 
   const filteredUsers = users?.filter(user => {
     const matchesSearch = user.email.toLowerCase().includes(searchTerm.toLowerCase());
@@ -110,6 +121,26 @@ export function AdminUsers() {
   const handleToggleBlock = (userId: string, currentStatus: string | null) => {
     const isBlocked = currentStatus === 'blocked';
     setBlocked.mutate({ userId, blocked: !isBlocked });
+  };
+
+  const handleGenerateResetLink = async (email: string) => {
+    setResetLinkDialog({ open: true, email, link: '', loading: true });
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-generate-reset-link', {
+        body: { email, redirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setResetLinkDialog({ open: true, email, link: data.recovery_link || '', loading: false });
+    } catch (err: any) {
+      toast.error(`Erro ao gerar link: ${err.message}`);
+      setResetLinkDialog({ open: false, email: '', link: '', loading: false });
+    }
+  };
+
+  const handleCopyResetLink = () => {
+    navigator.clipboard.writeText(resetLinkDialog.link);
+    toast.success('Link copiado!');
   };
 
   return (
@@ -261,6 +292,11 @@ export function AdminUsers() {
                             Resetar Teste (7 dias)
                           </DropdownMenuItem>
                           
+                          <DropdownMenuItem onClick={() => handleGenerateResetLink(user.email)}>
+                            <KeyRound className="h-4 w-4 mr-2" />
+                            Gerar Link de Reset
+                          </DropdownMenuItem>
+                          
                           <DropdownMenuSeparator />
                           
                           {/* Block/Unblock */}
@@ -342,6 +378,54 @@ export function AdminUsers() {
             </Button>
             <Button onClick={handleAdjustDays} disabled={adjustTrial.isPending}>
               Confirmar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Link Dialog */}
+      <Dialog
+        open={resetLinkDialog.open}
+        onOpenChange={(open) => {
+          if (!open) setResetLinkDialog({ open: false, email: '', link: '', loading: false });
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link de Redefinição de Senha</DialogTitle>
+            <DialogDescription>
+              {resetLinkDialog.email}
+            </DialogDescription>
+          </DialogHeader>
+          {resetLinkDialog.loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : resetLinkDialog.link ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Copie e envie este link para o cliente via WhatsApp. O link expira em poucos minutos.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  readOnly
+                  value={resetLinkDialog.link}
+                  className="text-xs font-mono"
+                />
+                <Button onClick={handleCopyResetLink} size="icon" variant="outline">
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-destructive">Não foi possível gerar o link.</p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setResetLinkDialog({ open: false, email: '', link: '', loading: false })}
+            >
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>
