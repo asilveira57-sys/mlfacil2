@@ -67,6 +67,12 @@ export function AdminUsers() {
     email: '',
   });
   const [daysToAdjust, setDaysToAdjust] = useState(7);
+  const [resetLinkDialog, setResetLinkDialog] = useState<{ open: boolean; email: string; link: string; loading: boolean }>({
+    open: false,
+    email: '',
+    link: '',
+    loading: false,
+  });
 
   const filteredUsers = users?.filter(user => {
     const matchesSearch = user.email.toLowerCase().includes(searchTerm.toLowerCase());
