@@ -38,7 +38,10 @@ import {
   RotateCcw,
   Ban,
   CheckCircle,
-  Filter
+  Filter,
+  KeyRound,
+  Copy,
+  Loader2
 } from 'lucide-react';
 import { useAdminUsers, useAdminUserRole, useAdminTrialManagement } from '@/hooks/useAdmin';
 import { formatDistanceToNow, format } from 'date-fns';
