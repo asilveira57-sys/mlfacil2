@@ -123,6 +123,26 @@ export function AdminUsers() {
     setBlocked.mutate({ userId, blocked: !isBlocked });
   };
 
+  const handleGenerateResetLink = async (email: string) => {
+    setResetLinkDialog({ open: true, email, link: '', loading: true });
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-generate-reset-link', {
+        body: { email, redirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setResetLinkDialog({ open: true, email, link: data.recovery_link || '', loading: false });
+    } catch (err: any) {
+      toast.error(`Erro ao gerar link: ${err.message}`);
+      setResetLinkDialog({ open: false, email: '', link: '', loading: false });
+    }
+  };
+
+  const handleCopyResetLink = () => {
+    navigator.clipboard.writeText(resetLinkDialog.link);
+    toast.success('Link copiado!');
+  };
+
   return (
     <div className="space-y-6">
       <div>
