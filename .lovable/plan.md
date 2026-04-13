@@ -1,23 +1,51 @@
 
 
-## Diagnóstico
+## Plano Veterano — Criação Completa
 
-A tela branca em `/primeiro-acesso` acontece porque a página espera **indefinidamente** pelo carregamento do estado do usuário (`accessLoading`). O `ProtectedRoute` já tem um timeout de 6 segundos para esse cenário, mas a própria página `PrimeiroAcesso` não tem — ela fica travada no spinner para sempre se o RPC `get_user_status` demorar ou falhar.
+### O que será feito
+Criar o plano "Veterano" no banco de dados com 3 ofertas de preço, restrito exclusivamente a usuários com tag `VETERANO` no perfil. O plano não aparece no frontend público — só é visível e contratável dentro do sistema para sellers veteranos.
 
-A primeira imagem mostra o onboarding funcionando (step "name"). A segunda mostra a tela completamente branca — o que indica que o RPC travou ou falhou silenciosamente na tentativa seguinte, e a página nunca saiu do loading.
+### 1. Migration — Novo tier + ofertas
 
-## Correção
+Inserir na tabela `plan_tiers`:
+- **code**: `veterano`
+- **name**: `Veterano`
+- **display_name**: `Plano Veterano`
+- **plan_group**: `veterano` (grupo próprio para diferenciação)
+- **min_orders_30d**: 0
+- **max_orders_30d**: NULL (ilimitado)
+- **is_active**: true
+- **is_enterprise**: false
+- **requires_marketplace_connection**: false
+- **display_order**: 99 (fora da ordenação normal)
 
-**Arquivo: `src/pages/PrimeiroAcesso.tsx`**
+Inserir 3 registros na tabela `plan_offers` vinculados ao novo tier:
 
-1. Adicionar um timeout de 5 segundos no `accessLoading` — idêntico ao padrão já usado no `ProtectedRoute` e `ModuleAccessGuard`.
-2. Se o timeout estourar, renderizar o onboarding normalmente (fail-open), já que RLS protege os dados no backend.
-3. Isso garante que nenhum usuário fique preso em tela branca durante o onboarding, independente de lentidão ou erro no `get_user_status`.
+| Oferta | billing_mode | period_months | price_brl | offer_code | is_visible |
+|---|---|---|---|---|---|
+| Mensal | assinatura | 1 | 4490 | veterano-mensal | false |
+| Trimestral | assinatura | 3 | 12000 | veterano-trimestral | false |
+| Semestral | assinatura | 6 | 21600 | veterano-semestral | false |
 
-Mudança específica na linha 350:
-- Criar state `accessTimedOut` com `useState(false)`
-- Adicionar `useEffect` que seta `accessTimedOut = true` após 5s se `accessLoading` continuar `true`
-- Alterar a condição de loading para: `if (loading || (accessLoading && !accessTimedOut))`
+Todas com `is_visible = false` para não aparecer em listagens públicas.
 
-Impacto: zero risco — a página de onboarding não depende de dados protegidos por RLS para funcionar; ela só usa `requiresOnboarding` para decidir se redireciona ao dashboard.
+### 2. Frontend — AdminClientes
+
+Adicionar o novo tier à lista `PLAN_TIERS` em `src/pages/admin/AdminClientes.tsx` para que admins possam atribuir o plano a usuários.
+
+### 3. Página de Planos (logado) — Exibição condicional
+
+Em `src/pages/Planos.tsx`, adicionar lógica para:
+- Buscar a tag do usuário no perfil (`profiles.tag`)
+- Se tag === `VETERANO`, exibir o Plano Veterano com suas ofertas
+- Se não for veterano, o plano não aparece
+
+### 4. Sem alteração no frontend público
+
+O plano não será adicionado a nenhuma listagem pública (landing page, catálogo de planos público). As ofertas ficam com `is_visible = false`.
+
+### Resumo de arquivos alterados
+- **Migration SQL**: criar tier + 3 ofertas
+- `src/pages/admin/AdminClientes.tsx`: adicionar tier à lista
+- `src/pages/Planos.tsx`: exibir plano condicionalmente para veteranos
 
