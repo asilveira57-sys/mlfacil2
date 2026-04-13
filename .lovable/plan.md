@@ -1,51 +1,53 @@
 
 
-## Plano Veterano — Criação Completa
+## Diagnóstico
 
-### O que será feito
-Criar o plano "Veterano" no banco de dados com 3 ofertas de preço, restrito exclusivamente a usuários com tag `VETERANO` no perfil. O plano não aparece no frontend público — só é visível e contratável dentro do sistema para sellers veteranos.
+O pagamento R$17.90 (transação 154604698714) do usuário **NOVAVIDA C.** (overlordcomerciobrasil@gmail.com) foi feito via **assinatura recorrente** (preapproval) do plano ZPL Básico Mensal.
 
-### 1. Migration — Novo tier + ofertas
+### Causa raiz: `notification_url` ausente para assinaturas recorrentes
 
-Inserir na tabela `plan_tiers`:
-- **code**: `veterano`
-- **name**: `Veterano`
-- **display_name**: `Plano Veterano`
-- **plan_group**: `veterano` (grupo próprio para diferenciação)
-- **min_orders_30d**: 0
-- **max_orders_30d**: NULL (ilimitado)
-- **is_active**: true
-- **is_enterprise**: false
-- **requires_marketplace_connection**: false
-- **display_order**: 99 (fora da ordenação normal)
+No `billing-checkout/index.ts`, a `notification_url` do webhook só é configurada para pagamentos **one-time** (linha 204):
 
-Inserir 3 registros na tabela `plan_offers` vinculados ao novo tier:
+```text
+ONE-TIME (preferência):  notification_url: ".../mercadopago-webhook"  ✅
+RECURRING (preapproval): notification_url: NÃO DEFINIDA              ❌
+```
 
-| Oferta | billing_mode | period_months | price_brl | offer_code | is_visible |
-|---|---|---|---|---|---|
-| Mensal | assinatura | 1 | 4490 | veterano-mensal | false |
-| Trimestral | assinatura | 3 | 12000 | veterano-trimestral | false |
-| Semestral | assinatura | 6 | 21600 | veterano-semestral | false |
+Sem `notification_url`, o Mercado Pago nunca notifica o sistema sobre o pagamento aprovado. Confirmado pelos logs: **zero chamadas** ao `mercadopago-webhook` para este pagamento.
 
-Todas com `is_visible = false` para não aparecer em listagens públicas.
+Resultado: pagamento aprovado no MP, mas `tenant_payments` vazio e `tenant_entitlements` vazio para este tenant. O `user_access_state` ainda mostra `payment_status: trial` com trial expirado em 12/abr.
 
-### 2. Frontend — AdminClientes
+---
 
-Adicionar o novo tier à lista `PLAN_TIERS` em `src/pages/admin/AdminClientes.tsx` para que admins possam atribuir o plano a usuários.
+## Plano de Correção
 
-### 3. Página de Planos (logado) — Exibição condicional
+### 1. Ativar manualmente o plano do usuário Nova Vida (imediato)
 
-Em `src/pages/Planos.tsx`, adicionar lógica para:
-- Buscar a tag do usuário no perfil (`profiles.tag`)
-- Se tag === `VETERANO`, exibir o Plano Veterano com suas ofertas
-- Se não for veterano, o plano não aparece
+Usar o insert tool para:
+- Inserir registro em `tenant_payments` com os dados do pagamento aprovado
+- Chamar `rpc_activate_entitlement` para o tenant `bebfe712-a911-42e5-b44a-818ca99c75c7` com tier `zpl-basico`, offer `rec_1m`
+- Atualizar `user_access_state.payment_status` para `active`
 
-### 4. Sem alteração no frontend público
+### 2. Corrigir billing-checkout — adicionar `notification_url` nas assinaturas
 
-O plano não será adicionado a nenhuma listagem pública (landing page, catálogo de planos público). As ofertas ficam com `is_visible = false`.
+**Arquivo:** `supabase/functions/billing-checkout/index.ts`
 
-### Resumo de arquivos alterados
-- **Migration SQL**: criar tier + 3 ofertas
-- `src/pages/admin/AdminClientes.tsx`: adicionar tier à lista
-- `src/pages/Planos.tsx`: exibir plano condicionalmente para veteranos
+Adicionar `notification_url: \`\${supabaseUrl}/functions/v1/mercadopago-webhook\`` nos dois caminhos de criação de preapproval:
+- Linha ~134 (preapproval com `mp_product_ref`)
+- Linha ~163 (preapproval ad-hoc)
+
+### 3. Verificar se a oferta rec_1m requer `mp_product_ref`
+
+A oferta `rec_1m` tem `mp_product_ref: null`, então usa o caminho ad-hoc. O fix no passo 2 cobre ambos os caminhos.
+
+---
+
+## Resumo de alterações
+
+| Ação | Tipo |
+|---|---|
+| Ativar plano Nova Vida manualmente | Insert/RPC no banco |
+| Adicionar `notification_url` em preapprovals | Edição em `billing-checkout/index.ts` |
+
+Isso corrige o problema para este usuário e previne que todos os futuros pagamentos por assinatura recorrente fiquem sem processamento.
 
