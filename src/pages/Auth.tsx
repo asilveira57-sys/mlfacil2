@@ -130,21 +130,48 @@ const Auth = () => {
   }, [resendCountdown]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        navigate("/primeiro-acesso", { replace: true });
-      } else {
+    let isActive = true;
+    let resolved = false;
+
+    const timeoutId = window.setTimeout(() => {
+      if (!isActive || resolved) return;
+      console.warn("[Auth] Session check timed out after 5s, showing login form");
+      setCheckingSession(false);
+    }, 5_000);
+
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        if (!isActive) return;
+        resolved = true;
+        window.clearTimeout(timeoutId);
+
+        if (session) {
+          navigate("/primeiro-acesso", { replace: true });
+          return;
+        }
+
         setCheckingSession(false);
-      }
-    });
+      })
+      .catch(() => {
+        if (!isActive) return;
+        resolved = true;
+        window.clearTimeout(timeoutId);
+        setCheckingSession(false);
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session) {
         navigate("/primeiro-acesso", { replace: true });
+      } else if (event === "SIGNED_OUT") {
+        setCheckingSession(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isActive = false;
+      window.clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -190,6 +217,10 @@ const Auth = () => {
             metadata: { login_at: new Date().toISOString() },
           }]);
         } catch { /* silent */ }
+
+        if (signInData.session) {
+          navigate("/primeiro-acesso", { replace: true });
+        }
       }
     } catch {
       toast.error("Erro inesperado ao fazer login.");
