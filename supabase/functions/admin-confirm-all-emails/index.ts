@@ -45,6 +45,9 @@ Deno.serve(async (req) => {
       });
     }
 
+    const body = await req.json().catch(() => ({}));
+    const emailFilter = typeof body?.email === "string" ? body.email.trim().toLowerCase() : null;
+
     const adminClient = createClient(supabaseUrl, serviceKey);
 
     let page = 1;
@@ -66,7 +69,11 @@ Deno.serve(async (req) => {
       page += 1;
     }
 
-    const targets = users.filter((user) => !user.email_confirmed_at && user.email);
+    const filteredUsers = emailFilter
+      ? users.filter((user) => user.email?.toLowerCase() === emailFilter)
+      : users;
+
+    const targets = filteredUsers.filter((user) => !user.email_confirmed_at && user.email);
 
     let confirmed = 0;
     let errors = 0;
@@ -84,7 +91,7 @@ Deno.serve(async (req) => {
           email: user.email,
           error: error.message,
         });
-        continue;
+          continue;
       }
 
       confirmed += 1;
@@ -93,7 +100,9 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        email_filter: emailFilter,
         total_users: users.length,
+        matched_users: filteredUsers.length,
         targeted_unconfirmed: targets.length,
         confirmed,
         errors,
