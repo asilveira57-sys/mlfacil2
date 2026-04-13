@@ -44,8 +44,48 @@ const Planos = () => {
 
   const [selectedTierCode, setSelectedTierCode] = useState<string | null>(null);
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
+  const [userTag, setUserTag] = useState<string | null>(null);
+  const [veteranoOffers, setVeteranoOffers] = useState<TierOffer[]>([]);
 
-  const tiers = catalog?.tiers || [];
+  // Fetch user tag for veterano check
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('profiles').select('tag').eq('id', user.id).single();
+      setUserTag(data?.tag ?? null);
+
+      // If veterano, fetch hidden offers
+      if (data?.tag === 'VETERANO') {
+        const { data: offers } = await supabase
+          .from('plan_offers')
+          .select('id, offer_code, billing_mode, period_months, price_brl, badge_text, is_campaign, mp_product_ref')
+          .eq('tier_id', 'f1e2d3c4-b5a6-7890-abcd-ef1234567890')
+          .eq('is_active', true)
+          .order('period_months');
+        if (offers) {
+          setVeteranoOffers(offers.map(o => ({ ...o, price_brl: Number(o.price_brl) })) as TierOffer[]);
+        }
+      }
+    })();
+  }, [isAuthenticated]);
+
+  const isVeterano = userTag === 'VETERANO';
+
+  // Filter tiers: hide veterano for non-veterano users, inject offers for veterano users
+  const tiers = useMemo(() => {
+    const baseTiers = catalog?.tiers || [];
+    if (isVeterano) {
+      // Inject veterano offers into the veterano tier
+      return baseTiers.map(t =>
+        t.code === 'veterano' ? { ...t, offers: veteranoOffers } : t
+      );
+    }
+    // Non-veterano: hide veterano tier entirely
+    return baseTiers.filter(t => t.code !== 'veterano');
+  }, [catalog?.tiers, isVeterano, veteranoOffers]);
+
   const addons = catalog?.addons || [];
   const settings = catalog?.settings || { enable_annual_campaign: false };
 
