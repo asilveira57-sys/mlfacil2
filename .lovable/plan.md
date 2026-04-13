@@ -1,51 +1,111 @@
 
-Objetivo: resolver de forma definitiva o caso do Mateus e eliminar a falsa causa raiz de “e-mail não confirmado”.
+Objetivo: descobrir por que o reset de senha agora parece falhar para vários clientes, incluindo `overlordcomerciobrasil@gmail.com`, e corrigir a causa real sem continuar no ciclo de “parece tudo certo”.
 
-Diagnóstico já confirmado:
-- O domínio de envio está verificado e apto para enviar.
-- A infraestrutura de e-mail está funcionando: há vários e-mails de recuperação recentes com ciclo completo `pending -> sent` para outros usuários.
-- O endereço `matheusmumanix@gmail.com` não aparece nem na fila/log de envio nem na lista de supressão.
-- Existe um perfil para o Mateus, e há evento de login com sucesso hoje.
-- O perfil dele ainda mostra `email_verified = false`, o que indica inconsistência cadastral/sincronização.
-- Conclusão provável: o problema do Mateus não está no provedor de e-mail em si; o reset dele nem está entrando no pipeline de envio. Ou o cadastro de autenticação está divergente do perfil, ou o fluxo de recuperação para esse usuário específico não está sendo disparado corretamente.
+Diagnóstico já sustentado pelo código:
+- O front continua disparando o reset normalmente em `src/pages/Auth.tsx` via `supabase.auth.resetPasswordForEmail(...)`.
+- A rota de recuperação `/reset-password` está pública e não aparenta estar bloqueando o fluxo.
+- O domínio de envio `notify.notifica.mktpfacil.com` continua verificado.
+- O hook `supabase/functions/auth-email-hook/index.ts` está configurado para:
+  - receber eventos de auth,
+  - registrar `pending` em `email_send_log`,
+  - enfileirar no `auth_emails`.
+- O worker `supabase/functions/process-email-queue/index.ts` é quem transforma fila em `sent`, `failed`, `rate_limited` ou `dlq`.
+- Já existe um fallback manual com “Gerar Link de Reset” no admin.
+- O painel/admin atual pode estar mascarando o estado real:
+  - `useEmailSendLog` mostra só as últimas linhas, sem deduplicação;
+  - `useEmailAnalyticsSummary` ainda usa tabelas legadas (`email_logs`, `email_queue`) em vez da infraestrutura nova (`email_send_log` / `email_send_state`).
 
-Plano de ação imediata:
-1. Validar o cadastro real do Mateus no backend de autenticação
-   - Conferir o usuário real de autenticação correspondente ao perfil.
-   - Comparar e-mail, status de confirmação e último acesso entre autenticação e perfil.
-   - Identificar se existe divergência entre `profiles.email` e o e-mail efetivo da conta de login.
+O que isso indica:
+- Se o usuário não aparece em `email_send_log`, o reset está morrendo antes do hook.
+- Se aparece como `pending` e não avança, o problema é fila/worker.
+- Se aparece `failed`, `rate_limited`, `dlq` ou `suppressed`, o problema já está identificado no pipeline.
+- Como você relatou que “ninguém está recebendo”, não dá mais para tratar como caso isolado; precisamos validar falha global.
 
-2. Reproduzir o reset exatamente para o Mateus e rastrear ponta a ponta
-   - Disparar uma recuperação real para `matheusmumanix@gmail.com`.
-   - Confirmar se o pedido entra no fluxo de autenticação.
-   - Verificar se o evento chega ao hook de e-mail.
-   - Confirmar se gera registro de envio e se entra na fila.
+Plano de implementação:
+1. Confirmar a falha com dados reais do backend
+   - Consultar os registros recentes para `overlordcomerciobrasil@gmail.com` em:
+     - `email_send_log`
+     - `suppressed_emails`
+   - Consultar logs recentes de autenticação para pedidos de recovery.
+   - Consultar logs do `auth-email-hook`.
+   - Consultar logs do `process-email-queue`.
+   - Verificar `email_send_state.retry_after_until` e sinais de backlog/rate limit.
+
+2. Classificar exatamente o ponto da quebra
+   - Cenário A: não existe log para o e-mail reportado
+     - problema antes do hook;
+     - investigar auth/recovery request não chegando ao pipeline.
+   - Cenário B: existe `pending`, mas não vira `sent`
+     - problema no worker/cron/fila.
+   - Cenário C: existe `failed`, `rate_limited`, `dlq` ou `suppressed`
+     - problema de entrega/processamento já identificável e corrigível.
+   - Cenário D: alguns casos entram e outros não
+     - divergência por usuário, dados quebrados ou supressão seletiva.
 
 3. Corrigir a causa raiz conforme o cenário encontrado
-   - Se houver divergência entre perfil e conta de autenticação: corrigir/sincronizar os dados.
-   - Se o perfil ficou com `email_verified` desatualizado: alinhar esse estado para não confundir admin e suporte.
-   - Se a conta estiver órfã/quebrada: reparar a conta do usuário para que o reset volte a funcionar normalmente.
-   - Se o hook de auth estiver falhando só para recovery: ajustar e redeployar o fluxo.
+   - Se o hook não estiver recebendo recovery:
+     - ajustar o fluxo de auth email/reconciliação do hook;
+     - redeployar o hook.
+   - Se a fila estiver travando:
+     - corrigir/revalidar a infraestrutura de envio;
+     - normalizar o worker e o estado da fila.
+   - Se houver rate limit:
+     - ajustar tratamento operacional e visibilidade;
+     - evitar falsa impressão de “enviado”.
+   - Se houver supressão indevida:
+     - localizar a regra/origem e limpar o bloqueio correto.
+   - Se houver divergência cadastral entre autenticação e perfil:
+     - reparar o cadastro afetado.
 
-4. Criar um fallback operacional para suporte
-   - Adicionar uma ação administrativa de “gerar/copiar link de redefinição de senha” para casos urgentes.
-   - Isso evita depender exclusivamente da entrega do e-mail em situações críticas.
+4. Corrigir a observabilidade do admin para parar de enganar o suporte
+   - Atualizar logs para mostrar o fluxo real da infraestrutura atual:
+     - solicitado,
+     - pending,
+     - sent,
+     - failed/rate_limited/dlq/suppressed.
+   - Ajustar analytics para parar de depender de tabelas legadas.
+   - Deduplicar por `message_id` para não contar o mesmo e-mail múltiplas vezes.
+   - Adicionar filtros rápidos por e-mail e tipo `recovery`.
 
-5. Fechar a lacuna de monitoramento
-   - Melhorar a visualização dos logs de e-mail/admin para mostrar claramente quando:
-     - o reset foi solicitado,
-     - o envio entrou na fila,
-     - foi enviado,
-     - ou nem chegou no pipeline.
-   - Isso reduz futuras investigações manuais.
+5. Manter fallback operacional robusto
+   - Preservar o botão de gerar link manual.
+   - Se necessário, melhorar a UX para copiar/reenviar o link mais rápido em suporte.
+   - Isso evita bloquear usuário final enquanto a causa raiz é corrigida.
 
 Resultado esperado:
-- O Mateus volta a conseguir redefinir a senha normalmente.
-- Fica claro por que o caso dele não gerou envio, mesmo com a infraestrutura ativa.
-- O sistema ganha um caminho de contingência para não depender de suporte manual em cada caso.
+- Fica claro se o problema atual é global ou parcial.
+- Descobrimos exatamente onde o reset está morrendo.
+- Corrigimos o pipeline real, em vez de continuar apagando incêndio por usuário.
+- O painel administrativo passa a refletir o estado verdadeiro dos e-mails.
 
-Detalhes técnicos:
-- Hoje o front chama `supabase.auth.resetPasswordForEmail(...)` em `src/pages/Auth.tsx`.
-- O caminho de envio autenticado usa `supabase/functions/auth-email-hook/index.ts`, que registra em `email_send_log` e enfileira para `process-email-queue`.
-- Como não existe nenhum `email_send_log` para o Mateus, o ponto de falha está antes do envio efetivo.
-- Também há um indício forte de inconsistência de dados: o perfil do Mateus continua com `email_verified = false`, apesar da confirmação em massa e de já existir login com sucesso.
+Detalhes técnicos importantes:
+- Arquivos já identificados como centrais:
+  - `src/pages/Auth.tsx`
+  - `src/pages/ResetPassword.tsx`
+  - `supabase/functions/auth-email-hook/index.ts`
+  - `supabase/functions/process-email-queue/index.ts`
+  - `src/hooks/useEmailSendLog.ts`
+  - `src/hooks/useEmailAnalytics.ts`
+  - `src/components/admin/email/EmailLogsTab.tsx`
+- Há um problema secundário no admin:
+  - o resumo analítico ainda consulta `email_logs` e `email_queue` legados;
+  - isso pode fazer parecer que “está tudo ok” quando o pipeline atual não está.
+- Também vou validar, na execução, se o worker está parando por:
+  - `rate_limited`
+  - `emails_disabled`
+  - falhas repetidas que empurram mensagens para `dlq`.
+
+Ordem de execução quando eu puder implementar:
+1. consultar backend real e logs;
+2. identificar o ponto exato da quebra;
+3. corrigir pipeline/hook/worker;
+4. ajustar dashboard/logs;
+5. testar recovery de ponta a ponta com e-mail afetado.
+
+<lov-actions>
+<lov-suggestion message="Test the password reset flow end-to-end with an affected account and verify whether the email reaches the inbox, spam folder, and email logs correctly.">Verify that it works</lov-suggestion>
+<lov-suggestion message="Fix the admin email dashboard to use the current email_send_log pipeline, deduplicate by message_id, and add filters for recovery emails and recipient search.">Corrigir dashboard de e-mails</lov-suggestion>
+<lov-suggestion message="Add a full audit trail for password recovery requests showing requested, queued, sent, failed, suppressed, or missing-before-hook states in the admin panel.">Adicionar trilha de auditoria</lov-suggestion>
+<lov-suggestion message="Improve the manual reset link fallback in Admin Users with copy history, expiration info, and WhatsApp-friendly share text for support.">Melhorar fallback manual</lov-suggestion>
+<lov-suggestion message="Investigate and fix the Mercado Livre label generation issue for accounts that are still receiving A4 labels with separation pages instead of the correct thermal format.">Corrigir etiquetas A4 e separação</lov-suggestion>
+</lov-actions>
