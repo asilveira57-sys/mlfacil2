@@ -131,6 +131,7 @@ serve(async (req) => {
           payer_email: user.email,
           external_reference: externalRef,
           back_url: success_url || `${baseUrl}/auth?payment=success`,
+          notification_url: `${supabaseUrl}/functions/v1/mercadopago-webhook`,
         };
 
         const mpRes = await fetch("https://api.mercadopago.com/preapproval", {
@@ -160,6 +161,7 @@ serve(async (req) => {
           external_reference: externalRef,
           back_url: success_url || `${baseUrl}/auth?payment=success`,
           payer_email: user.email,
+          notification_url: `${supabaseUrl}/functions/v1/mercadopago-webhook`,
         };
 
         const mpRes = await fetch("https://api.mercadopago.com/preapproval", {
