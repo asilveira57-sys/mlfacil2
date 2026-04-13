@@ -12,6 +12,31 @@ interface ModuleAccessGuardProps {
   children: React.ReactNode;
 }
 
+const PUBLIC_ROUTE_PREFIXES = [
+  '/home',
+  '/auth',
+  '/reset-password',
+  '/criar-acesso',
+  '/verificar',
+  '/primeiro-acesso',
+  '/reconnecting',
+  '/sincronizando',
+  '/planos',
+  '/blog',
+  '/consultoria',
+  '/termos-de-uso',
+  '/politica-de-privacidade',
+  '/politica-de-cookies',
+  '/lgpd',
+  '/modulo',
+  '/dica',
+  '/ferramentas',
+  '/status',
+  '/contato',
+  '/suporte',
+  '/central-de-ajuda',
+];
+
 /**
  * Route guard component that checks if the current user has access to the current route.
  * If they don't have access (collaborator without module permission), redirects to dashboard.
@@ -27,6 +52,11 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   const hasResolvedOnceRef = useRef(false);
 
   const combinedLoading = isLoading || planLoading;
+  const isPublicRoute =
+    location.pathname === '/' ||
+    PUBLIC_ROUTE_PREFIXES.some((prefix) =>
+      location.pathname === prefix || location.pathname.startsWith(`${prefix}/`),
+    );
 
   useEffect(() => {
     if (!combinedLoading) hasResolvedOnceRef.current = true;
@@ -69,12 +99,17 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   }, [location.pathname]);
 
   useEffect(() => {
+    if (isPublicRoute) {
+      setPlanBlocked(false);
+      return;
+    }
+
     if (combinedLoading) return;
 
     const moduleKey = getModuleKeyFromRouteSync(location.pathname);
-    
-    const publicRoutes = ['/dashboard', '/settings', '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/reset-password', '/'];
-    if (publicRoutes.includes(location.pathname)) return;
+
+    const internalBypassRoutes = ['/dashboard', '/settings'];
+    if (internalBypassRoutes.includes(location.pathname)) return;
 
     if (!moduleKey) return;
 
@@ -96,11 +131,15 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
       setPlanBlocked(true);
       return;
     }
-  }, [combinedLoading, isCollaborator, location.pathname, hasModuleAccess, canAccessModule, hasPlanConfig, navigate]);
+  }, [combinedLoading, isCollaborator, location.pathname, hasModuleAccess, canAccessModule, hasPlanConfig, navigate, isPublicRoute]);
 
   // Show friendly 403 screen for plan-blocked modules
   if (planBlocked) {
     return <ModuleAccessDenied />;
+  }
+
+  if (isPublicRoute) {
+    return <>{children}</>;
   }
 
   if (combinedLoading) {
