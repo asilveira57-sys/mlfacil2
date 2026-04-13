@@ -1,37 +1,51 @@
 
+Objetivo: resolver de forma definitiva o caso do Mateus e eliminar a falsa causa raiz de “e-mail não confirmado”.
 
-# Correção: Remover páginas de lista de separação em TODAS as modalidades
+Diagnóstico já confirmado:
+- O domínio de envio está verificado e apto para enviar.
+- A infraestrutura de e-mail está funcionando: há vários e-mails de recuperação recentes com ciclo completo `pending -> sent` para outros usuários.
+- O endereço `matheusmumanix@gmail.com` não aparece nem na fila/log de envio nem na lista de supressão.
+- Existe um perfil para o Mateus, e há evento de login com sucesso hoje.
+- O perfil dele ainda mostra `email_verified = false`, o que indica inconsistência cadastral/sincronização.
+- Conclusão provável: o problema do Mateus não está no provedor de e-mail em si; o reset dele nem está entrando no pipeline de envio. Ou o cadastro de autenticação está divergente do perfil, ou o fluxo de recuperação para esse usuário específico não está sendo disparado corretamente.
 
-## Diagnóstico
+Plano de ação imediata:
+1. Validar o cadastro real do Mateus no backend de autenticação
+   - Conferir o usuário real de autenticação correspondente ao perfil.
+   - Comparar e-mail, status de confirmação e último acesso entre autenticação e perfil.
+   - Identificar se existe divergência entre `profiles.email` e o e-mail efetivo da conta de login.
 
-A API do Mercado Livre retorna **3 páginas por envio**: etiqueta (0), DANFE (1), lista de separação (2). O código atual tem dois problemas:
+2. Reproduzir o reset exatamente para o Mateus e rastrear ponta a ponta
+   - Disparar uma recuperação real para `matheusmumanix@gmail.com`.
+   - Confirmar se o pedido entra no fluxo de autenticação.
+   - Verificar se o evento chega ao hook de e-mail.
+   - Confirmar se gera registro de envio e se entra na fila.
 
-1. **Layout "Padrão ML" (`meli_100x150`)**: a função `mergePDFs` copia TODAS as páginas sem filtrar — inclui a lista de separação.
-2. **Layout "Sem NF" (`meli_100x150_no_nf`) via pipeline padrão**: a função `stripDanfePages` assume 2 páginas por envio (pula índices ímpares), mas com 3 páginas por envio, ela mantém a separação (índice 2) e remove a DANFE (índice 1) — resultado errado.
-3. **Layout "Com Cabeçalho" (`mlfacil_100x175_header`)**: já está correto — `buildHeaderPdfSafe` copia apenas página 0 e opcionalmente página 1.
+3. Corrigir a causa raiz conforme o cenário encontrado
+   - Se houver divergência entre perfil e conta de autenticação: corrigir/sincronizar os dados.
+   - Se o perfil ficou com `email_verified` desatualizado: alinhar esse estado para não confundir admin e suporte.
+   - Se a conta estiver órfã/quebrada: reparar a conta do usuário para que o reset volte a funcionar normalmente.
+   - Se o hook de auth estiver falhando só para recovery: ajustar e redeployar o fluxo.
 
-## Solução
+4. Criar um fallback operacional para suporte
+   - Adicionar uma ação administrativa de “gerar/copiar link de redefinição de senha” para casos urgentes.
+   - Isso evita depender exclusivamente da entrega do e-mail em situações críticas.
 
-Arquivo: `supabase/functions/ml-generate-labels/index.ts`
+5. Fechar a lacuna de monitoramento
+   - Melhorar a visualização dos logs de e-mail/admin para mostrar claramente quando:
+     - o reset foi solicitado,
+     - o envio entrou na fila,
+     - foi enviado,
+     - ou nem chegou no pipeline.
+   - Isso reduz futuras investigações manuais.
 
-### 1. Criar função `stripExtraPages` inteligente
+Resultado esperado:
+- O Mateus volta a conseguir redefinir a senha normalmente.
+- Fica claro por que o caso dele não gerou envio, mesmo com a infraestrutura ativa.
+- O sistema ganha um caminho de contingência para não depender de suporte manual em cada caso.
 
-Substitui `stripDanfePages`. Detecta automaticamente quantas páginas por envio a API retornou (total_pages / num_shipments). Mantém apenas as páginas desejadas de cada grupo:
-- **Padrão ML**: mantém páginas 0 e 1 (etiqueta + DANFE), descarta página 2+ (separação)
-- **Sem NF**: mantém apenas página 0 (etiqueta), descarta todo o resto
-
-### 2. Aplicar no pipeline padrão (linhas ~1001-1020)
-
-- Após o merge de PDFs do layout `meli_100x150`, chamar `stripExtraPages(merged, shipmentCount, 'standard')` para remover as listas de separação
-- Para `meli_100x150_no_nf`, chamar `stripExtraPages(merged, shipmentCount, 'no_nf')` (substitui a atual `stripDanfePages`)
-
-### 3. Remover a função `stripDanfePages` antiga
-
-Será substituída pela nova `stripExtraPages`.
-
-## Resultado esperado
-
-- **Padrão ML**: 10 envios → 20 páginas (etiqueta + DANFE), sem separação
-- **Sem NF**: 10 envios → 10 páginas (só etiquetas)
-- **Com Cabeçalho**: já funciona corretamente, sem mudança
-
+Detalhes técnicos:
+- Hoje o front chama `supabase.auth.resetPasswordForEmail(...)` em `src/pages/Auth.tsx`.
+- O caminho de envio autenticado usa `supabase/functions/auth-email-hook/index.ts`, que registra em `email_send_log` e enfileira para `process-email-queue`.
+- Como não existe nenhum `email_send_log` para o Mateus, o ponto de falha está antes do envio efetivo.
+- Também há um indício forte de inconsistência de dados: o perfil do Mateus continua com `email_verified = false`, apesar da confirmação em massa e de já existir login com sucesso.
