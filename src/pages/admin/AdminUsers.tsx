@@ -292,6 +292,11 @@ export function AdminUsers() {
                             Resetar Teste (7 dias)
                           </DropdownMenuItem>
                           
+                          <DropdownMenuItem onClick={() => handleGenerateResetLink(user.email)}>
+                            <KeyRound className="h-4 w-4 mr-2" />
+                            Gerar Link de Reset
+                          </DropdownMenuItem>
+                          
                           <DropdownMenuSeparator />
                           
                           {/* Block/Unblock */}
