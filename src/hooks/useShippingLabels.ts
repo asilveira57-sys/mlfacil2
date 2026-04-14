@@ -930,12 +930,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         if (selectedIds.size === 0) throw new Error('Nenhum envio selecionado');
         const selectedOrders = orders.filter(o => selectedIds.has(o.id));
 
-        // Block mixed Flex + Coleta in same file
-        const hasFlex = selectedOrders.some(o => o.logistic_type === 'self_service');
-        const hasColeta = selectedOrders.some(o => o.logistic_type && o.logistic_type !== 'self_service' && o.logistic_type !== 'fulfillment');
-        if (hasFlex && hasColeta) {
-          throw new Error('Não é possível gerar etiquetas de Flex e Coleta no mesmo arquivo. Filtre por tipo de logística e gere separadamente.');
-        }
+        // Mixed Flex + Coleta is now allowed — backend handles variable page counts per shipment
 
         shipmentIds = selectedOrders
           .map(o => o.shipment_id)
