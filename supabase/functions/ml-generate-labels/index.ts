@@ -618,7 +618,7 @@ serve(async (req) => {
 
     const { data: shipments } = await supabaseAdmin
       .from('meli_shipments_cache')
-      .select('shipment_id, order_id, label_available')
+      .select('shipment_id, order_id, label_available, logistic_type')
       .eq('seller_id', seller_id)
       .in('shipment_id', shipment_ids);
 
@@ -720,7 +720,10 @@ serve(async (req) => {
       }
 
       const invoice = invoiceMap.get(shipment.order_id);
-      if (!invoice || invoice.invoice_status !== 'emitida') {
+      const isFlex = shipment.logistic_type === 'self_service';
+
+      // Flex shipments don't require NF — skip invoice check
+      if (!isFlex && (!invoice || invoice.invoice_status !== 'emitida')) {
         validationErrors.push({ shipment_id, reason: 'NF não emitida para este pedido' });
         continue;
       }
