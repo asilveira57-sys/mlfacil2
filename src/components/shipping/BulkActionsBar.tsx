@@ -82,19 +82,19 @@ export function BulkActionsBar({
                 >
                   <span className="font-medium">Padrão ML</span>
                   <span className="ml-2 text-xs text-muted-foreground">
-                    {!capabilities.canStandardPdf.enabled ? capabilities.canStandardPdf.reason : '100×150mm'}
+                    {!capabilities.canStandardPdf.enabled ? capabilities.canStandardPdf.reason : 'etiqueta + DANFE'}
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'meli_100x150_no_nf')}>
-                  <span className="font-medium">Somente Etiquetas de envio</span>
-                  <span className="ml-2 text-xs text-muted-foreground">com cabeçalho</span>
+                  <span className="font-medium">Cabeçalho sem DANFE</span>
+                  <span className="ml-2 text-xs text-muted-foreground">somente etiqueta</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   onClick={() => onGenerateLabels('pdf', 'mlfacil_100x175_header')}
                   disabled={!capabilities.canHeaderPdf.enabled}
                   className={!capabilities.canHeaderPdf.enabled ? 'opacity-50' : ''}
                 >
-                  <span className="font-medium">Com Cabeçalho</span>
+                  <span className="font-medium">Cabeçalho + DANFE</span>
                   <span className="ml-2 text-xs text-muted-foreground">
                     {!capabilities.canHeaderPdf.enabled ? capabilities.canHeaderPdf.reason : 'etiqueta + NF'}
                   </span>
