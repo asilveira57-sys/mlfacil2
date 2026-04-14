@@ -944,7 +944,41 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     }
   }, [isSyncing, sellerId, refetch, toast, waitForJob]);
 
-  // Generate labels mutation with batch support
+  // Helper: trigger file download from generation response data
+  const triggerDownload = useCallback((data: any, format: 'pdf' | 'zpl') => {
+    if (format === 'pdf' && data.pdf_base64) {
+      const binary = atob(data.pdf_base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `etiquetas_${new Date().getTime()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({
+        title: 'PDF gerado com sucesso',
+        description: `${data.total_labels} etiqueta(s) em ${data.total_batches || 1} lote(s)`,
+      });
+    } else if (format === 'zpl' && data.zpl_content) {
+      const blob = new Blob([data.zpl_content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `etiquetas_${new Date().getTime()}.zpl`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({
+        title: 'ZPL gerado com sucesso',
+        description: `${data.total_labels} etiqueta(s) em ${data.total_batches || 1} lote(s)`,
+      });
+    }
+  }, [toast]);
+
+  // Generate labels mutation with batch support + job persistence
   const generateLabelsMutation = useMutation({
     mutationFn: async ({ format, layout, shipmentId }: { format: 'pdf' | 'zpl'; layout: LabelLayout; shipmentId?: string }) => {
       if (!sellerId) throw new Error('Seller ID not set');
@@ -971,7 +1005,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         throw new Error('Nenhum envio válido selecionado');
       }
 
-      // Set initial progress
+      // Set initial progress and mark job as active
       const totalBatches = Math.ceil(shipmentIds.length / 50);
       setGenerationProgress({
         status: 'processing',
@@ -980,6 +1014,17 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         total_batches: totalBatches,
         completed_batches: 0,
         error_batches: 0,
+      });
+      setIsJobGenerating(true);
+
+      // Persist active job so it survives navigation
+      saveActiveJob({
+        jobId: 'pending', // will be updated if backend returns job_id
+        sellerId,
+        format,
+        layout,
+        shipmentIds,
+        startedAt: new Date().toISOString(),
       });
 
       const response = await supabase.functions.invoke('ml-generate-labels', {
@@ -1006,6 +1051,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       return response.data;
     },
     onSuccess: (data, variables) => {
+      // Clear active job
+      clearActiveJob();
+      setIsJobGenerating(false);
+
       if (!variables.shipmentId) {
         setSelectedIds(new Set());
       }
@@ -1028,38 +1077,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         })),
       });
       
-      if (variables.format === 'pdf' && data.pdf_base64) {
-        const binary = atob(data.pdf_base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        const blob = new Blob([bytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `etiquetas_${new Date().getTime()}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        toast({
-          title: 'PDF gerado com sucesso',
-          description: `${data.total_labels} etiqueta(s) em ${data.total_batches || 1} lote(s)`,
-        });
-      } else if (variables.format === 'zpl' && data.zpl_content) {
-        const blob = new Blob([data.zpl_content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `etiquetas_${new Date().getTime()}.zpl`;
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        toast({
-          title: 'ZPL gerado com sucesso',
-          description: `${data.total_labels} etiqueta(s) em ${data.total_batches || 1} lote(s)`,
-        });
-      }
+      triggerDownload(data, variables.format);
 
       // Show warning if there were partial failures
       if (data.error_batches > 0 && data.batch_errors) {
@@ -1077,6 +1095,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
     onError: (error) => {
       console.error('Generate labels error:', error);
+      clearActiveJob();
+      setIsJobGenerating(false);
       setGenerationProgress(prev => ({
         ...prev,
         status: 'error',
@@ -1093,6 +1113,131 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       }, 3000);
     },
   });
+
+  // Recover active job on mount (survives navigation)
+  useEffect(() => {
+    if (!sellerId || jobPollingRef.current) return;
+    const activeJob = loadActiveJob();
+    if (!activeJob || activeJob.sellerId !== sellerId) return;
+    // If there's a pending job marker, it means the mutation was in-flight
+    // when the user navigated away. Show a processing indicator.
+    if (activeJob.jobId === 'pending') {
+      // The mutation call was interrupted - show recovery state briefly then clear
+      setGenerationProgress({
+        status: 'processing',
+        total_labels: activeJob.shipmentIds.length,
+        processed_labels: 0,
+        total_batches: Math.ceil(activeJob.shipmentIds.length / 50),
+        completed_batches: 0,
+        error_batches: 0,
+      });
+      setIsJobGenerating(true);
+      jobPollingRef.current = true;
+
+      // Poll meli_print_queue for the most recent job for this seller
+      const pollForJob = async () => {
+        try {
+          const { data: recentJob } = await supabase
+            .from('meli_print_queue')
+            .select('id, status, total_labels, processed_labels, batches, file_url, zpl_content, error_log')
+            .eq('seller_id', sellerId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (!recentJob) {
+            // No job found - the call may have failed silently
+            clearActiveJob();
+            setIsJobGenerating(false);
+            setGenerationProgress(INITIAL_GENERATION_PROGRESS);
+            jobPollingRef.current = false;
+            return;
+          }
+
+          // Poll until complete
+          let attempts = 0;
+          const maxAttempts = 60; // 2 min max
+          while (attempts < maxAttempts) {
+            const { data: job } = await supabase
+              .from('meli_print_queue')
+              .select('id, status, total_labels, processed_labels, batches, file_url, zpl_content, error_log')
+              .eq('id', recentJob.id)
+              .single();
+
+            if (!job) break;
+
+            const batches = (job.batches || []) as BatchInfo[];
+            const completedBatches = batches.filter(b => b.status === 'success').length;
+            const errorBatches = batches.filter(b => b.status === 'error').length;
+
+            if (job.status === 'completed' || job.status === 'partial' || job.status === 'error') {
+              setGenerationProgress({
+                status: job.status as any,
+                total_labels: job.total_labels || 0,
+                processed_labels: job.processed_labels || 0,
+                total_batches: batches.length,
+                completed_batches: completedBatches,
+                error_batches: errorBatches,
+              });
+
+              // If completed successfully, trigger download via file_url or zpl_content
+              if ((job.status === 'completed' || job.status === 'partial') && job.file_url) {
+                // Download from storage URL
+                try {
+                  const resp = await fetch(job.file_url);
+                  if (resp.ok) {
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `etiquetas_${new Date().getTime()}.${activeJob.format === 'zpl' ? 'zpl' : 'pdf'}`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    toast({ title: 'Etiquetas recuperadas!', description: `${job.total_labels} etiqueta(s)` });
+                  }
+                } catch (e) {
+                  console.error('Failed to download recovered labels:', e);
+                }
+              }
+
+              clearActiveJob();
+              setIsJobGenerating(false);
+              setTimeout(() => setGenerationProgress(INITIAL_GENERATION_PROGRESS), 3000);
+              break;
+            }
+
+            // Still processing - update progress
+            setGenerationProgress({
+              status: 'processing',
+              total_labels: job.total_labels || 0,
+              processed_labels: job.processed_labels || 0,
+              total_batches: batches.length,
+              completed_batches: completedBatches,
+              error_batches: errorBatches,
+            });
+
+            await sleep(2000);
+            attempts++;
+          }
+
+          if (attempts >= maxAttempts) {
+            clearActiveJob();
+            setIsJobGenerating(false);
+            setGenerationProgress(INITIAL_GENERATION_PROGRESS);
+          }
+        } catch (e) {
+          console.error('Job recovery error:', e);
+          clearActiveJob();
+          setIsJobGenerating(false);
+          setGenerationProgress(INITIAL_GENERATION_PROGRESS);
+        }
+        jobPollingRef.current = false;
+      };
+
+      pollForJob();
+    }
+  }, [sellerId, toast]);
+
 
   // Selection helpers
   const toggleSelection = useCallback((id: string) => {
