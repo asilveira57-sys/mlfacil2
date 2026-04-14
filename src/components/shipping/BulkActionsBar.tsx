@@ -85,8 +85,7 @@ export function BulkActionsBar({
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'meli_100x150_no_nf')}>
-                  <span className="font-medium">Sem NF</span>
-                  <span className="ml-2 text-xs text-muted-foreground">somente etiquetas</span>
+                  <span className="font-medium">Somente Etiquetas de envio</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   onClick={() => onGenerateLabels('pdf', 'mlfacil_100x175_header')}
