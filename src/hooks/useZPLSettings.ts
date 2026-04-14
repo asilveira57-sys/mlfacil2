@@ -19,22 +19,16 @@ export const useZPLSettings = () => {
 
 export const detectLabelCount = (zplCode: string, labelType?: string): number => {
   const code = zplCode || "";
-
   if (!code.trim()) return 0;
 
-  // Para Shopee, usamos a lógica de split específica para contar etiquetas reais
-  if (labelType === "shopee") {
-    const labels = splitShopeeLabels(code);
-    return labels.length || 1;
+  // Use the same split logic used for conversion so count matches actual output
+  if (labelType) {
+    const labels = splitZPLByType(code, labelType);
+    return labels.length || (code.trim().length > 0 ? 1 : 0);
   }
-  
-  // Padrão: conta quantas vezes aparece ^XA (início de etiqueta ZPL)
+
+  // Fallback: count printable ^XA blocks
   const matches = code.match(/\^XA/gi);
-  // Se tem ~DGR, cada ~DGR = 1 etiqueta real (ex: Shopee genérico)
-  const dgrMatches = code.match(/~DGR/gi);
-  if (dgrMatches && dgrMatches.length > 1) {
-    return dgrMatches.length;
-  }
   return matches ? matches.length : 1;
 };
 
@@ -76,11 +70,9 @@ export const LABEL_TYPES: LabelTypeConfig[] = [
 // SHOPEE - arquivo pode conter múltiplas etiquetas no MESMO ZPL
 export const splitShopeeLabels = (zplCode: string): string[] => {
   const normalized = zplCode.trim();
-
   if (!normalized) return [];
 
-  // Estratégia principal: separar por blocos ~DGR (cada etiqueta Shopee tem seu próprio ~DGR com a imagem/arte)
-  // Padrão real: ~DGR:DEMO.GRF,... ^XA...^XZ ^XA...^XZ ~DGR:DEMO.GRF,... ^XA...^XZ ^XA...^XZ ...
+  // Strategy: split by ~DGR markers (each Shopee label has its own ~DGR graphic block)
   const dgrPositions: number[] = [];
   const dgrRegex = /~DGR/gi;
   let dgrMatch: RegExpExecArray | null;
@@ -88,56 +80,67 @@ export const splitShopeeLabels = (zplCode: string): string[] => {
     dgrPositions.push(dgrMatch.index);
   }
 
-  // Se tem múltiplos ~DGR, cada um é uma etiqueta independente
+  let candidates: string[];
+
   if (dgrPositions.length > 1) {
-    const labels: string[] = [];
+    // Multiple ~DGR: split at each one
+    candidates = [];
     for (let i = 0; i < dgrPositions.length; i++) {
       const start = dgrPositions[i];
       const end = i + 1 < dgrPositions.length ? dgrPositions[i + 1] : normalized.length;
       const block = normalized.slice(start, end).trim();
       if (block.length > 0) {
-        labels.push(block);
+        candidates.push(block);
       }
     }
-    return labels;
-  }
-
-  // Fallback: arquivo sem ~DGR ou com apenas 1 — usar lógica de ^XA/^XZ
-  const firstXAIndex = normalized.search(/\^XA/i);
-
-  if (firstXAIndex === -1) {
-    return [normalized];
-  }
-
-  const header = normalized.slice(0, firstXAIndex);
-  const body = normalized.slice(firstXAIndex);
-
-  const regex = /\^XA[\s\S]*?\^XZ/gi;
-  const rawBlocks: string[] = [];
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(body)) !== null) {
-    const labelBody = match[0].trim();
-    if (labelBody.length > 0) {
-      rawBlocks.push(header ? header + labelBody : labelBody);
-    }
-  }
-
-  if (rawBlocks.length === 0) {
-    return [normalized];
-  }
-
-  // Em muitos arquivos Shopee antigos, cada etiqueta lógica é composta por 2 blocos ^XA...^XZ
-  let groupedLabels: string[] = [];
-  if (rawBlocks.length % 2 === 0) {
-    for (let i = 0; i < rawBlocks.length; i += 2) {
-      groupedLabels.push(rawBlocks[i] + "\n" + rawBlocks[i + 1]);
-    }
   } else {
-    groupedLabels = rawBlocks;
+    // Fallback: split by ^XA blocks
+    const firstXAIndex = normalized.search(/\^XA/i);
+    if (firstXAIndex === -1) {
+      // No ^XA at all — return whole thing only if it has some content
+      return [normalized];
+    }
+
+    const header = normalized.slice(0, firstXAIndex);
+    const body = normalized.slice(firstXAIndex);
+
+    const regex = /\^XA[\s\S]*?\^XZ/gi;
+    const rawBlocks: string[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(body)) !== null) {
+      const labelBody = match[0].trim();
+      if (labelBody.length > 0) {
+        rawBlocks.push(header ? header + labelBody : labelBody);
+      }
+    }
+
+    if (rawBlocks.length === 0) {
+      return [normalized];
+    }
+
+    // Old Shopee files: logical labels composed of 2 ^XA...^XZ blocks
+    if (rawBlocks.length % 2 === 0) {
+      const grouped: string[] = [];
+      for (let i = 0; i < rawBlocks.length; i += 2) {
+        grouped.push(rawBlocks[i] + "\n" + rawBlocks[i + 1]);
+      }
+      candidates = grouped;
+    } else {
+      candidates = rawBlocks;
+    }
   }
 
-  return groupedLabels;
+  // VALIDATION: every candidate must contain at least one printable ^XA...^XZ block
+  // If a candidate is only a graphic preamble without ^XA, it's not a real label
+  const valid = candidates.filter(block => /\^XA[\s\S]*?\^XZ/i.test(block));
+
+  // If validation removed everything, try the whole document as a single label
+  if (valid.length === 0 && normalized.length > 0) {
+    return [normalized];
+  }
+
+  return valid;
 };
 
 // FULL PRODUTOS/VOLUMES - Para etiquetas que já têm ^XA/^XZ

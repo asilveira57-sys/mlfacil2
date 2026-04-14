@@ -38,11 +38,11 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
   const isFull = order.logistic_type === 'fulfillment';
   const pdfLayout = getReprintLayout(order, 'pdf');
   const pdfButtonLabel = pdfLayout === 'meli_100x150_no_nf'
-    ? 'PDF Somente Etiquetas de envio'
-    : 'PDF Padrão';
-  const pdfButtonTitle = pdfLayout === 'meli_100x150_no_nf'
-    ? 'Etiqueta com cabeçalho, sem DANFE'
+    ? 'PDF Cabeçalho sem DANFE'
     : 'PDF Padrão ML';
+  const pdfButtonTitle = pdfLayout === 'meli_100x150_no_nf'
+    ? 'Etiqueta com cabeçalho personalizado, sem DANFE (NF não emitida)'
+    : 'PDF Padrão ML (etiqueta + DANFE)';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
