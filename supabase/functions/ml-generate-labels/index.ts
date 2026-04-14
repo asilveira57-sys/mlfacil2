@@ -256,6 +256,7 @@ async function buildHeaderPdfSafe(
   fontSize: number,
   updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>,
   skipDanfe: boolean = false,
+  perShipmentSkipDanfe: Set<string> = new Set(),
 ): Promise<{ pdfBytes: Uint8Array; processedCount: number; errorShipments: string[] }> {
   const resultPdf = await PDFDocument.create();
   const font = await resultPdf.embedFont(StandardFonts.Helvetica);
@@ -343,8 +344,9 @@ async function buildHeaderPdfSafe(
     
     // === PAGE 1: DANFE/invoice — copy as-is, NO header ===
     // Only copy page index 1 (DANFE). Ignore pages 2+ (ML internal separation lists).
-    // Skip DANFE entirely when skipDanfe is true (layout meli_100x150_no_nf)
-    if (!skipDanfe && pageCount > 1) {
+    // Skip DANFE when: global skipDanfe flag OR per-shipment fallback (Flex without NF)
+    const shouldSkipDanfe = skipDanfe || perShipmentSkipDanfe.has(shipmentId);
+    if (!shouldSkipDanfe && pageCount > 1) {
       const [danfePage] = await resultPdf.copyPages(sourcePdf, [1]);
       resultPdf.addPage(danfePage);
     }
@@ -721,16 +723,19 @@ serve(async (req) => {
 
       const invoice = invoiceMap.get(shipment.order_id);
       const isFlex = shipment.logistic_type === 'self_service';
+      const isFull = shipment.logistic_type === 'fulfillment';
       const hasInvoice = invoice && invoice.invoice_status === 'emitida';
 
-      // Determine if NF is required based on layout/format
-      // - Flex never requires NF
-      // - 'mlfacil_100x175_header' requires NF because it includes DANFE
-      // - 'meli_100x150_no_nf' is the header layout without DANFE, so NF is not required
-      // - ZPL is label-only, NF not required
-      const nfRequired = !isFlex && layout === 'mlfacil_100x175_header' && format === 'pdf';
+      // Full orders: never allowed
+      if (isFull) {
+        validationErrors.push({ shipment_id, reason: 'Pedido Full (ML envia)' });
+        continue;
+      }
 
-      if (nfRequired && !hasInvoice) {
+      // "Cabeçalho + DANFE" validation:
+      // - Coleta without NF: blocked (requires NF)
+      // - Flex without NF: allowed, will fallback to header-only (skipDanfe per shipment)
+      if (layout === 'mlfacil_100x175_header' && format === 'pdf' && !hasInvoice && !isFlex) {
         validationErrors.push({ shipment_id, reason: 'NF não emitida para este pedido' });
         continue;
       }
@@ -957,9 +962,25 @@ serve(async (req) => {
         console.log(`[HEADER] Built headers for ${headerDataMap.size} shipments (pack-aware)`);
 
         // Build PDF with safe per-shipment pipeline
-        // - mlfacil_100x175_header => header + DANFE
+        // - mlfacil_100x175_header => header + DANFE (but Flex without NF falls back to header-only)
         // - meli_100x150_no_nf => header without DANFE
         const skipDanfe = layout === 'meli_100x150_no_nf';
+        
+        // Build per-shipment skipDanfe set for Flex orders without NF
+        const perShipmentSkipDanfe = new Set<string>();
+        if (layout === 'mlfacil_100x175_header') {
+          for (const sid of validShipmentIds) {
+            const shipment = shipmentMap.get(sid);
+            if (shipment && shipment.logistic_type === 'self_service') {
+              const invoice = invoiceMap.get(shipment.order_id);
+              if (!invoice || invoice.invoice_status !== 'emitida') {
+                perShipmentSkipDanfe.add(sid);
+                console.log(`[HEADER] Flex fallback: shipment ${sid} will skip DANFE (no NF)`);
+              }
+            }
+          }
+        }
+        
         const headerResult = await buildHeaderPdfSafe(
           validShipmentIds,
           mlAccount.access_token,
@@ -967,6 +988,7 @@ serve(async (req) => {
           prefs.font_size,
           updateProgress,
           skipDanfe,
+          perShipmentSkipDanfe,
         );
 
         totalSuccessLabels = headerResult.processedCount;

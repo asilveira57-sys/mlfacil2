@@ -9,19 +9,19 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { ShippingOrder, OrderItemSummary } from '@/hooks/useShippingLabels';
+import { ShippingOrder, OrderItemSummary, LabelLayout } from '@/hooks/useShippingLabels';
 import { usePrintHistory } from '@/hooks/usePrintHistory';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Package, History, MapPin, Truck, CheckCircle, AlertCircle, Clock, Printer, FileDown, ExternalLink, ShoppingCart } from 'lucide-react';
 import { getShipmentStatus, getInvoiceStatusFromSubstatus, getSeverityColors } from '@/lib/shippingStatusMap';
-import { canReprintOrder, getReprintLayout } from '@/lib/shippingLabelRules';
+import { canReprintOrder, getReprintOptions } from '@/lib/shippingLabelRules';
 
 interface OrderDetailsDrawerProps {
   order: ShippingOrder | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onReprint?: (shipmentId: string, format: 'pdf' | 'zpl') => void;
+  onReprint?: (shipmentId: string, format: 'pdf' | 'zpl', layout: LabelLayout) => void;
   isGenerating?: boolean;
   orderItems?: OrderItemSummary[];
 }
@@ -35,14 +35,9 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
   if (!order) return null;
 
   const canReprint = canReprintOrder(order, 'pdf') || canReprintOrder(order, 'zpl');
-  const isFull = order.logistic_type === 'fulfillment';
-  const pdfLayout = getReprintLayout(order, 'pdf');
-  const pdfButtonLabel = pdfLayout === 'meli_100x150_no_nf'
-    ? 'PDF Cabeçalho sem DANFE'
-    : 'PDF Padrão ML';
-  const pdfButtonTitle = pdfLayout === 'meli_100x150_no_nf'
-    ? 'Etiqueta com cabeçalho personalizado, sem DANFE (NF não emitida)'
-    : 'PDF Padrão ML (etiqueta + DANFE)';
+  const reprintOptions = getReprintOptions(order);
+  const pdfOptions = reprintOptions.filter(o => o.format === 'pdf');
+  const zplOptions = reprintOptions.filter(o => o.format === 'zpl');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -66,25 +61,39 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                   <Printer className="h-4 w-4" />
                   Reimprimir Etiqueta
                 </h3>
-                <div className="flex gap-2 flex-wrap">
-                  <Button
-                    size="sm"
-                    onClick={() => onReprint(order.shipment_id!, 'pdf')}
-                    disabled={isGenerating || isFull}
-                    title={pdfButtonTitle}
-                  >
-                    <FileDown className="h-4 w-4 mr-2" />
-                    {pdfButtonLabel}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onReprint(order.shipment_id!, 'zpl')}
-                    disabled={isGenerating || isFull}
-                  >
-                    <Printer className="h-4 w-4 mr-2" />
-                    ZPL
-                  </Button>
+                <div className="space-y-2">
+                  {/* PDF Options */}
+                  <div className="flex gap-2 flex-wrap">
+                    {pdfOptions.map(opt => (
+                      <Button
+                        key={`${opt.format}-${opt.layout}`}
+                        size="sm"
+                        onClick={() => onReprint(order.shipment_id!, opt.format, opt.layout)}
+                        disabled={isGenerating || !opt.enabled}
+                        title={opt.reason || opt.label}
+                        variant={opt.layout === 'meli_100x150' ? 'default' : 'outline'}
+                      >
+                        <FileDown className="h-4 w-4 mr-2" />
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {/* ZPL Options */}
+                  <div className="flex gap-2 flex-wrap">
+                    {zplOptions.map(opt => (
+                      <Button
+                        key={`${opt.format}-${opt.layout}`}
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onReprint(order.shipment_id!, opt.format, opt.layout)}
+                        disabled={isGenerating || !opt.enabled}
+                        title={opt.reason || opt.label}
+                      >
+                        <Printer className="h-4 w-4 mr-2" />
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                   A etiqueta será gerada novamente diretamente do Mercado Livre.
