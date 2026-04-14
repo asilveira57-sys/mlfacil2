@@ -15,6 +15,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Package, History, MapPin, Truck, CheckCircle, AlertCircle, Clock, Printer, FileDown, ExternalLink, ShoppingCart } from 'lucide-react';
 import { getShipmentStatus, getInvoiceStatusFromSubstatus, getSeverityColors } from '@/lib/shippingStatusMap';
+import { canReprintOrder } from '@/lib/shippingLabelRules';
 
 interface OrderDetailsDrawerProps {
   order: ShippingOrder | null;
@@ -33,9 +34,10 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
 
   if (!order) return null;
 
-  const canReprint = order.label_available && order.shipment_id;
+  const canReprint = canReprintOrder(order, 'pdf') || canReprintOrder(order, 'zpl');
   const hasInvoice = order.invoice_status === 'emitida';
   const isFlex = order.logistic_type === 'self_service';
+  const canPdfStandard = hasInvoice || isFlex;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -59,16 +61,28 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                   <Printer className="h-4 w-4" />
                   Reimprimir Etiqueta
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button
                     size="sm"
                     onClick={() => onReprint(order.shipment_id!, 'pdf')}
-                    disabled={isGenerating || (!hasInvoice && !isFlex)}
-                    title={!hasInvoice && !isFlex ? 'NF não emitida — use "Sem NF" ou ZPL' : undefined}
+                    disabled={isGenerating || !canPdfStandard}
+                    title={!canPdfStandard ? 'NF não emitida — use "Somente Etiquetas" ou ZPL' : 'PDF Padrão ML (etiqueta + DANFE)'}
                   >
                     <FileDown className="h-4 w-4 mr-2" />
                     PDF Padrão
                   </Button>
+                  {!canPdfStandard && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onReprint(order.shipment_id!, 'pdf')}
+                      disabled={isGenerating}
+                      title="PDF somente etiqueta (sem DANFE)"
+                    >
+                      <FileDown className="h-4 w-4 mr-2" />
+                      Somente Etiqueta
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -79,9 +93,9 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                     ZPL
                   </Button>
                 </div>
-                {!hasInvoice && !isFlex && (
+                {!canPdfStandard && (
                   <p className="text-xs text-amber-600 mt-2">
-                    NF não emitida — apenas ZPL disponível para reimpressão individual.
+                    NF não emitida — PDF Padrão indisponível. Use "Somente Etiqueta" ou ZPL.
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground mt-2">
