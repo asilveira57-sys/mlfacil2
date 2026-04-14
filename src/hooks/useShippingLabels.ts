@@ -1166,7 +1166,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
             if (!job) break;
 
-            const batches = (job.batches || []) as BatchInfo[];
+            const batches = (job.batches || []) as unknown as BatchInfo[];
             const completedBatches = batches.filter(b => b.status === 'success').length;
             const errorBatches = batches.filter(b => b.status === 'error').length;
 
