@@ -15,7 +15,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Package, History, MapPin, Truck, CheckCircle, AlertCircle, Clock, Printer, FileDown, ExternalLink, ShoppingCart } from 'lucide-react';
 import { getShipmentStatus, getInvoiceStatusFromSubstatus, getSeverityColors } from '@/lib/shippingStatusMap';
-import { canReprintOrder } from '@/lib/shippingLabelRules';
+import { canReprintOrder, getReprintLayout } from '@/lib/shippingLabelRules';
 
 interface OrderDetailsDrawerProps {
   order: ShippingOrder | null;
@@ -36,7 +36,13 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
 
   const canReprint = canReprintOrder(order, 'pdf') || canReprintOrder(order, 'zpl');
   const isFull = order.logistic_type === 'fulfillment';
-  const canPdfStandard = !isFull; // ML API handles available pages; no NF gate needed
+  const pdfLayout = getReprintLayout(order, 'pdf');
+  const pdfButtonLabel = pdfLayout === 'meli_100x150_no_nf'
+    ? 'PDF Somente Etiquetas de envio'
+    : 'PDF Padrão';
+  const pdfButtonTitle = pdfLayout === 'meli_100x150_no_nf'
+    ? 'Etiqueta com cabeçalho, sem DANFE'
+    : 'PDF Padrão ML';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -65,10 +71,10 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                     size="sm"
                     onClick={() => onReprint(order.shipment_id!, 'pdf')}
                     disabled={isGenerating || isFull}
-                    title="PDF Padrão ML"
+                    title={pdfButtonTitle}
                   >
                     <FileDown className="h-4 w-4 mr-2" />
-                    PDF Padrão
+                    {pdfButtonLabel}
                   </Button>
                   <Button
                     size="sm"

@@ -725,9 +725,9 @@ serve(async (req) => {
 
       // Determine if NF is required based on layout/format
       // - Flex never requires NF
-      // - Only 'mlfacil_100x175_header' layout requires NF (header pipeline needs DANFE page)
-      // - 'meli_100x150' (standard): ML API handles available pages, no NF needed
-      // - 'meli_100x150_no_nf' and ZPL: label-only, NF not required
+      // - 'mlfacil_100x175_header' requires NF because it includes DANFE
+      // - 'meli_100x150_no_nf' is the header layout without DANFE, so NF is not required
+      // - ZPL is label-only, NF not required
       const nfRequired = !isFlex && layout === 'mlfacil_100x175_header' && format === 'pdf';
 
       if (nfRequired && !hasInvoice) {
@@ -769,11 +769,11 @@ serve(async (req) => {
 
     // Create job record
     const isPdfLayout = format === 'pdf';
-    const isHeaderLayout = layout === 'mlfacil_100x175_header' && isPdfLayout;
-    // Standard PDF layouts use per-shipment processing to preserve page order and avoid ML separation pages.
-    const isPerShipmentPdf = isPdfLayout && (
-      layout === 'meli_100x150' || layout === 'meli_100x150_no_nf'
+    const isHeaderLayout = isPdfLayout && (
+      layout === 'mlfacil_100x175_header' || layout === 'meli_100x150_no_nf'
     );
+    // Standard ML PDF uses per-shipment processing to preserve page order and avoid ML separation pages.
+    const isPerShipmentPdf = isPdfLayout && layout === 'meli_100x150';
 
     // All PDF layouts: single "batch" covering all shipments (per-shipment processing)
     // ZPL: batch via ML API as before
@@ -855,9 +855,9 @@ serve(async (req) => {
     let errorBatchCount = 0;
     const batchResults: BatchResult[] = [];
 
-    // ===== HEADER LAYOUT: safe per-shipment pipeline =====
+    // ===== CUSTOM HEADER PDF LAYOUTS: safe per-shipment pipeline =====
     if (isHeaderLayout) {
-      console.log(`[HEADER] Starting safe per-shipment pipeline for ${validShipmentIds.length} shipments`);
+      console.log(`[HEADER] Starting safe per-shipment pipeline for ${validShipmentIds.length} shipments (layout=${layout})`);
       
       try {
         // Load seller preferences
@@ -957,6 +957,8 @@ serve(async (req) => {
         console.log(`[HEADER] Built headers for ${headerDataMap.size} shipments (pack-aware)`);
 
         // Build PDF with safe per-shipment pipeline
+        // - mlfacil_100x175_header => header + DANFE
+        // - meli_100x150_no_nf => header without DANFE
         const skipDanfe = layout === 'meli_100x150_no_nf';
         const headerResult = await buildHeaderPdfSafe(
           validShipmentIds,
