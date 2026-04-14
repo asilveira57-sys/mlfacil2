@@ -25,7 +25,8 @@ export interface SelectionCapabilities {
  * - Flex (self_service): never requires NF → all layouts allowed
  * - Fulfillment: blocked entirely (seller doesn't print)
  * - Coleta/Cross-docking (any other logistic_type):
- *   - 'meli_100x150' and 'mlfacil_100x175_header': require NF
+ *   - 'mlfacil_100x175_header': requires NF (header pipeline needs DANFE page)
+ *   - 'meli_100x150': does NOT require NF (ML API handles available pages)
  *   - 'meli_100x150_no_nf': does NOT require NF (label-only)
  *   - ZPL: does NOT require NF (label-only)
  */
@@ -33,8 +34,8 @@ function orderNeedsNf(order: ShippingOrder, layout: LabelLayout, format: LabelFo
   const isFlex = order.logistic_type === 'self_service';
   if (isFlex) return false;
 
-  const isLabelOnly = layout === 'meli_100x150_no_nf' || format === 'zpl';
-  return !isLabelOnly;
+  // Only the header layout strictly needs DANFE
+  return layout === 'mlfacil_100x175_header' && format === 'pdf';
 }
 
 function orderHasNf(order: ShippingOrder): boolean {
@@ -76,15 +77,13 @@ export function computeSelectionCapabilities(selectedOrders: ShippingOrder[]): S
     };
   }
 
-  // Check which orders block NF-dependent layouts
-  const ordersBlockingNfLayouts = selectedOrders.filter(o => !orderIsFlex(o) && !orderHasNf(o));
-  const hasBlockers = ordersBlockingNfLayouts.length > 0;
+  // Check which orders block NF-dependent layouts (only header layout needs NF)
+  const ordersBlockingHeaderLayout = selectedOrders.filter(o => !orderIsFlex(o) && !orderHasNf(o));
+  const hasHeaderBlockers = ordersBlockingHeaderLayout.length > 0;
 
   return {
-    canStandardPdf: hasBlockers
-      ? { enabled: false, reason: 'requer NF' }
-      : { enabled: true },
-    canHeaderPdf: hasBlockers
+    canStandardPdf: { enabled: true }, // ML API handles pages; no NF needed
+    canHeaderPdf: hasHeaderBlockers
       ? { enabled: false, reason: 'requer NF' }
       : { enabled: true },
     canNoNfPdf: { enabled: true },

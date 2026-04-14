@@ -35,9 +35,8 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
   if (!order) return null;
 
   const canReprint = canReprintOrder(order, 'pdf') || canReprintOrder(order, 'zpl');
-  const hasInvoice = order.invoice_status === 'emitida';
-  const isFlex = order.logistic_type === 'self_service';
-  const canPdfStandard = hasInvoice || isFlex;
+  const isFull = order.logistic_type === 'fulfillment';
+  const canPdfStandard = !isFull; // ML API handles available pages; no NF gate needed
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -65,39 +64,22 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                   <Button
                     size="sm"
                     onClick={() => onReprint(order.shipment_id!, 'pdf')}
-                    disabled={isGenerating || !canPdfStandard}
-                    title={!canPdfStandard ? 'NF não emitida — use "Somente Etiquetas" ou ZPL' : 'PDF Padrão ML (etiqueta + DANFE)'}
+                    disabled={isGenerating || isFull}
+                    title="PDF Padrão ML"
                   >
                     <FileDown className="h-4 w-4 mr-2" />
                     PDF Padrão
                   </Button>
-                  {!canPdfStandard && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onReprint(order.shipment_id!, 'pdf')}
-                      disabled={isGenerating}
-                      title="PDF somente etiqueta (sem DANFE)"
-                    >
-                      <FileDown className="h-4 w-4 mr-2" />
-                      Somente Etiqueta
-                    </Button>
-                  )}
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => onReprint(order.shipment_id!, 'zpl')}
-                    disabled={isGenerating}
+                    disabled={isGenerating || isFull}
                   >
                     <Printer className="h-4 w-4 mr-2" />
                     ZPL
                   </Button>
                 </div>
-                {!canPdfStandard && (
-                  <p className="text-xs text-amber-600 mt-2">
-                    NF não emitida — PDF Padrão indisponível. Use "Somente Etiqueta" ou ZPL.
-                  </p>
-                )}
                 <p className="text-xs text-muted-foreground mt-2">
                   A etiqueta será gerada novamente diretamente do Mercado Livre.
                 </p>
