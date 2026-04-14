@@ -53,7 +53,7 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan } = useAdminTrialManagement();
 
   const PLAN_TIERS = [
     { id: 'a0000000-0000-0000-0000-000000000001', name: 'ZPL Básico' },
@@ -101,7 +101,9 @@ export function AdminClientes() {
 
   // Trial adjustment dialog
   const [trialOpen, setTrialOpen] = useState(false);
+  const [trialMode, setTrialMode] = useState<'days' | 'date'>('days');
   const [trialDays, setTrialDays] = useState('7');
+  const [trialEndDate, setTrialEndDate] = useState('');
   const [trialClient, setTrialClient] = useState<AdminClient | null>(null);
 
   // Plan change dialog
