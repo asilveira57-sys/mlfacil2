@@ -210,21 +210,38 @@ export function AdminClientes() {
 
   const handleAdjustTrial = () => {
     if (!trialClient) return;
-    const days = parseInt(trialDays);
-    if (isNaN(days)) {
-      toast.error('Informe um número válido de dias');
-      return;
-    }
-    adjustTrial.mutate(
-      { userId: trialClient.user_id, daysAdjustment: days, reason: 'Ajuste manual via Admin Clientes' },
-      {
-        onSuccess: () => {
-          setTrialOpen(false);
-          setTrialClient(null);
-          refetch();
-        },
+    if (trialMode === 'date') {
+      if (!trialEndDateInput) {
+        toast.error('Selecione uma data');
+        return;
       }
-    );
+      setTrialEndDate.mutate(
+        { userId: trialClient.user_id, newEndDate: new Date(trialEndDateInput + 'T23:59:59').toISOString(), reason: 'Data definida via Admin Clientes' },
+        {
+          onSuccess: () => {
+            setTrialOpen(false);
+            setTrialClient(null);
+            refetch();
+          },
+        }
+      );
+    } else {
+      const days = parseInt(trialDays);
+      if (isNaN(days)) {
+        toast.error('Informe um número válido de dias');
+        return;
+      }
+      adjustTrial.mutate(
+        { userId: trialClient.user_id, daysAdjustment: days, reason: 'Ajuste manual via Admin Clientes' },
+        {
+          onSuccess: () => {
+            setTrialOpen(false);
+            setTrialClient(null);
+            refetch();
+          },
+        }
+      );
+    }
   };
 
   if (isLoading) {
