@@ -259,7 +259,37 @@ export function useAdminTrialManagement() {
     },
   });
 
-  return { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan };
+  const setTrialEndDate = useMutation({
+    mutationFn: async ({
+      userId,
+      newEndDate,
+      reason,
+    }: {
+      userId: string;
+      newEndDate: string;
+      reason?: string;
+    }) => {
+      const { data, error } = await supabase.rpc('admin_set_trial_end_date' as any, {
+        p_target_user_id: userId,
+        p_new_end_date: newEndDate,
+        p_reason: reason || null,
+      });
+      if (error) throw error;
+      const result = data as unknown as { success: boolean; error?: string };
+      if (!result.success) throw new Error(result.error);
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'clients'] });
+      toast.success('Data do trial atualizada');
+    },
+    onError: (error) => {
+      toast.error(`Erro ao definir data: ${error.message}`);
+    },
+  });
+
+  return { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan };
 }
 
 // Onboarding Cards
