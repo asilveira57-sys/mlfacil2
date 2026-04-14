@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -6,6 +6,14 @@ import { useToast } from '@/hooks/use-toast';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { startOfDay, endOfDay, subDays, subHours } from 'date-fns';
 import { toast as sonnerToast } from 'sonner';
+import {
+  saveFiltersState,
+  loadFiltersState,
+  saveActiveJob,
+  loadActiveJob,
+  clearActiveJob,
+  type ShippingFiltersState,
+} from '@/lib/shippingLabelsSession';
 
 /** Check if edge function response indicates trial expired (402) */
 function isTrialExpiredResponse(response: { data?: any; error?: any }): boolean {
