@@ -256,6 +256,7 @@ async function buildHeaderPdfSafe(
   fontSize: number,
   updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>,
   skipDanfe: boolean = false,
+  perShipmentSkipDanfe: Set<string> = new Set(),
 ): Promise<{ pdfBytes: Uint8Array; processedCount: number; errorShipments: string[] }> {
   const resultPdf = await PDFDocument.create();
   const font = await resultPdf.embedFont(StandardFonts.Helvetica);
@@ -343,8 +344,9 @@ async function buildHeaderPdfSafe(
     
     // === PAGE 1: DANFE/invoice — copy as-is, NO header ===
     // Only copy page index 1 (DANFE). Ignore pages 2+ (ML internal separation lists).
-    // Skip DANFE entirely when skipDanfe is true (layout meli_100x150_no_nf)
-    if (!skipDanfe && pageCount > 1) {
+    // Skip DANFE when: global skipDanfe flag OR per-shipment fallback (Flex without NF)
+    const shouldSkipDanfe = skipDanfe || perShipmentSkipDanfe.has(shipmentId);
+    if (!shouldSkipDanfe && pageCount > 1) {
       const [danfePage] = await resultPdf.copyPages(sourcePdf, [1]);
       resultPdf.addPage(danfePage);
     }
