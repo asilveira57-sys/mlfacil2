@@ -752,30 +752,59 @@ export function AdminClientes() {
           <DialogHeader>
             <DialogTitle>Ajustar Trial</DialogTitle>
             <DialogDescription>
-              Adicione ou remova dias do período de teste de{' '}
+              Editar o período de teste de{' '}
               <strong>{trialClient?.full_name || trialClient?.email}</strong>.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-sm font-medium">Dias (positivo = adicionar, negativo = remover)</label>
-              <Input
-                type="number"
-                value={trialDays}
-                onChange={(e) => setTrialDays(e.target.value)}
-                className="mt-1"
-              />
-            </div>
+          <div className="space-y-4">
             {trialClient?.trial_end_at && (
-              <p className="text-xs text-muted-foreground">
-                Trial atual termina em: {formatDate(trialClient.trial_end_at)}
+              <p className="text-sm text-muted-foreground">
+                Trial atual termina em: <strong>{formatDate(trialClient.trial_end_at)}</strong>
+                {(() => { const d = daysRemaining(trialClient.trial_end_at); return d !== null ? ` (${d > 0 ? `${d}d restantes` : 'Expirado'})` : ''; })()}
               </p>
+            )}
+            <div className="flex gap-2">
+              <Button
+                variant={trialMode === 'days' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTrialMode('days')}
+              >
+                Adicionar/Remover dias
+              </Button>
+              <Button
+                variant={trialMode === 'date' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTrialMode('date')}
+              >
+                Definir data específica
+              </Button>
+            </div>
+            {trialMode === 'days' ? (
+              <div>
+                <label className="text-sm font-medium">Dias (positivo = adicionar, negativo = remover)</label>
+                <Input
+                  type="number"
+                  value={trialDays}
+                  onChange={(e) => setTrialDays(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-sm font-medium">Nova data de expiração do trial</label>
+                <Input
+                  type="date"
+                  value={trialEndDateInput}
+                  onChange={(e) => setTrialEndDateInput(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTrialOpen(false)}>Cancelar</Button>
-            <Button onClick={handleAdjustTrial} disabled={adjustTrial.isPending}>
-              {adjustTrial.isPending ? 'Ajustando...' : 'Confirmar'}
+            <Button onClick={handleAdjustTrial} disabled={adjustTrial.isPending || setTrialEndDate.isPending}>
+              {(adjustTrial.isPending || setTrialEndDate.isPending) ? 'Salvando...' : 'Confirmar'}
             </Button>
           </DialogFooter>
         </DialogContent>
