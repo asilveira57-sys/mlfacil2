@@ -1398,7 +1398,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     lastSyncAt,
     statusCounts,
     generateLabels: generateLabelsMutation.mutate,
-    isGenerating: generateLabelsMutation.isPending,
+    isGenerating: generateLabelsMutation.isPending || isJobGenerating,
     generationProgress,
     orderItems,
     diagnosticInfo,
