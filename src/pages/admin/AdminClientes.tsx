@@ -53,7 +53,7 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan } = useAdminTrialManagement();
 
   const PLAN_TIERS = [
     { id: 'a0000000-0000-0000-0000-000000000001', name: 'ZPL Básico' },
@@ -101,7 +101,9 @@ export function AdminClientes() {
 
   // Trial adjustment dialog
   const [trialOpen, setTrialOpen] = useState(false);
+  const [trialMode, setTrialMode] = useState<'days' | 'date'>('days');
   const [trialDays, setTrialDays] = useState('7');
+  const [trialEndDateInput, setTrialEndDateInput] = useState('');
   const [trialClient, setTrialClient] = useState<AdminClient | null>(null);
 
   // Plan change dialog
@@ -208,21 +210,38 @@ export function AdminClientes() {
 
   const handleAdjustTrial = () => {
     if (!trialClient) return;
-    const days = parseInt(trialDays);
-    if (isNaN(days)) {
-      toast.error('Informe um número válido de dias');
-      return;
-    }
-    adjustTrial.mutate(
-      { userId: trialClient.user_id, daysAdjustment: days, reason: 'Ajuste manual via Admin Clientes' },
-      {
-        onSuccess: () => {
-          setTrialOpen(false);
-          setTrialClient(null);
-          refetch();
-        },
+    if (trialMode === 'date') {
+      if (!trialEndDateInput) {
+        toast.error('Selecione uma data');
+        return;
       }
-    );
+      setTrialEndDate.mutate(
+        { userId: trialClient.user_id, newEndDate: new Date(trialEndDateInput + 'T23:59:59').toISOString(), reason: 'Data definida via Admin Clientes' },
+        {
+          onSuccess: () => {
+            setTrialOpen(false);
+            setTrialClient(null);
+            refetch();
+          },
+        }
+      );
+    } else {
+      const days = parseInt(trialDays);
+      if (isNaN(days)) {
+        toast.error('Informe um número válido de dias');
+        return;
+      }
+      adjustTrial.mutate(
+        { userId: trialClient.user_id, daysAdjustment: days, reason: 'Ajuste manual via Admin Clientes' },
+        {
+          onSuccess: () => {
+            setTrialOpen(false);
+            setTrialClient(null);
+            refetch();
+          },
+        }
+      );
+    }
   };
 
   if (isLoading) {
@@ -452,7 +471,13 @@ export function AdminClientes() {
                             }}>
                               <Link2 className="h-4 w-4 mr-2" /> Copiar link de verificação
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setTrialClient(client); setTrialDays('7'); setTrialOpen(true); }}>
+                            <DropdownMenuItem onClick={() => {
+                              setTrialClient(client);
+                              setTrialDays('7');
+                              setTrialMode('days');
+                              setTrialEndDateInput(client.trial_end_at ? format(new Date(client.trial_end_at), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
+                              setTrialOpen(true);
+                            }}>
                               <CalendarPlus className="h-4 w-4 mr-2" /> Ajustar trial
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => resetTrial.mutate({ userId: client.user_id, reason: 'Reset via Admin Clientes' }, { onSuccess: () => refetch() })}>
@@ -727,30 +752,59 @@ export function AdminClientes() {
           <DialogHeader>
             <DialogTitle>Ajustar Trial</DialogTitle>
             <DialogDescription>
-              Adicione ou remova dias do período de teste de{' '}
+              Editar o período de teste de{' '}
               <strong>{trialClient?.full_name || trialClient?.email}</strong>.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-sm font-medium">Dias (positivo = adicionar, negativo = remover)</label>
-              <Input
-                type="number"
-                value={trialDays}
-                onChange={(e) => setTrialDays(e.target.value)}
-                className="mt-1"
-              />
-            </div>
+          <div className="space-y-4">
             {trialClient?.trial_end_at && (
-              <p className="text-xs text-muted-foreground">
-                Trial atual termina em: {formatDate(trialClient.trial_end_at)}
+              <p className="text-sm text-muted-foreground">
+                Trial atual termina em: <strong>{formatDate(trialClient.trial_end_at)}</strong>
+                {(() => { const d = daysRemaining(trialClient.trial_end_at); return d !== null ? ` (${d > 0 ? `${d}d restantes` : 'Expirado'})` : ''; })()}
               </p>
+            )}
+            <div className="flex gap-2">
+              <Button
+                variant={trialMode === 'days' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTrialMode('days')}
+              >
+                Adicionar/Remover dias
+              </Button>
+              <Button
+                variant={trialMode === 'date' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTrialMode('date')}
+              >
+                Definir data específica
+              </Button>
+            </div>
+            {trialMode === 'days' ? (
+              <div>
+                <label className="text-sm font-medium">Dias (positivo = adicionar, negativo = remover)</label>
+                <Input
+                  type="number"
+                  value={trialDays}
+                  onChange={(e) => setTrialDays(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-sm font-medium">Nova data de expiração do trial</label>
+                <Input
+                  type="date"
+                  value={trialEndDateInput}
+                  onChange={(e) => setTrialEndDateInput(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTrialOpen(false)}>Cancelar</Button>
-            <Button onClick={handleAdjustTrial} disabled={adjustTrial.isPending}>
-              {adjustTrial.isPending ? 'Ajustando...' : 'Confirmar'}
+            <Button onClick={handleAdjustTrial} disabled={adjustTrial.isPending || setTrialEndDate.isPending}>
+              {(adjustTrial.isPending || setTrialEndDate.isPending) ? 'Salvando...' : 'Confirmar'}
             </Button>
           </DialogFooter>
         </DialogContent>

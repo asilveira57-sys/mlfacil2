@@ -21225,6 +21225,14 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_set_trial_end_date: {
+        Args: {
+          p_new_end_date: string
+          p_reason?: string
+          p_target_user_id: string
+        }
+        Returns: Json
+      }
       admin_set_user_blocked: {
         Args: {
           p_blocked: boolean
