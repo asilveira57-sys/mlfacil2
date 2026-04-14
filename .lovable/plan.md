@@ -1,58 +1,101 @@
 
-Inspeção concluída
+Diagnóstico confirmado
 
-O que confirmei:
-- O login `engenharia@megatools.com.br` está ligado ao usuário interno `eaced208...`, com a conta ML ativa `DETILLI ENGENHARIA` (`seller_id 38249140`).
-- O erro atual não é de email nem de PDF A4. É bloqueio de validação.
-- Na fila de impressão dessa conta houve falhas recentes com os envios `46851942986`, `46851566313` e `46850413240`.
-- Esses envios estão no cache como:
-  - `logistic_type = cross_docking`
-  - `shipment_substatus = ready_for_pickup`
-  - `label_available = true`
-- O cache de NF mostra status `pendente`.
-- No backend, a função `supabase/functions/ml-generate-labels/index.ts` ainda exige NF para todo envio que não seja Flex. Então:
-  - Flex passa sem NF
-  - Coleta/cross_docking é barrado com `NF não emitida para este pedido`
-- A UI, porém, deixa esses pedidos selecionáveis como `reimprimir`, então o usuário consegue selecionar e só descobre o bloqueio no final. Esse desalinhamento é a causa do “não imprime nada”.
+O problema mais provável agora não é “uma opção quebrada”, e sim uma regressão de regra:
 
-Plano urgente de correção
+1. A UI passou a decidir tudo com um único booleano: `hasOrdersWithoutNf`
+   - Arquivos: `src/pages/ShippingLabels.tsx` e `src/components/shipping/BulkActionsBar.tsx`
+   - Isso simplificou demais uma regra que na prática depende de:
+     - `logistic_type`
+     - `invoice_status`
+     - `label_available`
+     - layout escolhido
+   - Resultado: o dropdown desabilita `Padrão ML` e `Com Cabeçalho` em bloco, mesmo quando a seleção deveria ter outra permissão.
 
-1. Ajustar a regra do backend por layout/formato
+2. O sistema ainda está com regras espalhadas
+   - `BulkActionsBar` usa uma regra
+   - `ShippingLabels.tsx` usa outra
+   - `OrderDetailsDrawer.tsx` usa outra
+   - `ml-generate-labels` usa outra no backend
+   - Isso explica o “cada mexida quebra outra”.
+
+3. A captura enviada confirma a regressão visual/funcional
+   - O menu PDF está sendo guiado só pelo estado “tem NF ou não”
+   - Mas o comportamento correto precisa distinguir Flex, Coleta/Cross-docking e layout escolhido
+
+Plano de correção definitiva
+
+1. Centralizar a regra de impressão em um único helper compartilhado
+- Criar uma função única para calcular compatibilidade por pedido/seleção:
+  - Flex: liberar os 3 layouts
+  - Coleta/Cross-docking sem NF: liberar apenas `Somente Etiquetas de envio` e `ZPL`
+  - Coleta/Cross-docking com NF: liberar os 3 layouts compatíveis
+  - Full: manter bloqueio
+- Essa função deve devolver:
+  - layouts permitidos
+  - layouts bloqueados
+  - motivo do bloqueio por layout
+
+2. Trocar o booleano `hasOrdersWithoutNf` por uma matriz real de capacidades
+- Arquivos:
+  - `src/pages/ShippingLabels.tsx`
+  - `src/components/shipping/BulkActionsBar.tsx`
+- Em vez de “tem pedido sem NF = bloqueia tudo”, calcular:
+  - `canUseStandardPdf`
+  - `canUseHeaderPdf`
+  - `canUseNoNfPdf`
+  - `canUseZpl`
+- Mostrar motivo correto no menu:
+  - `requer NF`
+  - `indisponível para Full`
+  - `permitido apenas para etiqueta`
+
+3. Unificar a reimpressão individual com a mesma regra
+- Arquivos:
+  - `src/components/shipping/OrderDetailsDrawer.tsx`
+  - `src/pages/ShippingLabels.tsx`
+- Hoje a reimpressão individual ainda está parcial.
+- Ajustar para:
+  - não forçar sempre `PDF Padrão`
+  - permitir `Somente Etiquetas de envio` quando for o caso
+  - permitir Flex sem NF em PDF e ZPL
+  - manter o mesmo comportamento da barra em lote
+
+4. Alinhar o backend à mesma matriz
 - Arquivo: `supabase/functions/ml-generate-labels/index.ts`
-- Trocar a validação atual por regra orientada ao tipo de saída:
-  - `meli_100x150` e `mlfacil_100x175_header`: manter NF obrigatória para não-Flex
-  - `meli_100x150_no_nf`: permitir impressão sem NF quando `label_available = true`
-  - `zpl`: minha recomendação é seguir a mesma lógica de “somente etiqueta” e liberar também sem NF
-- Manter `fulfillment` bloqueado como hoje.
+- Reaplicar a regra no backend com a mesma lógica central do produto:
+  - Flex não exige NF
+  - `meli_100x150_no_nf` e `zpl` podem sair sem NF quando a etiqueta existir
+  - `meli_100x150` e `mlfacil_100x175_header` exigem NF apenas para não-Flex
+- Garantir mensagens de erro específicas por envio/layout, sem bloqueio confuso
 
-2. Alinhar a UI com a regra real
-- Arquivos: `src/components/shipping/BulkActionsBar.tsx` e `src/hooks/useShippingLabels.ts`
-- Antes de chamar a função, analisar a seleção:
-  - se houver pedidos sem NF e não-Flex, desabilitar só os modos incompatíveis
-  - manter disponíveis os modos permitidos (“Sem NF” e, se aprovado, ZPL)
-- Trocar o erro genérico por mensagem clara:
-  - “Esta seleção só pode ser impressa em Sem NF/ZPL porque há pedidos sem nota fiscal”.
+5. Revisar a classificação operacional da listagem
+- Arquivo potencial: função `get_shipping_orders` nas migrations do backend
+- Confirmar se `ready_for_pickup` / `in_packing_list` devem aparecer como:
+  - `Para imprimir`
+  - ou `Reimprimir`
+- O importante é a compatibilidade de impressão seguir a regra central, não o nome da aba
 
-3. Corrigir a reimpressão unitária
-- Arquivos: `src/components/shipping/OrderDetailsDrawer.tsx` e `src/pages/ShippingLabels.tsx`
-- Hoje a gaveta exige `invoice_status === 'emitida'` e, ao reimprimir PDF, sempre força `layout: 'meli_100x150'`.
-- Se a regra acima for aplicada, a reimpressão individual também precisa:
-  - liberar ZPL sem NF
-  - usar `meli_100x150_no_nf` quando o pedido não tiver NF e o modo escolhido for somente etiqueta
+6. Validação obrigatória antes de fechar
+- Testar com cenários reais:
+  1. Flex sem NF → os 3 layouts devem funcionar
+  2. Flex com NF → os 3 layouts devem funcionar
+  3. Coleta sem NF → `Somente Etiquetas de envio` e `ZPL` funcionam; os outros bloqueiam
+  4. Coleta com NF → os 3 layouts funcionam
+  5. Full → continua bloqueado
+  6. Reimpressão individual e em lote com a mesma regra
+- Validar especificamente a conta `engenharia@megatools.com.br`
 
-4. Melhorar a coerência operacional
-- Revisar o status/listagem para não tratar pedido sem NF como “reimprimir” genérico quando ele só puder sair em modo sem NF.
-- Isso pode vir logo depois do hotfix, se quiser separar risco operacional.
+Arquivos que eu alteraria
+- `src/pages/ShippingLabels.tsx`
+- `src/components/shipping/BulkActionsBar.tsx`
+- `src/components/shipping/OrderDetailsDrawer.tsx`
+- `src/hooks/useShippingLabels.ts`
+- `supabase/functions/ml-generate-labels/index.ts`
+- possivelmente uma nova utilidade compartilhada, por exemplo `src/lib/shippingLabelRules.ts`
+- possivelmente a função `get_shipping_orders` se a classificação de aba estiver incoerente
 
-Validação após implementação
-- Testar com a própria conta `DETILLI ENGENHARIA` (`seller_id 38249140`)
-- Cenários mínimos:
-  1. cross_docking + NF pendente + PDF Padrão ML => deve bloquear
-  2. cross_docking + NF pendente + Sem NF => deve imprimir
-  3. cross_docking + NF pendente + ZPL => deve imprimir, se adotarmos essa liberação
-  4. Flex sem NF => continua imprimindo
-  5. Coleta com NF emitida => continua imprimindo nos modos compatíveis
-
-Observação importante
-- O problema atual não é o email do cliente.
-- O problema é uma regra antiga do backend que ainda exige NF para Coleta mesmo quando o operador escolhe um modo de somente etiqueta, somada a uma UI que continua permitindo a seleção desses pedidos como se estivessem prontos para qualquer impressão.
+Detalhe técnico importante
+- O conserto definitivo não é mais “ajustar mais um if”.
+- É remover a lógica espalhada e colocar uma única fonte de verdade para permissão de impressão.
+- Sem isso, qualquer ajuste em Flex vai continuar quebrando Coleta, e vice-versa.
