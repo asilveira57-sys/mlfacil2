@@ -51,7 +51,13 @@ interface UseShippingCutoffOptions {
 const BC_CHANNEL = 'shipping_cutoff_refresh';
 
 export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShippingCutoffOptions) {
-  const [data, setData] = useState<CutoffData | null>(null);
+  const [data, setData] = useState<CutoffData | null>(() => {
+    // Restore last cached value to avoid loading flash on remount
+    try {
+      const cached = sessionStorage.getItem(`cutoff_${sellerId}`);
+      return cached ? JSON.parse(cached) : null;
+    } catch { return null; }
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,8 +95,10 @@ export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShipping
     if (!companyId || !sellerId || !mlUserId) return;
     if (refreshingRef.current && forceRefresh) return;
 
-    const setter = forceRefresh ? setIsRefreshing : setIsLoading;
-    setter(true);
+    // Only show full loading spinner if we have NO cached data
+    const setter = forceRefresh ? setIsRefreshing : (data ? () => {} : setIsLoading);
+    if (!forceRefresh && !data) setIsLoading(true);
+    if (forceRefresh) setIsRefreshing(true);
     setError(null);
 
     if (forceRefresh) {
@@ -129,6 +137,8 @@ export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShipping
           _raw: result._raw,
         };
         setData(parsed);
+        // Cache in sessionStorage for instant restore on remount
+        try { sessionStorage.setItem(`cutoff_${sellerId}`, JSON.stringify(parsed)); } catch {}
 
         if (forceRefresh) {
           bcRef.current?.postMessage({ type: 'shipping_cutoff_refresh_finished', sellerId, data: parsed });
@@ -138,10 +148,13 @@ export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShipping
       console.error('[ShippingCutoff] Error:', e);
       setError(e.message || 'Erro inesperado');
     } finally {
-      setter(false);
-      if (forceRefresh) refreshingRef.current = false;
+      setIsLoading(false);
+      if (forceRefresh) {
+        setIsRefreshing(false);
+        refreshingRef.current = false;
+      }
     }
-  }, [companyId, sellerId, mlUserId]);
+  }, [companyId, sellerId, mlUserId, data]);
 
   useEffect(() => {
     if (sellerId && mlUserId && companyId) {
