@@ -211,19 +211,25 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
-  const [statusFilter, setStatusFilter] = useState<FinalStatus>('all');
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('7d'); // Default: 7 days to include pending shipments from previous days
+  // Restore persisted state for this seller
+  const restored = useMemo(() => sellerId ? loadFiltersState(sellerId) : null, [sellerId]);
+  
+  const [statusFilter, setStatusFilter] = useState<FinalStatus>((restored?.statusFilter as FinalStatus) || 'all');
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>((restored?.periodFilter as PeriodFilter) || '7d');
   const [customDateRange, setCustomDateRange] = useState<DateRange>({ from: null, to: null });
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortField, setSortField] = useState<SortField>('created_at_meli');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState(restored?.searchQuery || '');
+  const [sortField, setSortField] = useState<SortField>((restored?.sortField as SortField) || 'created_at_meli');
+  const [sortDirection, setSortDirection] = useState<SortDirection>((restored?.sortDirection as SortDirection) || 'desc');
+  const [currentPage, setCurrentPage] = useState(restored?.currentPage || 1);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    new Set(restored?.selectedIds || [])
+  );
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncPhase, setSyncPhase] = useState<SyncPhase>('idle');
   const [syncProgress, setSyncProgress] = useState<string>('');
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(INITIAL_GENERATION_PROGRESS);
+  const [isJobGenerating, setIsJobGenerating] = useState(false);
   const [diagnosticInfo, setDiagnosticInfo] = useState<DiagnosticInfo>({
     lastOrderDate: null,
     missingShipments30d: 0,
@@ -234,6 +240,22 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const lastSyncTimeRef = useRef<number>(0);
   const hasAutoSyncedRef = useRef(false);
   const isSilentSyncRef = useRef(false);
+  const jobPollingRef = useRef(false);
+
+  // Persist filters to sessionStorage on change
+  useEffect(() => {
+    if (!sellerId) return;
+    saveFiltersState(sellerId, {
+      statusFilter,
+      periodFilter,
+      searchQuery,
+      sortField,
+      sortDirection,
+      currentPage,
+      logisticFilter: 'all', // logisticFilter is managed by page component
+      selectedIds: Array.from(selectedIds),
+    });
+  }, [sellerId, statusFilter, periodFilter, searchQuery, sortField, sortDirection, currentPage, selectedIds]);
 
   // Reset page when filters change
   useEffect(() => {
