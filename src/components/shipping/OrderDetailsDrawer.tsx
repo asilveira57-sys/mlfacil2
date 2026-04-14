@@ -33,7 +33,9 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
 
   if (!order) return null;
 
-  const canReprint = order.label_available && order.invoice_status === 'emitida' && order.shipment_id;
+  const canReprint = order.label_available && order.shipment_id;
+  const hasInvoice = order.invoice_status === 'emitida';
+  const isFlex = order.logistic_type === 'self_service';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

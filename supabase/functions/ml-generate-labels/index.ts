@@ -721,9 +721,17 @@ serve(async (req) => {
 
       const invoice = invoiceMap.get(shipment.order_id);
       const isFlex = shipment.logistic_type === 'self_service';
+      const hasInvoice = invoice && invoice.invoice_status === 'emitida';
 
-      // Flex shipments don't require NF — skip invoice check
-      if (!isFlex && (!invoice || invoice.invoice_status !== 'emitida')) {
+      // Determine if NF is required based on layout/format
+      // - Flex never requires NF
+      // - 'meli_100x150_no_nf' layout: label-only, NF not required
+      // - ZPL format: label-only, NF not required
+      // - Other PDF layouts (meli_100x150, mlfacil_100x175_header): NF required for non-Flex
+      const isLabelOnlyMode = layout === 'meli_100x150_no_nf' || format === 'zpl';
+      const nfRequired = !isFlex && !isLabelOnlyMode;
+
+      if (nfRequired && !hasInvoice) {
         validationErrors.push({ shipment_id, reason: 'NF não emitida para este pedido' });
         continue;
       }
