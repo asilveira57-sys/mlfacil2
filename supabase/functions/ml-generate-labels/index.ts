@@ -962,9 +962,25 @@ serve(async (req) => {
         console.log(`[HEADER] Built headers for ${headerDataMap.size} shipments (pack-aware)`);
 
         // Build PDF with safe per-shipment pipeline
-        // - mlfacil_100x175_header => header + DANFE
+        // - mlfacil_100x175_header => header + DANFE (but Flex without NF falls back to header-only)
         // - meli_100x150_no_nf => header without DANFE
         const skipDanfe = layout === 'meli_100x150_no_nf';
+        
+        // Build per-shipment skipDanfe set for Flex orders without NF
+        const perShipmentSkipDanfe = new Set<string>();
+        if (layout === 'mlfacil_100x175_header') {
+          for (const sid of validShipmentIds) {
+            const shipment = shipmentMap.get(sid);
+            if (shipment && shipment.logistic_type === 'self_service') {
+              const invoice = invoiceMap.get(shipment.order_id);
+              if (!invoice || invoice.invoice_status !== 'emitida') {
+                perShipmentSkipDanfe.add(sid);
+                console.log(`[HEADER] Flex fallback: shipment ${sid} will skip DANFE (no NF)`);
+              }
+            }
+          }
+        }
+        
         const headerResult = await buildHeaderPdfSafe(
           validShipmentIds,
           mlAccount.access_token,
@@ -972,6 +988,7 @@ serve(async (req) => {
           prefs.font_size,
           updateProgress,
           skipDanfe,
+          perShipmentSkipDanfe,
         );
 
         totalSuccessLabels = headerResult.processedCount;
