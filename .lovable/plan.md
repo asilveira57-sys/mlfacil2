@@ -1,54 +1,55 @@
 
 
-## Permitir Flex + Coleta no mesmo relatório — com NF variável
+## Corrigir bloqueio de impressão de etiquetas Flex sem NF
 
-### Problema real
+### Diagnóstico
 
-O `stripExtraPages` assume que **todos os envios têm o mesmo número de páginas** (`totalPages / shipmentCount`). Quando Flex e Coleta são misturados — e considerando que Flex pode ter NF ou não — essa divisão uniforme quebra a sequência do PDF.
+O problema está na **validação da Edge Function `ml-generate-labels`** (linhas 619-726). O código:
 
-O pipeline "Com Cabeçalho" (`buildHeaderPdfSafe`) já funciona corretamente porque processa **cada envio individualmente**, verificando o `pageCount` real de cada PDF retornado pela API do ML.
+1. Busca os shipments do cache **sem incluir `logistic_type`** na query (linha 621)
+2. Verifica se **todos** os envios têm NF emitida (linhas 722-726)
+3. Se a NF não existe, rejeita o envio com erro "NF não emitida para este pedido"
+
+Envios Flex (`self_service`) **não precisam de NF** — o Mercado Livre não exige. Porém o código não diferencia e bloqueia igualmente.
 
 ### Solução
 
-Converter o pipeline "Padrão ML" para processar **por envio individual** (igual ao header), em vez de batch monolítico. Assim, cada envio é tratado com base no seu `pageCount` real.
+Duas alterações cirúrgicas na Edge Function:
 
-### Alterações
+**1. Incluir `logistic_type` no select do cache** (linha 621)
 
-**1. `src/hooks/useShippingLabels.ts`** — Remover a trava (linhas 933-938)
-- Apagar o bloco que impede mistura Flex + Coleta.
-
-**2. `supabase/functions/ml-generate-labels/index.ts`** — Refatorar pipeline padrão
-
-- Criar função `buildStandardPdfPerShipment` que:
-  - Itera sobre cada `shipmentId` individualmente
-  - Usa `fetchSingleShipmentPdf` (já existe) para baixar o PDF de cada envio
-  - Verifica o `pageCount` real do PDF retornado
-  - **Layout `meli_100x150` (Padrão ML)**: copia página 0 (etiqueta) + página 1 (DANFE) se existir — ignora página 2+ (lista separação)
-  - **Layout `meli_100x150_no_nf` (Sem NF)**: copia somente página 0 (etiqueta)
-  - Concatena tudo em um único PDF final
-- Substituir o trecho de `processBatchWithRetry` + `stripExtraPages` pelo novo fluxo per-shipment
-- Manter delay entre fetches (50ms) para evitar rate limiting
-
-### Sequência resultante (exemplo misto)
-
-```text
-Envio 1 (Coleta, 3 páginas ML): [Etiqueta] [DANFE]     ← ignora pág 2
-Envio 2 (Flex, 1 página ML):    [Etiqueta]              ← sem DANFE
-Envio 3 (Flex, 2 páginas ML):   [Etiqueta] [DANFE]      ← Flex COM NF
-Envio 4 (Coleta, 3 páginas ML): [Etiqueta] [DANFE]      ← ignora pág 2
+Mudar de:
+```
+.select('shipment_id, order_id, label_available')
+```
+Para:
+```
+.select('shipment_id, order_id, label_available, logistic_type')
 ```
 
-Para "Sem NF":
-```text
-Envio 1: [Etiqueta]
-Envio 2: [Etiqueta]
-Envio 3: [Etiqueta]
-Envio 4: [Etiqueta]
+**2. Pular validação de NF para envios Flex** (linhas 722-726)
+
+Antes da verificação de invoice, checar se o envio é Flex (`self_service`). Se for Flex, aceitar o envio mesmo sem NF:
+
+```typescript
+const invoice = invoiceMap.get(shipment.order_id);
+const isFlex = shipment.logistic_type === 'self_service';
+
+// Flex shipments don't require NF — skip invoice check
+if (!isFlex && (!invoice || invoice.invoice_status !== 'emitida')) {
+  validationErrors.push({ shipment_id, reason: 'NF não emitida para este pedido' });
+  continue;
+}
 ```
+
+### Arquivo alterado
+| Arquivo | Alteração |
+|---|---|
+| `supabase/functions/ml-generate-labels/index.ts` | Adicionar `logistic_type` ao select + pular validação de NF para Flex |
 
 ### Impacto
-- `stripExtraPages` deixa de ser usada para esses layouts (pode ser mantida como fallback)
-- Sem alteração de DPI ou dimensões
-- Ordem de seleção do usuário preservada
-- Performance: individual é mais lento que batch, mas já funciona assim no pipeline header sem problemas
+- Flex sem NF: passa na validação e gera etiqueta normalmente
+- Flex com NF: continua funcionando (NF será incluída no PDF se existir)
+- Coleta/outros: mantém a exigência de NF como antes
+- Nenhuma alteração de frontend necessária
 
