@@ -74,17 +74,29 @@ export function BulkActionsBar({
                   Formato PDF
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'meli_100x150')}>
+                <DropdownMenuItem 
+                  onClick={() => onGenerateLabels('pdf', 'meli_100x150')}
+                  disabled={hasOrdersWithoutNf}
+                  className={hasOrdersWithoutNf ? 'opacity-50' : ''}
+                >
                   <span className="font-medium">Padrão ML</span>
-                  <span className="ml-2 text-xs text-muted-foreground">100×150mm</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {hasOrdersWithoutNf ? 'requer NF' : '100×150mm'}
+                  </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'meli_100x150_no_nf')}>
                   <span className="font-medium">Sem NF</span>
                   <span className="ml-2 text-xs text-muted-foreground">somente etiquetas</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'mlfacil_100x175_header')}>
+                <DropdownMenuItem 
+                  onClick={() => onGenerateLabels('pdf', 'mlfacil_100x175_header')}
+                  disabled={hasOrdersWithoutNf}
+                  className={hasOrdersWithoutNf ? 'opacity-50' : ''}
+                >
                   <span className="font-medium">Com Cabeçalho</span>
-                  <span className="ml-2 text-xs text-muted-foreground">etiqueta + NF</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {hasOrdersWithoutNf ? 'requer NF' : 'etiqueta + NF'}
+                  </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
