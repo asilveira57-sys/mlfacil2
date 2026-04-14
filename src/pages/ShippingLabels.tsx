@@ -20,6 +20,7 @@ import { PageContainer } from '@/components/layout/PageContainer';
 import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparationReport';
 import { useMlApiAccess } from '@/components/access/TrialExpiredBanner';
 import { TrialExpiredScreen } from '@/components/shipping/TrialExpiredScreen';
+import { computeSelectionCapabilities, getReprintLayout } from '@/lib/shippingLabelRules';
 
 export default function ShippingLabels() {
   const { t } = useTranslation('shipping');
@@ -144,20 +145,15 @@ export default function ShippingLabels() {
   };
 
   const handleReprintLabel = (shipmentId: string, format: 'pdf' | 'zpl') => {
-    // For single reprint, find order to check NF status
     const order = orders.find(o => o.shipment_id === shipmentId);
-    const hasNf = order?.invoice_status === 'emitida';
-    const isFlex = order?.logistic_type === 'self_service';
-    // If no NF and not Flex, use no_nf layout for PDF
-    const layout: LabelLayout = (format === 'pdf' && !hasNf && !isFlex) ? 'meli_100x150_no_nf' : 'meli_100x150';
+    if (!order) return;
+    const layout = getReprintLayout(order, format);
     generateLabels({ format, layout, shipmentId });
   };
 
-  // Check if any selected orders lack NF and are not Flex
-  const hasOrdersWithoutNf = Array.from(selectedIds).some(id => {
-    const order = orders.find(o => o.id === id);
-    return order && order.invoice_status !== 'emitida' && order.logistic_type !== 'self_service';
-  });
+  // Compute capabilities for selected orders using centralized rules
+  const selectedOrders = orders.filter(o => selectedIds.has(o.id));
+  const capabilities = computeSelectionCapabilities(selectedOrders);
 
   const handleSeparationReport = useCallback(async (mode: SeparationMode) => {
     const selected = orders.filter(o => selectedIds.has(o.id));
@@ -312,7 +308,7 @@ export default function ShippingLabels() {
         onSeparationReport={handleSeparationReport}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
-        hasOrdersWithoutNf={hasOrdersWithoutNf}
+        capabilities={capabilities}
       />
 
       {/* Details Drawer */}

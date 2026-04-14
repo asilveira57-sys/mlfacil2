@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { FileText, Printer, X, Loader2, ChevronDown, ClipboardList } from 'lucide-react';
 import { LabelGenerationProgress, GenerationProgress } from './LabelGenerationProgress';
 import { LabelLayout } from '@/hooks/useShippingLabels';
+import { SelectionCapabilities } from '@/lib/shippingLabelRules';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +19,7 @@ interface BulkActionsBarProps {
   onSeparationReport?: (mode: 'per_order' | 'accumulated') => void;
   isGenerating: boolean;
   generationProgress: GenerationProgress;
-  hasOrdersWithoutNf?: boolean;
+  capabilities: SelectionCapabilities;
 }
 
 export function BulkActionsBar({
@@ -28,7 +29,7 @@ export function BulkActionsBar({
   onSeparationReport,
   isGenerating,
   generationProgress,
-  hasOrdersWithoutNf = false,
+  capabilities,
 }: BulkActionsBarProps) {
   // Show progress bar even when nothing selected (during generation)
   if (selectedCount === 0 && generationProgress.status === 'idle') return null;
@@ -76,12 +77,12 @@ export function BulkActionsBar({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   onClick={() => onGenerateLabels('pdf', 'meli_100x150')}
-                  disabled={hasOrdersWithoutNf}
-                  className={hasOrdersWithoutNf ? 'opacity-50' : ''}
+                  disabled={!capabilities.canStandardPdf.enabled}
+                  className={!capabilities.canStandardPdf.enabled ? 'opacity-50' : ''}
                 >
                   <span className="font-medium">Padrão ML</span>
                   <span className="ml-2 text-xs text-muted-foreground">
-                    {hasOrdersWithoutNf ? 'requer NF' : '100×150mm'}
+                    {!capabilities.canStandardPdf.enabled ? capabilities.canStandardPdf.reason : '100×150mm'}
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'meli_100x150_no_nf')}>
@@ -89,12 +90,12 @@ export function BulkActionsBar({
                 </DropdownMenuItem>
                 <DropdownMenuItem 
                   onClick={() => onGenerateLabels('pdf', 'mlfacil_100x175_header')}
-                  disabled={hasOrdersWithoutNf}
-                  className={hasOrdersWithoutNf ? 'opacity-50' : ''}
+                  disabled={!capabilities.canHeaderPdf.enabled}
+                  className={!capabilities.canHeaderPdf.enabled ? 'opacity-50' : ''}
                 >
                   <span className="font-medium">Com Cabeçalho</span>
                   <span className="ml-2 text-xs text-muted-foreground">
-                    {hasOrdersWithoutNf ? 'requer NF' : 'etiqueta + NF'}
+                    {!capabilities.canHeaderPdf.enabled ? capabilities.canHeaderPdf.reason : 'etiqueta + NF'}
                   </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
