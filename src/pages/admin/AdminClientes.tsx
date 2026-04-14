@@ -103,7 +103,7 @@ export function AdminClientes() {
   const [trialOpen, setTrialOpen] = useState(false);
   const [trialMode, setTrialMode] = useState<'days' | 'date'>('days');
   const [trialDays, setTrialDays] = useState('7');
-  const [trialEndDate, setTrialEndDate] = useState('');
+  const [trialEndDateInput, setTrialEndDateInput] = useState('');
   const [trialClient, setTrialClient] = useState<AdminClient | null>(null);
 
   // Plan change dialog
