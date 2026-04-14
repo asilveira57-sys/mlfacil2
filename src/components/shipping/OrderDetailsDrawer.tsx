@@ -35,9 +35,8 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
   if (!order) return null;
 
   const canReprint = canReprintOrder(order, 'pdf') || canReprintOrder(order, 'zpl');
-  const hasInvoice = order.invoice_status === 'emitida';
-  const isFlex = order.logistic_type === 'self_service';
-  const canPdfStandard = hasInvoice || isFlex;
+  const isFull = order.logistic_type === 'fulfillment';
+  const canPdfStandard = !isFull; // ML API handles available pages; no NF gate needed
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
