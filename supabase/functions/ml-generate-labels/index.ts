@@ -761,9 +761,12 @@ serve(async (req) => {
     }
 
     // Create job record
-    const isHeaderLayout = (layout === 'mlfacil_100x175_header' || layout === 'meli_100x150_no_nf') && format === 'pdf';
-    // Standard PDF layouts now also use per-shipment processing to handle mixed Flex+Coleta
-    const isPerShipmentPdf = (layout === 'meli_100x150' && format === 'pdf');
+    const isPdfLayout = format === 'pdf';
+    const isHeaderLayout = layout === 'mlfacil_100x175_header' && isPdfLayout;
+    // Standard PDF layouts use per-shipment processing to preserve page order and avoid ML separation pages.
+    const isPerShipmentPdf = isPdfLayout && (
+      layout === 'meli_100x150' || layout === 'meli_100x150_no_nf'
+    );
 
     // All PDF layouts: single "batch" covering all shipments (per-shipment processing)
     // ZPL: batch via ML API as before
@@ -772,7 +775,7 @@ serve(async (req) => {
       : chunkArray(validShipmentIds, MAX_BATCH_SIZE);
     const totalBatches = batches.length;
     
-    console.log(`Processing ${validShipmentIds.length} labels in ${totalBatches} batch(es) (header=${isHeaderLayout})`);
+    console.log(`Processing ${validShipmentIds.length} labels in ${totalBatches} batch(es) (header=${isHeaderLayout}, perShipmentPdf=${isPerShipmentPdf})`);
 
     const batchesInitial = batches.map((batch, idx) => ({
       batch_id: idx + 1,
