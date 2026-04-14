@@ -721,16 +721,19 @@ serve(async (req) => {
 
       const invoice = invoiceMap.get(shipment.order_id);
       const isFlex = shipment.logistic_type === 'self_service';
+      const isFull = shipment.logistic_type === 'fulfillment';
       const hasInvoice = invoice && invoice.invoice_status === 'emitida';
 
-      // Determine if NF is required based on layout/format
-      // - Flex never requires NF
-      // - 'mlfacil_100x175_header' requires NF because it includes DANFE
-      // - 'meli_100x150_no_nf' is the header layout without DANFE, so NF is not required
-      // - ZPL is label-only, NF not required
-      const nfRequired = !isFlex && layout === 'mlfacil_100x175_header' && format === 'pdf';
+      // Full orders: never allowed
+      if (isFull) {
+        validationErrors.push({ shipment_id, reason: 'Pedido Full (ML envia)' });
+        continue;
+      }
 
-      if (nfRequired && !hasInvoice) {
+      // "Cabeçalho + DANFE" validation:
+      // - Coleta without NF: blocked (requires NF)
+      // - Flex without NF: allowed, will fallback to header-only (skipDanfe per shipment)
+      if (layout === 'mlfacil_100x175_header' && format === 'pdf' && !hasInvoice && !isFlex) {
         validationErrors.push({ shipment_id, reason: 'NF não emitida para este pedido' });
         continue;
       }

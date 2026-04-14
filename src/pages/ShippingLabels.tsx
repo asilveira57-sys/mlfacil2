@@ -20,7 +20,7 @@ import { PageContainer } from '@/components/layout/PageContainer';
 import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparationReport';
 import { useMlApiAccess } from '@/components/access/TrialExpiredBanner';
 import { TrialExpiredScreen } from '@/components/shipping/TrialExpiredScreen';
-import { computeSelectionCapabilities, getReprintLayout } from '@/lib/shippingLabelRules';
+import { computeSelectionCapabilities } from '@/lib/shippingLabelRules';
 
 export default function ShippingLabels() {
   const { t } = useTranslation('shipping');
@@ -144,10 +144,7 @@ export default function ShippingLabels() {
     generateLabels({ format, layout });
   };
 
-  const handleReprintLabel = (shipmentId: string, format: 'pdf' | 'zpl') => {
-    const order = orders.find(o => o.shipment_id === shipmentId);
-    if (!order) return;
-    const layout = getReprintLayout(order, format);
+  const handleReprintLabel = (shipmentId: string, format: 'pdf' | 'zpl', layout: LabelLayout) => {
     generateLabels({ format, layout, shipmentId });
   };
 
