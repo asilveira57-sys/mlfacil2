@@ -215,6 +215,18 @@ export default function ZPLConverter() {
         return;
       }
 
+      // Validate that every split block contains printable ZPL (^XA...^XZ)
+      const invalidBlocks = labels.filter(block => !/\^XA[\s\S]*?\^XZ/i.test(block));
+      if (invalidBlocks.length > 0) {
+        console.warn(`${invalidBlocks.length} blocks without ^XA/^XZ removed from batch`);
+        const validLabels = labels.filter(block => /\^XA[\s\S]*?\^XZ/i.test(block));
+        if (validLabels.length === 0) {
+          toast.error("O código ZPL não contém etiquetas imprimíveis válidas (faltam marcadores ^XA/^XZ)");
+          setIsConverting(false);
+          return;
+        }
+      }
+
       const qualityLabel = 'normal';
       toast.info(`Processando ${labels.length} etiqueta(s) em qualidade ${qualityLabel}${useVectorPdf ? ' (PDF vetorial)' : ''}...`);
 
