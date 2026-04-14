@@ -1278,7 +1278,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // === SILENT AUTO-REFRESH: Update shipment statuses every 5 minutes ===
   const refreshShipmentStatuses = useCallback(async () => {
-    if (!sellerId || isSyncing) return;
+    if (!sellerId || isSyncing || isJobGenerating || generateLabelsMutation.isPending) return;
 
     try {
       // Query only active shipments (status that can change) from local DB
