@@ -759,11 +759,13 @@ serve(async (req) => {
 
     // Create job record
     const isHeaderLayout = (layout === 'mlfacil_100x175_header' || layout === 'meli_100x150_no_nf') && format === 'pdf';
+    // Standard PDF layouts now also use per-shipment processing to handle mixed Flex+Coleta
+    const isPerShipmentPdf = (layout === 'meli_100x150' && format === 'pdf');
 
-    // For header layout: we process per-shipment (no batching via ML API)
-    // For standard layout: we batch via ML API as before
-    const batches = isHeaderLayout
-      ? [validShipmentIds] // single "batch" covering all shipments
+    // All PDF layouts: single "batch" covering all shipments (per-shipment processing)
+    // ZPL: batch via ML API as before
+    const batches = (isHeaderLayout || isPerShipmentPdf)
+      ? [validShipmentIds]
       : chunkArray(validShipmentIds, MAX_BATCH_SIZE);
     const totalBatches = batches.length;
     
@@ -989,8 +991,101 @@ serve(async (req) => {
         });
         errorBatchCount = 1;
       }
+    } else if (isPerShipmentPdf) {
+      // ===== STANDARD PDF LAYOUT: per-shipment pipeline (handles mixed Flex+Coleta) =====
+      console.log(`[STANDARD] Starting per-shipment pipeline for ${validShipmentIds.length} shipments`);
+      
+      try {
+        const resultPdf = await PDFDocument.create();
+        let processedCount = 0;
+        const errorShipments: string[] = [];
+        const isNoNf = layout === 'meli_100x150_no_nf';
+        
+        for (let idx = 0; idx < validShipmentIds.length; idx++) {
+          const shipmentId = validShipmentIds[idx];
+          
+          // Report progress every 10 shipments
+          if (idx % 10 === 0) {
+            await updateProgress(1, 'processing', 1);
+          }
+          
+          const pdfBytes = await fetchSingleShipmentPdf(shipmentId, mlAccount.access_token);
+          if (!pdfBytes) {
+            console.error(`[STANDARD] BLOCKING: shipment ${shipmentId} failed to download PDF`);
+            errorShipments.push(shipmentId);
+            break;
+          }
+          
+          let sourcePdf: Awaited<ReturnType<typeof PDFDocument.load>>;
+          try {
+            sourcePdf = await PDFDocument.load(pdfBytes);
+          } catch (err) {
+            console.error(`[STANDARD] BLOCKING: shipment ${shipmentId} has invalid PDF`, err);
+            errorShipments.push(shipmentId);
+            break;
+          }
+          
+          const pageCount = sourcePdf.getPageCount();
+          if (pageCount === 0) {
+            console.error(`[STANDARD] BLOCKING: shipment ${shipmentId} PDF has 0 pages`);
+            errorShipments.push(shipmentId);
+            break;
+          }
+          
+          // Page 0: Label — always copy
+          const [labelPage] = await resultPdf.copyPages(sourcePdf, [0]);
+          resultPdf.addPage(labelPage);
+          
+          // Page 1: DANFE — copy if exists and not in no_nf mode
+          if (!isNoNf && pageCount > 1) {
+            const [danfePage] = await resultPdf.copyPages(sourcePdf, [1]);
+            resultPdf.addPage(danfePage);
+          }
+          // Pages 2+: separation lists — always ignored
+          
+          processedCount++;
+          
+          if (idx < validShipmentIds.length - 1) {
+            await sleep(50);
+          }
+        }
+        
+        if (errorShipments.length > 0) {
+          console.error(`[STANDARD] BLOCKED: ${errorShipments.length} shipments failed: ${errorShipments.join(', ')}`);
+          errorBatchCount = 1;
+          totalSuccessLabels = 0;
+          batchResults.push({
+            batch_id: 1,
+            shipment_ids: validShipmentIds,
+            status: 'error',
+            retry_count: 1,
+            error_message: `Geração bloqueada: falha no envio ${errorShipments[0]}. Nenhum PDF foi gerado para evitar erros.`,
+          });
+        } else if (processedCount > 0) {
+          finalPdfBase64 = uint8ArrayToBase64(await resultPdf.save());
+          totalSuccessLabels = processedCount;
+          batchResults.push({
+            batch_id: 1,
+            shipment_ids: validShipmentIds,
+            status: 'success',
+            retry_count: 1,
+          });
+        }
+        
+        console.log(`[STANDARD] Pipeline complete: ${totalSuccessLabels} labels generated`);
+      } catch (stdError) {
+        console.error('[STANDARD] Fatal error in per-shipment pipeline:', stdError);
+        batchResults.push({
+          batch_id: 1,
+          shipment_ids: validShipmentIds,
+          status: 'error',
+          retry_count: 1,
+          error_message: stdError instanceof Error ? stdError.message : 'Unknown error',
+        });
+        errorBatchCount = 1;
+      }
     } else {
-      // ===== STANDARD LAYOUT: batch pipeline (unchanged) =====
+      // ===== ZPL FORMAT: batch pipeline (unchanged) =====
       for (let i = 0; i < batches.length; i++) {
         const batchId = i + 1;
         const result = await processBatchWithRetry(
@@ -1027,30 +1122,8 @@ serve(async (req) => {
         );
       }
 
-      if (format === 'pdf') {
-        const pdfDataArray = successBatches.filter(b => b.pdf_data).map(b => b.pdf_data!);
-        const totalShipments = successBatches.reduce((sum, b) => sum + b.shipment_ids.length, 0);
-        
-        let mergedPdfBytes: Uint8Array;
-        if (pdfDataArray.length > 1) {
-          mergedPdfBytes = await mergePDFs(pdfDataArray);
-        } else {
-          mergedPdfBytes = pdfDataArray[0];
-        }
-        
-        // Strip separation list pages for all layouts
-        if (layout === 'meli_100x150_no_nf') {
-          mergedPdfBytes = new Uint8Array(await stripExtraPages(mergedPdfBytes, totalShipments, 'no_nf'));
-        } else if (layout === 'meli_100x150') {
-          mergedPdfBytes = new Uint8Array(await stripExtraPages(mergedPdfBytes, totalShipments, 'standard'));
-        }
-        
-        finalPdfBase64 = uint8ArrayToBase64(mergedPdfBytes);
-      } else {
-        const zplDataArray = successBatches.filter(b => b.zpl_data).map(b => b.zpl_data!);
-        finalZplContent = mergeZPLs(zplDataArray);
-      }
-
+      const zplDataArray = successBatches.filter(b => b.zpl_data).map(b => b.zpl_data!);
+      finalZplContent = mergeZPLs(zplDataArray);
       totalSuccessLabels = successBatches.reduce((sum, b) => sum + b.shipment_ids.length, 0);
     }
 
