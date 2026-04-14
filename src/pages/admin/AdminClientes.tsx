@@ -471,7 +471,13 @@ export function AdminClientes() {
                             }}>
                               <Link2 className="h-4 w-4 mr-2" /> Copiar link de verificação
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setTrialClient(client); setTrialDays('7'); setTrialOpen(true); }}>
+                            <DropdownMenuItem onClick={() => {
+                              setTrialClient(client);
+                              setTrialDays('7');
+                              setTrialMode('days');
+                              setTrialEndDateInput(client.trial_end_at ? format(new Date(client.trial_end_at), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
+                              setTrialOpen(true);
+                            }}>
                               <CalendarPlus className="h-4 w-4 mr-2" /> Ajustar trial
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => resetTrial.mutate({ userId: client.user_id, reason: 'Reset via Admin Clientes' }, { onSuccess: () => refetch() })}>
