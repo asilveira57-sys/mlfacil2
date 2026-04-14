@@ -63,10 +63,11 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                   <Button
                     size="sm"
                     onClick={() => onReprint(order.shipment_id!, 'pdf')}
-                    disabled={isGenerating}
+                    disabled={isGenerating || (!hasInvoice && !isFlex)}
+                    title={!hasInvoice && !isFlex ? 'NF não emitida — use "Sem NF" ou ZPL' : undefined}
                   >
                     <FileDown className="h-4 w-4 mr-2" />
-                    PDF
+                    PDF Padrão
                   </Button>
                   <Button
                     size="sm"
@@ -78,6 +79,11 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                     ZPL
                   </Button>
                 </div>
+                {!hasInvoice && !isFlex && (
+                  <p className="text-xs text-amber-600 mt-2">
+                    NF não emitida — apenas ZPL disponível para reimpressão individual.
+                  </p>
+                )}
                 <p className="text-xs text-muted-foreground mt-2">
                   A etiqueta será gerada novamente diretamente do Mercado Livre.
                 </p>
