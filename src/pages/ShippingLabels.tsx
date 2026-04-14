@@ -130,11 +130,11 @@ export default function ShippingLabels() {
   useEffect(() => {
     clearSelection();
     if (sellerId) {
-      // Update logisticFilter in persisted state
       const current = loadFiltersState(sellerId);
       if (current) {
-        const { saveFiltersState } = require('@/lib/shippingLabelsSession');
-        saveFiltersState(sellerId, { ...current, logisticFilter });
+        import('@/lib/shippingLabelsSession').then(({ saveFiltersState }) => {
+          saveFiltersState(sellerId, { ...current, logisticFilter });
+        });
       }
     }
   }, [logisticFilter, clearSelection, sellerId]);
