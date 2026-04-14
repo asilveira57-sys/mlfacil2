@@ -108,7 +108,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
 
     const moduleKey = getModuleKeyFromRouteSync(location.pathname);
 
-    const internalBypassRoutes = ['/dashboard', '/settings'];
+    const internalBypassRoutes = ['/dashboard', '/settings', '/admin'];
     if (internalBypassRoutes.includes(location.pathname)) return;
 
     if (!moduleKey) return;
