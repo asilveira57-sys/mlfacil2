@@ -12,7 +12,7 @@ export interface SelectionCapabilities {
   canStandardPdf: LayoutCapability;
   /** PDF Com Cabeçalho (etiqueta + cabeçalho + DANFE) */
   canHeaderPdf: LayoutCapability;
-  /** PDF Somente Etiquetas de envio (sem DANFE) */
+  /** PDF Somente Etiquetas de envio (com cabeçalho, sem DANFE) */
   canNoNfPdf: LayoutCapability;
   /** ZPL (sempre somente etiqueta) */
   canZplStandard: LayoutCapability;
@@ -27,7 +27,7 @@ export interface SelectionCapabilities {
  * - Coleta/Cross-docking (any other logistic_type):
  *   - 'mlfacil_100x175_header': requires NF (header pipeline needs DANFE page)
  *   - 'meli_100x150': does NOT require NF (ML API handles available pages)
- *   - 'meli_100x150_no_nf': does NOT require NF (label-only)
+ *   - 'meli_100x150_no_nf': does NOT require NF (etiqueta com cabeçalho, sem DANFE)
  *   - ZPL: does NOT require NF (label-only)
  */
 function orderNeedsNf(order: ShippingOrder, layout: LabelLayout, format: LabelFormat): boolean {
@@ -97,7 +97,7 @@ export function computeSelectionCapabilities(selectedOrders: ShippingOrder[]): S
  */
 export function getReprintLayout(order: ShippingOrder, format: LabelFormat): LabelLayout {
   if (format === 'zpl') return 'meli_100x150';
-  // PDF: if order doesn't have NF and is not Flex, use label-only
+  // PDF: if order doesn't have NF and is not Flex, use the header-without-DANFE layout
   if (!orderHasNf(order) && !orderIsFlex(order)) return 'meli_100x150_no_nf';
   return 'meli_100x150';
 }
