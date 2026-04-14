@@ -18,6 +18,7 @@ interface BulkActionsBarProps {
   onSeparationReport?: (mode: 'per_order' | 'accumulated') => void;
   isGenerating: boolean;
   generationProgress: GenerationProgress;
+  hasOrdersWithoutNf?: boolean;
 }
 
 export function BulkActionsBar({
@@ -27,6 +28,7 @@ export function BulkActionsBar({
   onSeparationReport,
   isGenerating,
   generationProgress,
+  hasOrdersWithoutNf = false,
 }: BulkActionsBarProps) {
   // Show progress bar even when nothing selected (during generation)
   if (selectedCount === 0 && generationProgress.status === 'idle') return null;
