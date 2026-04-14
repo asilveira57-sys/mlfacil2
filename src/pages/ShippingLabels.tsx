@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparation
 import { useMlApiAccess } from '@/components/access/TrialExpiredBanner';
 import { TrialExpiredScreen } from '@/components/shipping/TrialExpiredScreen';
 import { computeSelectionCapabilities } from '@/lib/shippingLabelRules';
+import { loadFiltersState } from '@/lib/shippingLabelsSession';
 
 export default function ShippingLabels() {
   const { t } = useTranslation('shipping');
@@ -32,7 +33,13 @@ export default function ShippingLabels() {
   
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [logisticFilter, setLogisticFilter] = useState<'all' | 'flex' | 'coleta' | 'full'>('all');
+  // Restore logisticFilter from session
+  const restoredLogistic = useMemo(() => {
+    if (!sellerId) return 'all';
+    const s = loadFiltersState(sellerId);
+    return (s?.logisticFilter as 'all' | 'flex' | 'coleta' | 'full') || 'all';
+  }, [sellerId]);
+  const [logisticFilter, setLogisticFilter] = useState<'all' | 'flex' | 'coleta' | 'full'>(restoredLogistic);
   const { isAdmin } = useUserRole();
   const { allowed: mlAllowed, loading: mlAccessLoading, isTrialExpired } = useMlApiAccess();
   const companyId = activeAccount?.companyId || null;
