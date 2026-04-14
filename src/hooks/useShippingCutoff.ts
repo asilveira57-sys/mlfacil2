@@ -137,6 +137,8 @@ export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShipping
           _raw: result._raw,
         };
         setData(parsed);
+        // Cache in sessionStorage for instant restore on remount
+        try { sessionStorage.setItem(`cutoff_${sellerId}`, JSON.stringify(parsed)); } catch {}
 
         if (forceRefresh) {
           bcRef.current?.postMessage({ type: 'shipping_cutoff_refresh_finished', sellerId, data: parsed });
@@ -146,10 +148,13 @@ export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShipping
       console.error('[ShippingCutoff] Error:', e);
       setError(e.message || 'Erro inesperado');
     } finally {
-      setter(false);
-      if (forceRefresh) refreshingRef.current = false;
+      setIsLoading(false);
+      if (forceRefresh) {
+        setIsRefreshing(false);
+        refreshingRef.current = false;
+      }
     }
-  }, [companyId, sellerId, mlUserId]);
+  }, [companyId, sellerId, mlUserId, data]);
 
   useEffect(() => {
     if (sellerId && mlUserId && companyId) {
