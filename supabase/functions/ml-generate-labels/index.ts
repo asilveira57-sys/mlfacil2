@@ -725,11 +725,10 @@ serve(async (req) => {
 
       // Determine if NF is required based on layout/format
       // - Flex never requires NF
-      // - 'meli_100x150_no_nf' layout: label-only, NF not required
-      // - ZPL format: label-only, NF not required
-      // - Other PDF layouts (meli_100x150, mlfacil_100x175_header): NF required for non-Flex
-      const isLabelOnlyMode = layout === 'meli_100x150_no_nf' || format === 'zpl';
-      const nfRequired = !isFlex && !isLabelOnlyMode;
+      // - Only 'mlfacil_100x175_header' layout requires NF (header pipeline needs DANFE page)
+      // - 'meli_100x150' (standard): ML API handles available pages, no NF needed
+      // - 'meli_100x150_no_nf' and ZPL: label-only, NF not required
+      const nfRequired = !isFlex && layout === 'mlfacil_100x175_header' && format === 'pdf';
 
       if (nfRequired && !hasInvoice) {
         validationErrors.push({ shipment_id, reason: 'NF não emitida para este pedido' });
