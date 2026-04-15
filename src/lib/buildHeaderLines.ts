@@ -10,8 +10,8 @@ const DEFAULT_PREFERENCES = {
   show_sku: true,
   show_variation_attrs: true,
   line_order: ['customer', 'products', 'order', 'comment'],
-  max_product_lines: 3,
-  max_total_lines: 6,
+  max_product_lines: 5,
+  max_total_lines: 8,
   font_size: 9,
 };
 
