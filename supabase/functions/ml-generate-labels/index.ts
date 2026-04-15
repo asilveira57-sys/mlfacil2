@@ -904,7 +904,7 @@ serve(async (req) => {
 
         const { data: itemsData } = await supabaseAdmin
           .from('meli_order_items_cache')
-          .select('order_id, sku, title_short, title, quantity')
+          .select('order_id, sku, title_short, title, quantity, variation_attributes')
           .eq('seller_id', seller_id)
           .in('order_id', allOrderIds);
 
@@ -917,18 +917,16 @@ serve(async (req) => {
         }
 
         // Build header lines for each shipment — aggregate items from ALL sibling orders
-        const headerDataMap = new Map<string, string[]>();
+        const headerDataMap = new Map<string, { text: string; bold: boolean }[]>();
 
         for (const shipmentId of validShipmentIds) {
           const siblingOrderIds = shipmentToOrderIds.get(shipmentId) || [];
           if (siblingOrderIds.length === 0) continue;
 
-          // Use the first order's metadata for buyer info
           const primaryOrder = (allShipmentOrders || []).find(o => o.shipment_id === shipmentId);
           if (!primaryOrder) continue;
 
-          // Aggregate items from ALL sibling orders in this pack
-          const allItems: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[] = [];
+          const allItems: { sku: string | null; title_short: string | null; title: string | null; quantity: number; variation_attributes?: any[] | null }[] = [];
           for (const oid of siblingOrderIds) {
             for (const i of (itemsByOrder.get(oid) || [])) {
               allItems.push({
@@ -936,6 +934,7 @@ serve(async (req) => {
                 title_short: i.title_short,
                 title: i.title,
                 quantity: i.quantity,
+                variation_attributes: (i as any).variation_attributes || null,
               });
             }
           }
