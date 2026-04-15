@@ -70,6 +70,7 @@ const lazyRetry = (factory: () => Promise<any>) =>
   );
 
 const ShippingLabels = lazyRetry(() => import("./pages/ShippingLabels"));
+const LabelTeste = lazyRetry(() => import("./pages/LabelTeste"));
 const LabelHeaderSettings = lazyRetry(() => import("./pages/LabelHeaderSettings"));
 const ZPLConverter = lazyRetry(() => import("./pages/ZPLConverter"));
 const AbcAnalysis = lazyRetry(() => import("./pages/AbcAnalysis"));
@@ -250,6 +251,7 @@ const App = () => {
                   <Route path="/inicio" element={<Home />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/shipping-labels" element={<ShippingEligibilityGuard><ShippingLabels /></ShippingEligibilityGuard>} />
+                  <Route path="/label-teste" element={<LabelTeste />} />
                   <Route path="/shipping-labels/header-settings" element={<ShippingEligibilityGuard><LabelHeaderSettings /></ShippingEligibilityGuard>} />
                   <Route path="/zpl-converter" element={<ShippingEligibilityGuard><ZPLConverter /></ShippingEligibilityGuard>} />
                   <Route path="/abc-analysis" element={<AbcAnalysis />} />
