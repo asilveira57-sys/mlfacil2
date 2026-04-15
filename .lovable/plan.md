@@ -1,74 +1,38 @@
 
 
-# Corrigir Rota de Primeiro Acesso para Clientes Novos e Importados
+# Tratar Falhas de Conexão ML sem Quebrar o Existente
 
-## Problema identificado
+## Situação atual do rafastore
 
-A função `get_or_create_user_access_state` possui um "auto-heal" que marca o onboarding como `completed` sempre que detecta uma **company ativa** ou **ML account ativa**. Isso causa dois problemas:
+O cliente **já está conectado** — a conta ML `RAFA_STORE` foi criada hoje às 14:26, status `connected`, trial ativo. Das 4 tentativas, a última funcionou.
 
-1. **Cliente importado** (criado pelo admin com empresa pré-cadastrada) — ao fazer o primeiro login, a company ativa já existe. O auto-heal marca onboarding como `completed` antes do usuário ver a tela de primeiro acesso. Resultado: vai direto pro Dashboard.
+## Problemas identificados (2 pontos frágeis)
 
-2. **Cliente novo** — se por algum motivo a company é criada antes do onboarding completar (ex: race condition, callback OAuth), o mesmo auto-heal pula o primeiro acesso.
+### 1. Fallback de URL incorreto no `ml-auth-url`
+Linha 102: o fallback hardcoded ainda usa `https://ddec4858-9aec-466d-afd2-b6bd5577a30c.lovableproject.com` — um domínio de projeto antigo. Se o `FRONTEND_URL` secret não estiver configurado E o body não enviar `frontendOrigin`, o callback redireciona para um domínio morto e o usuário perde a sessão.
 
-3. **Clientes que já completaram** (com login anterior + conta ML conectada) — devem continuar pulando normalmente.
+### 2. Redirect fixo para `/primeiro-acesso` no callback
+Linha 470 do `ml-oauth-callback`: após sucesso, **sempre** redireciona para `/primeiro-acesso`. Se o usuário já completou onboarding (reconexão, troca de conta), ele vê a tela de primeiro acesso desnecessariamente — confuso e pode parecer que "não conectou".
 
-## Causa raiz (uma única linha)
+## Correções propostas (mínimas, cirúrgicas)
 
-Na migration mais recente (`20260415011741`), linhas 43-48 e 72-77:
+### Arquivo 1: `supabase/functions/ml-auth-url/index.ts`
+- Trocar o fallback hardcoded de `lovableproject.com` para `https://www.mktpfacil.com` (domínio de produção)
+- Apenas a string na linha 102 muda
 
-```sql
--- Auto-heal: se tem company ativa OU ML account, marca como completed
-EXISTS(SELECT 1 FROM public.companies WHERE user_id = p_user_id AND is_active = true)
-```
-
-Ter uma company ativa **não significa** que o usuário passou pelo onboarding. Pode ter sido criada pelo admin na importação.
-
-## Correção proposta
-
-### 1. Ajustar `get_or_create_user_access_state` (migration SQL)
-
-Remover `companies` como sinal de auto-heal. Manter apenas sinais confiáveis de que o usuário realmente usou o sistema:
-
-- `onboarding_user_progress` com status `completed` (fluxo de welcome cards)
-- `ml_accounts` com `is_active = true` (só existe se o usuário fez OAuth pessoalmente)
-- `onboarding_completed_at IS NOT NULL` no próprio `user_access_state` (só é setado quando o `update_onboarding_state` roda com `status = 'completed'`)
-
-A regra fica:
-- **Auto-heal SIM**: se tem `ml_accounts` ativa OU `onboarding_user_progress` completado OU `onboarding_completed_at` já foi setado antes
-- **Auto-heal NÃO**: ter `companies` ativa sozinha NÃO é suficiente
-
-### 2. Não mexer no frontend
-
-O `ProtectedRoute` e o `PrimeiroAcesso.tsx` estão corretos:
-- `ProtectedRoute` redireciona para `/primeiro-acesso` quando `requiresOnboarding = true`
-- `PrimeiroAcesso` redireciona para `/dashboard` quando `requiresOnboarding = false`
-- `Auth.tsx` redireciona para `/primeiro-acesso` após login
-
-A lógica inteira depende do valor de `requires_onboarding` que vem do banco. Corrigindo o banco, o frontend funciona.
-
-### 3. Não quebrar clientes existentes
-
-A migration NÃO vai alterar nenhum `onboarding_status` existente que já esteja como `completed`. Só muda o critério do auto-heal para novas consultas. Clientes que já passaram pelo onboarding e têm status `completed` continuam inalterados.
-
-**Checklist de segurança:**
-- Clientes com `onboarding_status = 'completed'` → sem alteração, continuam no dashboard
-- Clientes com ML account ativa → auto-heal continua funcionando (ML account = prova de uso real)
-- Clientes importados sem login anterior → auto-heal NÃO dispara (company sozinha não basta)
-- Clientes novos → auto-heal NÃO dispara (não tem nada ainda)
-
-### Arquivo alterado
-
-- Nova migration SQL: reescreve `get_or_create_user_access_state` removendo `companies` do critério de auto-heal
+### Arquivo 2: `supabase/functions/ml-oauth-callback/index.ts`
+- **Redirect inteligente** (linhas 469-474): após salvar a conta com sucesso, verificar no banco se `user_access_state.onboarding_status = 'completed'`. Se sim, redirecionar para `/settings?section=empresas-contas&ml_connected=true`. Se não, manter o redirect para `/primeiro-acesso?ml_connected=true`.
+- **Logging de erro expandido** (linha 89): no bloco de falha do token exchange, logar o status HTTP e o body completo da resposta do ML, para que tentativas futuras deixem rastro nos logs.
 
 ### O que NÃO muda
+- Nenhum arquivo frontend
+- Nenhuma migration SQL
+- O fluxo de PKCE, troca de token e salvamento de conta permanece idêntico
+- A lógica de `mp-auth-url` (fluxo finance) não é tocada
+- O fluxo de primeiro acesso continua funcionando normalmente para quem ainda não completou onboarding
 
-- `ProtectedRoute.tsx` — intacto
-- `PrimeiroAcesso.tsx` — intacto
-- `Auth.tsx` — intacto
-- `useUserAccessState.ts` — intacto
-- `UserAccessContext.tsx` — intacto
-- `get_user_feature_flags` — intacto
-- `get_user_status` — intacto
-- `update_onboarding_state` — intacto
-- Nenhum dado existente é alterado
+### Resumo do impacto
+- Duas edge functions com mudanças cirúrgicas (fallback URL + redirect condicional + logging)
+- Zero risco para clientes existentes — quem já usa não percebe diferença
+- Clientes que reconectam vão direto para a tela certa em vez de ver o primeiro acesso de novo
 
