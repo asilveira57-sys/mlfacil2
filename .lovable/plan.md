@@ -1,59 +1,92 @@
 
+# Restaurar Geração de Etiquetas Agora, sem Quebrar o que Já Funciona
 
-# Normalizar Tamanho de Página das Etiquetas para 10x15cm
+## Leitura do problema
+O que quebrou não foi a regra de seleção nem o fluxo de cabeçalho em si. O ponto mais arriscado foi a mudança recente dentro de `supabase/functions/ml-generate-labels/index.ts`, que passou a mexer no PDF em todos os pipelines para “normalizar” páginas para 10x15.
 
-## Problema
+Hoje a função ficou mais frágil em 2 pontos:
+1. passou a redesenhar páginas que antes só eram copiadas;
+2. a geração é “bloqueio total”: se 1 envio falha, derruba o PDF inteiro.
 
-A API do Mercado Livre retorna PDFs em tamanhos diferentes dependendo da **configuração da conta do vendedor no painel ML**. Vendedores configurados para "impressora térmica" recebem páginas 10x15cm. Vendedores configurados para "folha A4" recebem PDFs em A4 paisagem (842x595pt), com a etiqueta centralizada na folha.
+Para uma conta como `ADECONEX.SP`, que já vinha 10x15 correto, o comportamento ideal era continuar no caminho antigo, sem tocar em nada. Então a forma mais segura de resolver urgente é separar “restaurar operação” de “corrigir contas A4”.
 
-Nosso sistema copia as páginas como vêm do ML, sem normalizar o tamanho. Resultado: contas como MKMODAS e OLGA recebem PDFs A4 quando deveriam receber 10x15.
+## Causa provável
+A normalização foi aplicada cedo demais e de forma ampla demais:
+- entrou no pipeline padrão;
+- entrou no pipeline com cabeçalho;
+- entrou também na DANFE;
+- usa recriação/embedding extra de página, o que aumenta chance de erro;
+- qualquer PDF fora da tolerância cai nesse caminho novo.
 
-## Causa raiz
+Ou seja: a correção para MKMODAS/OLGA acabou interceptando também casos que antes funcionavam.
 
-Nos 3 pipelines de geração (standard, header, e per-shipment), o código usa `copyPages` ou `embedPage` que **preservam** as dimensões originais do PDF do ML. Nenhuma normalização de tamanho é feita.
+## Plano seguro de correção
 
-## Solução proposta
+### Fase 1 — Firebreak imediato
+Reverter apenas a parte da normalização de PDF em `ml-generate-labels` e restaurar o fluxo anterior de cópia simples das páginas.
 
-Criar uma função `normalizePageTo10x15` que é aplicada a cada página baixada do ML **antes** de inseri-la no PDF final. A função:
+O que volta:
+- `copyPages` / `embedPage` como estava antes da normalização;
+- pipeline padrão volta a gerar como antes;
+- pipeline com cabeçalho volta a usar a etiqueta original como base;
+- DANFE volta ao comportamento antigo.
 
-1. Verifica se a página já está no tamanho correto (~283x425pt ±10%). Se sim, retorna sem alteração.
-2. Se a página é maior (A4), usa `embedPage` para **escalar** a página inteira para caber em 283x425pt, mantendo proporção e centralizando.
-3. Funciona tanto para A4 portrait quanto landscape.
+O que permanece:
+- autenticação mais recente da edge function;
+- regras de NF / Flex / Coleta;
+- frontend;
+- seleção de layouts;
+- ZPL.
 
-### Pontos de inserção (3 locais no código)
+Objetivo dessa fase: fazer `ADECONEX.SP` e as contas que já rodavam em 10x15 voltarem a funcionar imediatamente.
 
-1. **`buildHeaderPdfSafe`** (linha 319): Após `embedPage(sourcePdf.getPage(0))`, normalizar `origWidth/origHeight` antes de criar a página com header.
+### Fase 2 — Validação pós-restauração
+Depois do rollback cirúrgico:
+- testar geração PDF padrão;
+- testar “Cabeçalho sem DANFE”;
+- testar “Cabeçalho + DANFE” apenas quando a venda realmente permitir;
+- confirmar que o erro desapareceu na conta problemática principal.
 
-2. **Pipeline standard `isPerShipmentPdf`** (linha 1104): Após `copyPages(sourcePdf, [0])`, verificar tamanho e re-escalar se necessário.
+### Fase 3 — Reintrodução segura da correção A4
+Só depois de tudo estável, reimplementar a solução de MKMODAS/OLGA com abordagem conservadora:
 
-3. **DANFE pages** (linhas 381 e 1109): Normalizar também as páginas de DANFE — se vieram em A4, escalar para 10x15.
+- detectar apenas páginas claramente A4/oversized;
+- não normalizar páginas que já estejam próximas de 10x15;
+- aplicar a normalização só no ponto estritamente necessário;
+- evitar recriar PDF inteiro à toa;
+- manter fallback: se a página não for claramente A4, seguir fluxo antigo.
 
-### Dimensões alvo
+Em outras palavras: a futura correção não será “qualquer coisa fora da tolerância”, e sim “somente quando for evidentemente A4 do ML”.
 
-```text
-10cm x 15cm = 283.46pt x 425.20pt (1pt = 0.3528mm)
-Tolerância: ±15% (241-326pt largura, 361-489pt altura)
-Se fora da tolerância → escalar para caber
-```
+## O que não vou mexer nessa correção urgente
+- `src/lib/shippingLabelRules.ts`
+- regras de habilitação de “Cabeçalho + DANFE”
+- frontend da tela de etiquetas
+- banco/migrations
+- preferências de cabeçalho
+- ZPL
 
-### O que NÃO muda
+## Observação importante sobre o cabeçalho “desabilitado”
+Isso é uma regra separada da falha de geração:
+- Coleta sem NF emitida bloqueia “Cabeçalho + DANFE”;
+- “Cabeçalho sem DANFE” continua sendo o caminho permitido nesses casos.
 
-- Frontend (nenhum arquivo)
-- Lógica de Flex/Coleta/NF
-- Lógica de header (texto, posicionamento, linhas)
-- Lógica de DANFE skip
-- Pipeline ZPL (não é PDF)
-- Nenhuma migration SQL
-- Preferências de cabeçalho
+Então a urgência principal aqui é restaurar a geração; a lógica de habilitação do cabeçalho não deve ser alterada nesse rollback.
 
-### Segurança da mudança
+## Arquivo a ajustar
+- `supabase/functions/ml-generate-labels/index.ts`
 
-- Se a página já é 10x15, a normalização é um no-op (zero impacto)
-- Clientes que já recebem etiquetas corretas não percebem diferença
-- Clientes com A4 passam a receber 10x15 automaticamente
-- A escala é proporcional — nenhum conteúdo é cortado
+## Resultado esperado
+1. a geração volta a funcionar imediatamente para quem já estava correto;
+2. `ADECONEX.SP` volta ao comportamento anterior estável;
+3. a correção de MKMODAS/OLGA será refeita depois, de forma isolada e sem risco para a base toda.
 
-### Arquivo alterado
+## Detalhe técnico
+Implementação segura da Fase 1:
+- remover/desativar `TARGET_WIDTH_PT`, `TARGET_HEIGHT_PT`, `SIZE_TOLERANCE`;
+- remover/desativar `normalizePageTo10x15` e `copyPageNormalized`;
+- restaurar os trechos do pipeline padrão e do header para o fluxo anterior;
+- preservar as mudanças de autenticação da edge function;
+- redeploy só da função `ml-generate-labels`.
 
-- `supabase/functions/ml-generate-labels/index.ts` — adicionar função `normalizePageTo10x15` e aplicar nos 3 pontos de inserção
-
+Essa é a forma mais rápida e menos arriscada de “voltar ao que funcionava” sem desmontar outras correções recentes.
