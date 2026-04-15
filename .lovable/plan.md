@@ -1,45 +1,48 @@
 
 
-# Corrigir Detecção de NF para Pedidos "Reimprimir"
+# Desbloquear MEGATOOLSF — Fail-Open quando Cache Está Vazio
 
-## Problema encontrado
+## Diagnóstico
 
-A venda do DAJUSCEMARA (order `2000015961750872`) tem no banco:
-- `invoice_status = 'pendente'` — a invoice_cache não tem essa NF
-- `shipment_substatus = 'printed'` — o pedido já foi impresso antes
-- `logistic_type = 'xd_drop_off'` — Coleta
+O seller MEGATOOLSF (`seller_id: 127163577`) está com **zero registros** na `meli_orders_cache` — nenhum pedido de qualquer status, em qualquer data. Isso indica que a sincronização de pedidos nunca rodou para essa conta, não que ele não tem vendas.
 
-A função `orderHasNf()` em `shippingLabelRules.ts` verifica:
-1. `invoice_status === 'emitida'` → **falso** (cache sem NF)
-2. `shipment_substatus` em `['ready_to_print', 'invoice_issued', 'invoice_validated', 'not_required']` → **falso** (`printed` não está na lista)
-
-Resultado: o sistema bloqueia "Cabeçalho + DANFE" por achar que não tem NF.
-
-## Causa raiz
-
-Um pedido com substatus `printed`, `ready_for_pickup` ou `in_packing_list` **já passou pela validação fiscal do ML** — é impossível chegar nesses estados sem NF emitida. Porém esses substatuses de "reimprimir" não estão na lista de "NF pronta" do `orderHasNf()`.
+A verificação de elegibilidade (`useShippingEligibility`) faz `COUNT(*) WHERE order_status = 'paid' AND last 30 days`, encontra 0, e bloqueia o acesso.
 
 ## Solução
 
-### 1. Adicionar substatuses de reimprimir na detecção de NF
-Em `src/lib/shippingLabelRules.ts`, na função `orderHasNf()`, incluir `'printed'`, `'ready_for_pickup'` e `'in_packing_list'` na lista de substatuses que indicam NF pronta.
+Aplicar a política de fail-open já existente no projeto: se o cache total do seller está vazio (zero registros em qualquer status/data), considerar como "dados não sincronizados" e liberar o acesso.
+
+## Alteração
+
+**Arquivo:** `src/hooks/useShippingEligibility.ts`
+
+Na `queryFn`, antes de declarar inelegível, verificar se o seller tem **algum** registro no cache. Se não tiver nenhum, é fail-open (cache não populado):
 
 ```typescript
-const readySubstatuses = [
-  'ready_to_print', 'invoice_issued', 'invoice_validated', 'not_required',
-  'printed', 'ready_for_pickup', 'in_packing_list'  // já passou pela validação fiscal
-];
+// Após a query de 30 dias retornar 0...
+if (sales30d === 0) {
+  // Check if cache has ANY orders for this seller (any status, any date)
+  const { count: totalCached } = await supabase
+    .from('meli_orders_cache')
+    .select('*', { count: 'exact', head: true })
+    .eq('seller_id', sellerId);
+
+  if ((totalCached ?? 0) === 0) {
+    // Cache empty = sync never ran, fail-open
+    return { eligible: true, reason: null, sales30d: 0 };
+  }
+}
 ```
 
-### O que NÃO muda
-- Edge function `ml-generate-labels` (zero alteração)
-- Frontend de etiquetas
-- Banco de dados
-- Lógica de geração de PDF/ZPL
-- Outras regras de habilitação
+Se o cache tem registros mas nenhum pago nos últimos 30 dias, aí sim bloqueia (comportamento atual).
 
-### Impacto
-- Pedidos na aba "reimprimir" passam a ter "Cabeçalho + DANFE" habilitado (correto, pois ML já validou)
-- Zero risco para pedidos novos na aba "pronta" — a lógica deles não muda
-- Arquivo: `src/lib/shippingLabelRules.ts` (1 linha)
+## Impacto
+
+- MEGATOOLSF: desbloqueado imediatamente
+- Contas com cache populado: zero mudança
+- Contas novas antes do primeiro sync: acesso liberado (correto)
+- Segurança: mantida — contas com dados reais e sem vendas continuam bloqueadas
+
+## Arquivo alterado
+- `src/hooks/useShippingEligibility.ts` (uma verificação adicional)
 
