@@ -102,7 +102,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (isPublicRoute) {
+    if (isPublicRoute || isAdminRoute || isAdmin) {
       setPlanBlocked(false);
       return;
     }
@@ -111,7 +111,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
 
     const moduleKey = getModuleKeyFromRouteSync(location.pathname);
 
-    const internalBypassRoutes = ['/dashboard', '/settings', '/admin'];
+    const internalBypassRoutes = ['/dashboard', '/settings'];
     if (internalBypassRoutes.includes(location.pathname)) return;
 
     if (!moduleKey) return;
@@ -134,7 +134,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
       setPlanBlocked(true);
       return;
     }
-  }, [combinedLoading, isCollaborator, location.pathname, hasModuleAccess, canAccessModule, hasPlanConfig, navigate, isPublicRoute]);
+  }, [combinedLoading, isCollaborator, isAdmin, location.pathname, hasModuleAccess, canAccessModule, hasPlanConfig, navigate, isPublicRoute, isAdminRoute]);
 
   // Show friendly 403 screen for plan-blocked modules
   if (planBlocked) {
