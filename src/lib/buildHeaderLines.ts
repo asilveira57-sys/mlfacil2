@@ -82,6 +82,7 @@ function buildProductLines(
   items: OrderItem[],
   maxProductLines: number,
   showSku: boolean,
+  showVariationAttrs: boolean,
   maxLineLength = 72
 ): string[] {
   if (items.length === 0) return [];
@@ -94,23 +95,12 @@ function buildProductLines(
     return textA.localeCompare(textB);
   });
 
-  // Format each item: "Nx [SKU] Title" or "Nx Title"
-  const formattedItems = sortedItems.map(item => {
-    const skuPart = showSku && item.sku ? `[${item.sku}] ` : '';
-    const displayText = item.title_short || item.title || item.sku || 'Item';
-    // Reserve space for qty prefix + SKU bracket, truncate title to fit
-    const prefix = `${item.quantity}x ${skuPart}`;
-    const maxTitleLen = maxLineLength - prefix.length;
-    const truncatedTitle = truncate(displayText, Math.max(maxTitleLen, 15));
-    return `${prefix}${truncatedTitle}`;
-  });
-
   const lines: string[] = [];
+  let itemIndex = 0;
 
-  for (let i = 0; i < formattedItems.length; i++) {
+  for (const item of sortedItems) {
     if (lines.length >= maxProductLines) {
-      // Add "+N itens" to last line
-      const remaining = formattedItems.length - i;
+      const remaining = sortedItems.length - itemIndex;
       if (remaining > 0 && lines.length > 0) {
         const suffix = ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}`;
         const lastLine = lines[lines.length - 1];
@@ -123,20 +113,29 @@ function buildProductLines(
       break;
     }
 
-    if (lines.length === maxProductLines - 1 && i < formattedItems.length - 1) {
-      // Last allowed line but more items remain
-      const remaining = formattedItems.length - i - 1;
-      const suffix = remaining > 0 ? ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}` : '';
-      const line = formattedItems[i];
-      if (line.length + suffix.length <= maxLineLength) {
-        lines.push(line + suffix);
-      } else {
-        lines.push(truncate(line, maxLineLength - suffix.length) + suffix);
-      }
-      break;
+    // New format: product title as main line (bold in PDF)
+    const displayTitle = item.title || item.title_short || item.sku || 'Item';
+    lines.push(truncate(displayTitle, maxLineLength));
+
+    // Qty + SKU line: "Quantidade: N - Apelido: SKU"
+    if (lines.length < maxProductLines) {
+      const skuPart = showSku && item.sku ? ` - Apelido: ${item.sku}` : '';
+      lines.push(truncate(`Quantidade: ${item.quantity}${skuPart}`, maxLineLength));
     }
 
-    lines.push(truncate(formattedItems[i], maxLineLength));
+    // Variation attributes: "Cor: X", "Tamanho: Y"
+    if (showVariationAttrs && item.variation_attributes && lines.length < maxProductLines) {
+      for (const attr of item.variation_attributes) {
+        if (lines.length >= maxProductLines) break;
+        const name = attr.name || attr.id || '';
+        const value = attr.value_name || attr.value || '';
+        if (name && value) {
+          lines.push(truncate(`${name}: ${value}`, maxLineLength));
+        }
+      }
+    }
+
+    itemIndex++;
   }
 
   return lines;
@@ -166,6 +165,7 @@ export async function buildHeaderLines(
         show_shipment_id: prefData.show_shipment_id,
         show_comment: prefData.show_comment,
         show_sku: prefData.show_sku ?? true,
+        show_variation_attrs: (prefData as any).show_variation_attrs ?? true,
         line_order: prefData.line_order as string[],
         max_product_lines: prefData.max_product_lines,
         max_total_lines: prefData.max_total_lines,
@@ -184,12 +184,12 @@ export async function buildHeaderLines(
 
   // Customer line
   if (prefs.show_customer && order.buyer_name) {
-    lineContents.customer = [`Cliente: ${sanitize(order.buyer_name, 40)}`];
+    lineContents.customer = [sanitize(order.buyer_name, 40)];
   }
 
   // Products lines — one per item with SKU
   if (prefs.show_products && items.length > 0) {
-    lineContents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku);
+    lineContents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku, prefs.show_variation_attrs);
   }
 
   // Order ID line (use pack_id if available, fallback to order_id)
