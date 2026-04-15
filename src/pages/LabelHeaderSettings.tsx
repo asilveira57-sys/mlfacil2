@@ -102,8 +102,8 @@ export default function LabelHeaderSettings() {
   }, [sellerId]);
 
   // Generate preview lines — customer always first, one product per line with SKU
-  const generatePreviewLines = useCallback((): string[] => {
-    const lineContents: Record<string, string[]> = {
+  const generatePreviewLines = useCallback((): { text: string; bold?: boolean }[] => {
+    const lineContents: Record<string, { text: string; bold?: boolean }[]> = {
       customer: [],
       products: [],
       order: [],
@@ -111,55 +111,51 @@ export default function LabelHeaderSettings() {
     };
 
     if (preferences.show_customer && SAMPLE_ORDER.buyer_name) {
-      lineContents.customer = [`Cliente: ${SAMPLE_ORDER.buyer_name}`];
+      lineContents.customer = [{ text: SAMPLE_ORDER.buyer_name }];
     }
 
     if (preferences.show_products && SAMPLE_ITEMS.length > 0) {
       const sortedItems = [...SAMPLE_ITEMS].sort((a, b) => b.quantity - a.quantity);
-      const lines: string[] = [];
-      const maxLineLength = 70;
+      const lines: { text: string; bold?: boolean }[] = [];
 
       for (let i = 0; i < sortedItems.length; i++) {
-        if (lines.length >= preferences.max_product_lines) {
-          const remaining = sortedItems.length - i;
-          if (remaining > 0 && lines.length > 0) {
-            const suffix = ` +${remaining} itens`;
-            lines[lines.length - 1] = lines[lines.length - 1] + suffix;
-          }
-          break;
-        }
+        if (lines.length >= preferences.max_product_lines) break;
 
         const item = sortedItems[i];
-        const skuPart = preferences.show_sku && item.sku ? `[${item.sku}] ` : '';
-        const displayText = item.title_short || item.title || 'Item';
-        const prefix = `${item.quantity}x ${skuPart}`;
-        const maxTitleLen = maxLineLength - prefix.length;
-        const formatted = `${prefix}${displayText.substring(0, Math.max(maxTitleLen, 15))}`;
+        const displayTitle = item.title || item.title_short || 'Item';
+        lines.push({ text: displayTitle.substring(0, 60), bold: true });
 
-        if (lines.length === preferences.max_product_lines - 1 && i < sortedItems.length - 1) {
-          const remaining = sortedItems.length - i - 1;
-          const suffix = remaining > 0 ? ` +${remaining} itens` : '';
-          lines.push(formatted + suffix);
-          break;
+        if (lines.length < preferences.max_product_lines) {
+          const skuPart = preferences.show_sku && item.sku ? ` - Apelido: ${item.sku}` : '';
+          lines.push({ text: `Quantidade: ${item.quantity}${skuPart}` });
         }
 
-        lines.push(formatted);
+        if (preferences.show_variation_attrs && item.variation_attributes && lines.length < preferences.max_product_lines) {
+          for (const attr of item.variation_attributes) {
+            if (lines.length >= preferences.max_product_lines) break;
+            const name = (attr as any).name || '';
+            const value = (attr as any).value_name || '';
+            if (name && value) {
+              lines.push({ text: `${name}: ${value}` });
+            }
+          }
+        }
       }
 
       lineContents.products = lines;
     }
 
     if (preferences.show_order_id) {
-      lineContents.order = [`Pedido: ${SAMPLE_ORDER.order_id}`];
+      lineContents.order = [{ text: `Pedido: ${SAMPLE_ORDER.order_id}` }];
     }
 
     if (preferences.show_comment && SAMPLE_ORDER.order_comment) {
       const cleanComment = SAMPLE_ORDER.order_comment.substring(0, 50);
-      lineContents.comment = [`Obs: ${cleanComment}...`];
+      lineContents.comment = [{ text: `Obs: ${cleanComment}...` }];
     }
 
     // Customer ALWAYS first, then remaining in configured order
-    const allLines: string[] = [];
+    const allLines: { text: string; bold?: boolean }[] = [];
     if (lineContents.customer.length > 0) {
       for (const line of lineContents.customer) {
         if (allLines.length >= preferences.max_total_lines) break;
