@@ -1,64 +1,92 @@
 
+Objetivo
 
-## Diagnóstico: Reset em massa acidental do onboarding
+Restabelecer acesso total e permanente aos dois e-mails informados (`asilveira57@gmail.com` e `etiquetacapixaba2@gmail.com`) em todo o sistema, inclusive em todos os submenus de `/admin`, sem bloqueio por plano, menu ou permissão operacional.
 
-### Causa raiz confirmada
+Diagnóstico confirmado
 
-Em **13/04/2026 às 21:01 UTC**, a função `admin_bulk_reset_onboarding` foi executada e resetou o `onboarding_status` para `'pending'` em **83 contas** com tag VETERANO que não tinham ML conectado naquele momento.
+Há 2 problemas diferentes acontecendo ao mesmo tempo:
 
-Essas contas **já haviam completado o onboarding** via `/primeiro-acesso`, mas o mecanismo de auto-reparo (`get_or_create_user_access_state`) não consegue reverter porque:
-- A auto-cura depende da tabela `onboarding_user_progress`
-- O fluxo `/primeiro-acesso` grava o status direto em `user_access_state` e **não cria registro** em `onboarding_user_progress`
-- Sem esse registro, o sistema não tem como saber que o onboarding já foi feito
+1. O bypass atual do guard de módulos está incompleto
+- Em `ModuleAccessGuard.tsx`, o bypass só cobre a rota exata `/admin`.
+- Subrotas como `/admin/canal-oficial` continuam passando pela checagem de plano/módulo.
+- Resultado: o usuário entra no admin, mas ao abrir menus internos recebe “Acesso não disponível”, exatamente como no print.
 
-Resultado: ao logar, `get_user_status` retorna `requires_onboarding: true`, e o `ProtectedRoute` redireciona para `/primeiro-acesso`.
+2. O reconhecimento de admin está frágil para esses dois e-mails
+- Existe uma migration antiga que tentou semear esses dois e-mails como admin.
+- Mas ela rodou uma única vez: se a conta ainda não existia naquele momento, o `user_roles` não foi criado e nunca mais foi auto-reparado.
+- Além disso, `useCollaboratorAccess` hoje só dá acesso total para `workspace_members.role = 'admin'`, ignorando o papel global vindo de `user_roles`.
+- Resultado: mesmo sendo admin global, o usuário pode continuar sendo tratado como colaborador limitado em menus/checks internos.
 
-### Plano de correção (3 partes)
+Correção proposta
 
-**1. Correção imediata dos dados (migration SQL)**
+1. Corrigir o bypass de `/admin` inteiro
+- Alterar `ModuleAccessGuard` para ignorar bloqueio por plano em toda a namespace admin:
+  - `/admin`
+  - `/admin/*`
+- Além disso, se o usuário for admin global, o guard não deve aplicar bloqueio por módulo/plano em nenhuma rota.
 
-Reverter os 83 usuários afetados pelo bulk reset de 13/04:
+2. Tornar esses dois e-mails “super admin” de forma canônica no backend
+Criar uma correção de backend que:
+- mantenha esses dois e-mails em whitelist administrativa
+- normalize e compare por e-mail em lowercase/trim
+- garanta/administre o papel `admin` no `user_roles`
+- faça backfill para usuários já existentes
 
-```sql
-UPDATE user_access_state
-SET onboarding_status = 'completed', updated_at = now()
-WHERE onboarding_status = 'pending'
-  AND updated_at BETWEEN '2026-04-13 21:01:00+00' AND '2026-04-13 21:02:00+00';
-```
+Isso evita depender de uma migration antiga que pode ter falhado porque o usuário ainda não existia no momento da execução.
 
-Além disso, corrigir TODOS os usuários com `onboarding_status = 'pending'` que já possuem sinais claros de uso (ML conectado, ou com companies ativas):
+3. Fazer auto-reparo permanente do papel admin
+Ajustar a lógica de autorização para que, se o usuário autenticado tiver um dos dois e-mails permitidos:
+- seja tratado como admin mesmo se o `user_roles` ainda estiver inconsistente
+- e o sistema repare o `user_roles` automaticamente/backfill de forma segura
 
-```sql
-UPDATE user_access_state uas
-SET onboarding_status = 'completed', updated_at = now()
-WHERE uas.onboarding_status = 'pending'
-  AND (
-    uas.ml_account_connected = true
-    OR EXISTS (SELECT 1 FROM companies c WHERE c.user_id = uas.user_id AND c.is_active = true)
-  );
-```
+Assim o problema não volta após login novo, troca de conta ou inconsistência de dados.
 
-**2. Melhorar o auto-reparo em `get_or_create_user_access_state`**
+4. Corrigir a camada de acesso de colaborador
+Em `useCollaboratorAccess`:
+- checar admin global antes de classificar o usuário como colaborador
+- se for admin global, retornar acesso total (`__all__`) e nunca aplicar limitação de perfil/módulo
 
-Adicionar verificação adicional: se `onboarding_status = 'pending'` mas o usuário já tem ML conectado ou company ativa, marcar como `'completed'` automaticamente.
+Isso elimina bloqueios internos em menus, seções e recursos administrativos.
 
-```sql
-IF v_state.onboarding_status = 'pending' THEN
-  -- Check onboarding_user_progress (existing)
-  -- PLUS: check if user has active ML account or company (new)
-  IF v_onboarding_done OR v_ml_account.id IS NOT NULL OR v_company IS NOT NULL THEN
-    UPDATE user_access_state SET onboarding_status = 'completed' ...
-  END IF;
-END IF;
-```
+Arquivos / áreas a alterar
 
-**3. Proteger o `admin_bulk_reset_onboarding` contra uso acidental**
+- `src/components/access/ModuleAccessGuard.tsx`
+- `src/hooks/useCollaboratorAccess.ts`
+- nova migration SQL em `supabase/migrations/...`
 
-Remover a função `admin_bulk_reset_onboarding` por ser perigosa e dispensável. Manter apenas `admin_reset_onboarding` (reset individual) que é mais seguro.
+Mudanças técnicas previstas
 
-### Arquivos alterados
-- Nova migration SQL (correção de dados + rewrite de `get_or_create` + drop do bulk reset)
+1. Migration SQL
+- cadastrar os dois e-mails autorizados como fonte oficial de super admin
+- fazer backfill do `user_roles` para os usuários já existentes
+- endurecer a lógica de admin para não depender só do seed histórico
 
-### Sem mudança no frontend
-O `ProtectedRoute` e `useUserAccessState` estão corretos. O problema é exclusivamente dados corrompidos + falta de auto-reparo robusto.
+2. `ModuleAccessGuard.tsx`
+- trocar bypass exato por bypass de prefixo para `/admin`
+- pular checagem de plano/módulo para admin global
 
+3. `useCollaboratorAccess.ts`
+- incluir checagem de admin global via backend antes da lógica de colaborador/workspace
+- se admin global, devolver acesso total imediatamente
+
+Validação após implementação
+
+1. Logar com `asilveira57@gmail.com`
+- acessar `/admin`
+- abrir `/admin/canal-oficial`
+- abrir outros submenus do admin
+- confirmar que não aparece mais “Acesso não disponível”
+
+2. Repetir com `etiquetacapixaba2@gmail.com`
+
+3. Confirmar também:
+- menu admin aparece normalmente
+- nenhuma tela do admin é filtrada por plano
+- navegação interna entre abas do admin funciona sem bloqueio
+- o acesso total vale para o sistema inteiro, não só para a rota principal do admin
+
+Resultado esperado
+
+Esses dois e-mails passam a ter acesso administrativo total, estável e permanente.
+Nenhuma subrota de admin volta a ser bloqueada por plano/módulo, e o sistema deixa de depender de um seed antigo e frágil para reconhecer esses usuários como admin.
