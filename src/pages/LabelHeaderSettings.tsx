@@ -19,6 +19,7 @@ const DEFAULT_PREFERENCES: HeaderPreferences = {
   show_shipment_id: false,
   show_comment: true,
   show_sku: true,
+  show_variation_attrs: true,
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
@@ -41,9 +42,9 @@ const SAMPLE_ORDER: OrderData = {
 };
 
 const SAMPLE_ITEMS: OrderItem[] = [
-  { sku: 'W11310109', title_short: 'Hélice Espargidor Superior Lava Louça', title: 'Hélice Espargidor Superior Lava Louça Brastemp', quantity: 1 },
-  { sku: 'XYZ-789', title_short: 'Calça Jeans 42', title: 'Calça Jeans Tamanho 42', quantity: 1 },
-  { sku: 'DEF-456', title_short: 'Tênis Branco 40', title: 'Tênis Branco Tamanho 40', quantity: 1 },
+  { sku: 'W11310109', title_short: 'Hélice Espargidor Superior Lava Louça', title: 'Hélice Espargidor Superior Lava Louça Brastemp', quantity: 1, variation_attributes: [{ name: 'Cor', value_name: 'Transparente + Cinza' }] },
+  { sku: 'XYZ-789', title_short: 'Calça Jeans 42', title: 'Calça Jeans Tamanho 42', quantity: 1, variation_attributes: [{ name: 'Tamanho', value_name: '42' }, { name: 'Cor', value_name: 'Azul Escuro' }] },
+  { sku: 'DEF-456', title_short: 'Tênis Branco 40', title: 'Tênis Branco Tamanho 40', quantity: 1, variation_attributes: [{ name: 'Tamanho', value_name: '40' }] },
   { sku: null, title_short: 'Meia Preta Kit 3 pares', title: 'Meia Preta Kit 3 pares', quantity: 3 },
 ];
 
@@ -87,6 +88,7 @@ export default function LabelHeaderSettings() {
           show_shipment_id: prefData.show_shipment_id,
           show_comment: prefData.show_comment,
           show_sku: prefData.show_sku ?? true,
+          show_variation_attrs: (prefData as any).show_variation_attrs ?? true,
           line_order: prefData.line_order as string[],
           max_product_lines: prefData.max_product_lines,
           max_total_lines: prefData.max_total_lines,
