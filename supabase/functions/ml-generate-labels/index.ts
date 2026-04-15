@@ -94,6 +94,26 @@ function truncate(text: string, maxLength: number): string {
   return text.substring(0, maxLength - 3) + '...';
 }
 
+/** Word-wrap a string into lines that fit within maxChars characters */
+function wrapTextLines(text: string, maxChars: number): string[] {
+  if (!text || text.length <= maxChars) return [text];
+  const words = text.split(' ');
+  const result: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (!current) {
+      current = word;
+    } else if (current.length + 1 + word.length <= maxChars) {
+      current += ' ' + word;
+    } else {
+      result.push(current);
+      current = word;
+    }
+  }
+  if (current) result.push(current);
+  return result.length > 0 ? result : [text];
+}
+
 function sanitize(text: string | null | undefined, maxLength = 90): string {
   if (!text) return '';
   return truncate(
