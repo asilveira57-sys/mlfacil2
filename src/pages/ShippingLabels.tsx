@@ -20,6 +20,7 @@ import { PageContainer } from '@/components/layout/PageContainer';
 import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparationReport';
 import { useMlApiAccess } from '@/components/access/TrialExpiredBanner';
 import { TrialExpiredScreen } from '@/components/shipping/TrialExpiredScreen';
+import { useUserAccess } from '@/contexts/UserAccessContext';
 import { computeSelectionCapabilities } from '@/lib/shippingLabelRules';
 import { loadFiltersState } from '@/lib/shippingLabelsSession';
 
