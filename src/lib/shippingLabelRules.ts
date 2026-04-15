@@ -27,7 +27,7 @@ export interface SelectionCapabilities {
 function orderHasNf(order: ShippingOrder): boolean {
   if (order.invoice_status === 'emitida') return true;
   // Marketplace substatus signals that fiscal documentation is ready
-  const readySubstatuses = ['ready_to_print', 'invoice_issued', 'invoice_validated', 'not_required'];
+  const readySubstatuses = ['ready_to_print', 'invoice_issued', 'invoice_validated', 'not_required', 'printed', 'ready_for_pickup', 'in_packing_list'];
   return readySubstatuses.includes(order.shipment_substatus || '');
 }
 
