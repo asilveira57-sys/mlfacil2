@@ -8750,6 +8750,93 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_print_queue_v2: {
+        Row: {
+          batches: Json
+          created_at: string
+          download_filename: string | null
+          duration_ms: number | null
+          error_log: string | null
+          file_url: string | null
+          format: string
+          id: string
+          job_completed_at: string | null
+          job_started_at: string | null
+          layout: string
+          page_height_mm: number | null
+          page_height_pt: number | null
+          page_width_mm: number | null
+          page_width_pt: number | null
+          per_shipment_log: Json | null
+          processed_labels: number
+          seller_id: string
+          shipment_ids: string[]
+          status: string
+          total_labels: number
+          total_pages: number | null
+          updated_at: string
+          user_id: string
+          version: string
+          zpl_content: string | null
+        }
+        Insert: {
+          batches?: Json
+          created_at?: string
+          download_filename?: string | null
+          duration_ms?: number | null
+          error_log?: string | null
+          file_url?: string | null
+          format: string
+          id?: string
+          job_completed_at?: string | null
+          job_started_at?: string | null
+          layout?: string
+          page_height_mm?: number | null
+          page_height_pt?: number | null
+          page_width_mm?: number | null
+          page_width_pt?: number | null
+          per_shipment_log?: Json | null
+          processed_labels?: number
+          seller_id: string
+          shipment_ids?: string[]
+          status?: string
+          total_labels?: number
+          total_pages?: number | null
+          updated_at?: string
+          user_id: string
+          version?: string
+          zpl_content?: string | null
+        }
+        Update: {
+          batches?: Json
+          created_at?: string
+          download_filename?: string | null
+          duration_ms?: number | null
+          error_log?: string | null
+          file_url?: string | null
+          format?: string
+          id?: string
+          job_completed_at?: string | null
+          job_started_at?: string | null
+          layout?: string
+          page_height_mm?: number | null
+          page_height_pt?: number | null
+          page_width_mm?: number | null
+          page_width_pt?: number | null
+          per_shipment_log?: Json | null
+          processed_labels?: number
+          seller_id?: string
+          shipment_ids?: string[]
+          status?: string
+          total_labels?: number
+          total_pages?: number | null
+          updated_at?: string
+          user_id?: string
+          version?: string
+          zpl_content?: string | null
+        }
+        Relationships: []
+      }
       meli_real_costs_sync_state: {
         Row: {
           created_at: string
