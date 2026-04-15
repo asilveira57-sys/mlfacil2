@@ -29,7 +29,7 @@ const MAX_RETRIES = 5;
 const DELAY_BETWEEN_BATCHES_MS = 100;
 
 // Header configuration
-const HEADER_HEIGHT_PT = 65; // ~23mm header area
+const HEADER_HEIGHT_PT = 85; // ~30mm header area (increased for new format)
 const HEADER_PADDING_TOP = 8;
 const HEADER_LINE_HEIGHT_FACTOR = 1.3;
 const SEPARATOR_LINE_Y_OFFSET = 4;
@@ -41,6 +41,7 @@ const DEFAULT_HEADER_PREFS = {
   show_shipment_id: false,
   show_comment: true,
   show_sku: true,
+  show_variation_attrs: true,
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
@@ -103,11 +104,12 @@ function sanitize(text: string | null | undefined, maxLength = 90): string {
 
 // Build product display lines — one item per line with SKU
 function buildProductLines(
-  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[],
+  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number; variation_attributes?: any[] | null }[],
   maxProductLines: number,
   showSku: boolean,
+  showVariationAttrs: boolean,
   maxLineLength = 58
-): string[] {
+): { text: string; bold: boolean }[] {
   if (items.length === 0) return [];
 
   const sorted = [...items].sort((a, b) => {
@@ -115,43 +117,32 @@ function buildProductLines(
     return (a.sku || a.title_short || a.title || '').localeCompare(b.sku || b.title_short || b.title || '');
   });
 
-  // Format each item: "Nx [SKU] Title" — one per line
-  const formatted = sorted.map(item => {
-    const skuPart = showSku && item.sku ? `[${item.sku}] ` : '';
-    const displayText = item.title_short || item.title || item.sku || 'Item';
-    const prefix = `${item.quantity}x ${skuPart}`;
-    const maxTitleLen = maxLineLength - prefix.length;
-    return `${prefix}${truncate(displayText, Math.max(maxTitleLen, 15))}`;
-  });
+  const lines: { text: string; bold: boolean }[] = [];
 
-  const lines: string[] = [];
+  for (const item of sorted) {
+    if (lines.length >= maxProductLines) break;
 
-  for (let i = 0; i < formatted.length; i++) {
-    if (lines.length >= maxProductLines) {
-      const remaining = formatted.length - i;
-      if (remaining > 0 && lines.length > 0) {
-        const suffix = ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}`;
-        const last = lines[lines.length - 1];
-        lines[lines.length - 1] = last.length + suffix.length <= maxLineLength
-          ? last + suffix
-          : truncate(last, maxLineLength - suffix.length) + suffix;
-      }
-      break;
+    // Product title as main line (bold)
+    const displayTitle = item.title || item.title_short || item.sku || 'Item';
+    lines.push({ text: truncate(displayTitle, maxLineLength), bold: true });
+
+    // Qty + SKU line
+    if (lines.length < maxProductLines) {
+      const skuPart = showSku && item.sku ? ` - Apelido: ${item.sku}` : '';
+      lines.push({ text: truncate(`Quantidade: ${item.quantity}${skuPart}`, maxLineLength), bold: false });
     }
 
-    if (lines.length === maxProductLines - 1 && i < formatted.length - 1) {
-      const remaining = formatted.length - i - 1;
-      const suffix = remaining > 0 ? ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}` : '';
-      const line = formatted[i];
-      if (line.length + suffix.length <= maxLineLength) {
-        lines.push(line + suffix);
-      } else {
-        lines.push(truncate(line, maxLineLength - suffix.length) + suffix);
+    // Variation attributes
+    if (showVariationAttrs && item.variation_attributes && lines.length < maxProductLines) {
+      for (const attr of item.variation_attributes) {
+        if (lines.length >= maxProductLines) break;
+        const name = attr?.name || attr?.id || '';
+        const value = attr?.value_name || attr?.value || '';
+        if (name && value) {
+          lines.push({ text: truncate(`${name}: ${value}`, maxLineLength), bold: false });
+        }
       }
-      break;
     }
-
-    lines.push(truncate(formatted[i], maxLineLength));
   }
 
   return lines;
