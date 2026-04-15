@@ -152,9 +152,9 @@ function buildProductLines(
 function buildHeaderLinesForOrder(
   prefs: typeof DEFAULT_HEADER_PREFS,
   order: { order_id: string; shipment_id: string | null; buyer_name: string | null; order_comment: string | null },
-  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[]
-): string[] {
-  const contents: Record<string, string[]> = {
+  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number; variation_attributes?: any[] | null }[]
+): { text: string; bold: boolean }[] {
+  const contents: Record<string, { text: string; bold: boolean }[]> = {
     customer: [],
     products: [],
     order: [],
@@ -163,24 +163,24 @@ function buildHeaderLinesForOrder(
   };
 
   if (prefs.show_customer && order.buyer_name) {
-    contents.customer = [`Cliente: ${sanitize(order.buyer_name, 40)}`];
+    contents.customer = [{ text: sanitize(order.buyer_name, 40), bold: false }];
   }
   if (prefs.show_products && items.length > 0) {
-    contents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku ?? true);
+    contents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku ?? true, prefs.show_variation_attrs ?? true);
   }
   if (prefs.show_order_id) {
-    contents.order = [`Pedido: ${order.order_id}`];
+    contents.order = [{ text: `Pedido: ${order.order_id}`, bold: false }];
   }
   if (prefs.show_shipment_id && order.shipment_id) {
-    contents.shipment = [`Envio: ${order.shipment_id}`];
+    contents.shipment = [{ text: `Envio: ${order.shipment_id}`, bold: false }];
   }
   if (prefs.show_comment && order.order_comment) {
     const clean = sanitize(order.order_comment, 60);
-    if (clean) contents.comment = [`Obs: ${clean}`];
+    if (clean) contents.comment = [{ text: `Obs: ${clean}`, bold: false }];
   }
 
   // Customer ALWAYS first
-  const lines: string[] = [];
+  const lines: { text: string; bold: boolean }[] = [];
   if (contents.customer.length > 0) {
     for (const line of contents.customer) {
       if (lines.length >= prefs.max_total_lines) break;
