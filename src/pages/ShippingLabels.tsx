@@ -246,7 +246,9 @@ export default function ShippingLabels() {
   }
 
   // Show friendly expired screen instead of loading data that will fail
-  if (!mlAllowed && isTrialExpired) {
+  // CRITICAL: Never block if has_active_subscription is true (paid user)
+  const hasActiveSub = flags?.has_active_subscription === true;
+  if (!mlAllowed && isTrialExpired && !hasActiveSub) {
     return <TrialExpiredScreen title={t('title')} />;
   }
 
