@@ -21178,7 +21178,6 @@ export type Database = {
         }
         Returns: Json
       }
-      admin_bulk_reset_onboarding: { Args: never; Returns: Json }
       admin_change_user_plan: {
         Args: { p_plan_tier_id: string; p_target_user_id: string }
         Returns: Json
