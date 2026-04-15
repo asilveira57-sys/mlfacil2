@@ -319,6 +319,19 @@ async function buildHeaderPdfSafe(
         textY -= lineHeight;
       }
       
+      // Draw border box around header area
+      const headerBoxY = origHeight + SEPARATOR_LINE_Y_OFFSET - 1;
+      const headerBoxHeight = newHeight - headerBoxY - 2;
+      newPage.drawRectangle({
+        x: 3,
+        y: headerBoxY,
+        width: origWidth - 6,
+        height: headerBoxHeight,
+        borderColor: rgb(0.15, 0.15, 0.15),
+        borderWidth: 1.0,
+        color: undefined,
+      });
+      
       // Draw separator line between header and label
       const separatorY = origHeight + SEPARATOR_LINE_Y_OFFSET;
       newPage.drawLine({
