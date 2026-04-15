@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useCollaboratorAccess, getModuleKeyFromRouteSync } from '@/hooks/useCollaboratorAccess';
 import { useModuleRouteMap } from '@/hooks/useSystemModules';
 import { useCanAccessModule } from '@/hooks/useCanAccessModule';
+import { useUserRole } from '@/hooks/useUserRole';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModuleAccessDenied } from './ModuleAccessDenied';
