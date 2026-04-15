@@ -141,7 +141,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
     return <ModuleAccessDenied />;
   }
 
-  if (isPublicRoute) {
+  if (isPublicRoute || isAdminRoute || isAdmin) {
     return <>{children}</>;
   }
 
