@@ -29,7 +29,7 @@ const MAX_RETRIES = 5;
 const DELAY_BETWEEN_BATCHES_MS = 100;
 
 // Header configuration
-const HEADER_HEIGHT_PT = 85; // ~30mm header area (increased for new format)
+const HEADER_MIN_HEIGHT_PT = 85; // minimum ~30mm header area
 const HEADER_PADDING_TOP = 8;
 const HEADER_LINE_HEIGHT_FACTOR = 1.3;
 const SEPARATOR_LINE_Y_OFFSET = 4;
