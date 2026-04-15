@@ -1,118 +1,71 @@
-<final-text>
-Objetivo
 
-Corrigir com urgência o bloqueio indevido de clientes pagos no módulo de Etiquetas e eliminar a divergência entre “plano ativo” e “acesso bloqueado”.
 
-Diagnóstico confirmado
+# Melhorar Layout do Cabeçalho das Etiquetas
 
-O pagamento do ADX existe e o direito está ativo.
-Eu confirmei no banco:
+## O que muda
 
-- Conta: `loja@adeconex.com.br`
-- Empresa: `ADX`
-- Plano ativo: `51 a 300 pedidos/mês`
-- Entitlement ativo até: `24/04/2026 11:24 UTC`
-- Pagamento aprovado: `150910495973`
+O cabeçalho atual usa um formato compacto com prefixos genéricos ("Cliente:", "1x [SKU] Título"). O modelo de referência usa um layout mais rico e visual, com título do produto em destaque, atributos de variação, e formatação diferenciada.
 
-Ou seja: o problema não é cobrança nem ausência de plano.
+### Alterações no formato das linhas (sem mudar a estrutura de config existente)
 
-Causa raiz
+**De:**
+```
+Cliente: João da Silva
+1x [W11310109] Hélice Espargidor Superior
+Pedido: 2000005847123456
+Obs: Presente, embrulhar...
+```
 
-Existe uma divergência entre duas camadas de acesso:
+**Para (mais próximo da referência):**
+```
+Hélice Espargidor Superior Lava Louça Brastemp        ← título do produto (bold, maior destaque)
+Quantidade: 1 - Apelido: W11310109                    ← quantidade + SKU no formato "Apelido"
+Priscila Peninck                                      ← nome do comprador sem prefixo
+Cor: Transparente + Cinza                             ← atributos de variação (novo!)
+```
 
-1. `get_user_feature_flags`
-- reconhece corretamente que o cliente está pago
-- retorna:
-  - `has_active_subscription = true`
-  - `can_print_labels = true`
-  - `can_import_sales = true`
+### Mudanças técnicas
 
-2. `check_ml_api_access`
-- ainda está retornando `trial_expired`
-- isso faz a tela de Etiquetas bloquear o usuário aqui:
-  - `src/pages/ShippingLabels.tsx`
-  - condição: `if (!mlAllowed && isTrialExpired) return <TrialExpiredScreen />`
+**1. Edge function `ml-generate-labels/index.ts`**
 
-Resultado:
-- o sistema “sabe” que o cliente está ativo
-- mas a página de Etiquetas usa outra checagem, que contradiz isso
-- por isso o usuário pago vê “Período de teste finalizado”
+- Alterar `buildHeaderLinesForOrder()` para novo formato:
+  - **Produto**: título completo como primeira linha (sem prefixo "Nx")
+  - **Quantidade + SKU**: "Quantidade: N - Apelido: SKU" numa segunda linha
+  - **Cliente**: nome sem prefixo "Cliente:"
+  - **Atributos de variação**: novas linhas "Cor: X", "Tamanho: Y" etc.
+- Buscar `variation_attributes` na query de `meli_order_items_cache` (já existe no banco como JSON)
+- Na renderização PDF:
+  - Primeira linha do produto em `fontBold` com fonte levemente maior
+  - Demais linhas em `font` normal (não bold)
+  - Adicionar borda/caixa ao redor do cabeçalho (drawRectangle)
+  - Aumentar `HEADER_HEIGHT_PT` de 65 para ~85pt para acomodar as linhas extras
 
-Impacto real encontrado
+**2. `src/lib/buildHeaderLines.ts`**
 
-Não é só o ADX.
+- Adicionar `variation_attributes` ao interface `OrderItem`
+- Ajustar `buildProductLines()` para o novo formato (título separado de quantidade+SKU)
+- Adicionar geração de linhas de atributos de variação
 
-Eu confirmei pelo menos 2 clientes pagos afetados agora:
-- `loja@adeconex.com.br` — bloqueado indevidamente com plano `51 a 300`
-- `overlordcomerciobrasil@gmail.com` — também inconsistido; no caso dele há um plano `ZPL Básico`, e hoje a função está classificando como `trial_expired` em vez de classificar corretamente pela regra do plano
+**3. `src/pages/LabelHeaderSettings.tsx`**
 
-Então o bug é sistêmico na função central de acesso da API do ML, não um caso isolado.
+- Atualizar preview para refletir o novo formato
+- Adicionar toggle para "Mostrar atributos de variação" (novo campo `show_variation_attrs`)
+- Atualizar dados de amostra com `variation_attributes`
 
-Plano de correção
+**4. Migration SQL**
 
-1. Corrigir a função de backend `check_ml_api_access`
-Ajustar a lógica para respeitar a mesma prioridade usada no restante do sistema:
-- entitlement ativo deve liberar acesso imediatamente
-- `payment_status = active` não pode cair em `trial_expired`
-- plano ZPL deve retornar motivo correto (`zpl_plan`), nunca `trial_expired`
-- manter resolução por:
-  - `company_users`
-  - `companies.user_id`
-  - `tenant_id`
+- Adicionar coluna `show_variation_attrs` (boolean, default true) em `meli_label_header_preferences`
 
-2. Unificar a regra de acesso da tela de Etiquetas
-Garantir que `/shipping-labels` não dependa de uma interpretação divergente da assinatura.
-A tela deve obedecer a mesma verdade operacional de acesso que já aparece em:
-- histórico de cobrança
-- feature flags
-- status de assinatura
+### O que NÃO muda
 
-3. Corrigir os clientes já afetados
-Executar uma correção de dados para os usuários com:
-- `payment_status = active`
-- mas `check_ml_api_access = trial_expired`
+- Estrutura de layouts (meli_100x150, mlfacil_100x175_header, meli_100x150_no_nf)
+- Lógica de Flex/Coleta/NF
+- Pipeline de geração por shipment
+- Lógica de DANFE
+- Configurações existentes (show_customer, show_products, show_sku, etc.)
+- Drag-and-drop de ordem das linhas
 
-No mínimo:
-- ADX
-- overlordcomerciobrasil@gmail.com
+### Resumo visual
 
-E fazer o auto-heal para que, ao consultar novamente, o estado fique consistente.
+A etiqueta vai ficar visualmente mais próxima do modelo que os clientes pedem: título do produto em destaque, SKU como "Apelido", nome do comprador limpo, e atributos de variação visíveis. Tudo dentro da mesma infraestrutura de cabeçalho que já existe.
 
-4. Fazer varredura preventiva
-Depois da correção, rodar uma checagem para listar qualquer conta com:
-- pagamento ativo ou entitlement ativo
-- mas acesso ML bloqueado
-
-Isso evita que o suporte descubra caso a caso.
-
-Validação após implementação
-
-1. Validar ADX
-- abrir conta `loja@adeconex.com.br`
-- acessar Etiquetas
-- confirmar que não aparece mais “Período de teste finalizado”
-
-2. Validar o segundo caso encontrado
-- confirmar que a conta não cai mais em motivo errado
-- se for ZPL, bloquear pela razão correta do plano, não por trial expirado
-
-3. Validar regressão global
-- consultar novamente quantos clientes pagos continuam bloqueados
-- resultado esperado: `0` casos pagos com `trial_expired`
-
-Arquivos/áreas a ajustar
-
-- `src/pages/ShippingLabels.tsx`
-- migration SQL nova para corrigir:
-  - `public.check_ml_api_access`
-  - eventual auto-heal de estado
-  - backfill dos usuários inconsistentes
-
-Resultado esperado
-
-Depois dessa correção:
-- cliente pago não volta a ver bloqueio de trial expirado
-- ADX volta a usar Etiquetas normalmente
-- o sistema deixa de ter duas “verdades” diferentes sobre acesso
-- você passa a ter uma base limpa para suporte, sem ficar corrigindo cliente por cliente
-</final-text>
