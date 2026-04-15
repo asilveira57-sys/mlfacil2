@@ -231,7 +231,8 @@ export default function LabelHeaderSettings() {
           max_product_lines: preferences.max_product_lines,
           max_total_lines: preferences.max_total_lines,
           font_size: preferences.font_size,
-        }, { onConflict: 'seller_id' });
+          show_variation_attrs: preferences.show_variation_attrs,
+        } as any, { onConflict: 'seller_id' });
 
       if (error) throw error;
 
@@ -328,6 +329,16 @@ export default function LabelHeaderSettings() {
                     checked={preferences.show_sku}
                     onCheckedChange={(checked) => 
                       setPreferences(prev => ({ ...prev, show_sku: checked }))
+                    }
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="show_variation_attrs" className="flex-1">Atributos de Variação (Cor, Tamanho...)</Label>
+                  <Switch
+                    id="show_variation_attrs"
+                    checked={preferences.show_variation_attrs}
+                    onCheckedChange={(checked) => 
+                      setPreferences(prev => ({ ...prev, show_variation_attrs: checked }))
                     }
                   />
                 </div>
