@@ -48,6 +48,104 @@ const DEFAULT_HEADER_PREFS = {
   font_size: 9,
 };
 
+// Target dimensions: 10cm x 15cm in points (1pt = 0.3528mm)
+const TARGET_WIDTH_PT = 283.46;
+const TARGET_HEIGHT_PT = 425.20;
+const SIZE_TOLERANCE = 0.15; // ±15%
+
+/**
+ * Normalizes a PDF page to 10x15cm if it's significantly larger (e.g. A4).
+ * If the page is already within tolerance, returns it as-is (no-op).
+ * Returns a new PDFDocument with a single normalized page.
+ */
+async function normalizePageTo10x15(
+  sourcePdf: Awaited<ReturnType<typeof PDFDocument.load>>,
+  pageIndex: number,
+  targetPdf: Awaited<ReturnType<typeof PDFDocument.create>>
+): Promise<{ page: Awaited<ReturnType<typeof PDFDocument.prototype.embedPage>>; width: number; height: number } | null> {
+  const srcPage = sourcePdf.getPage(pageIndex);
+  const { width: srcW, height: srcH } = srcPage.getSize();
+
+  const minW = TARGET_WIDTH_PT * (1 - SIZE_TOLERANCE);
+  const maxW = TARGET_WIDTH_PT * (1 + SIZE_TOLERANCE);
+  const minH = TARGET_HEIGHT_PT * (1 - SIZE_TOLERANCE);
+  const maxH = TARGET_HEIGHT_PT * (1 + SIZE_TOLERANCE);
+
+  // Already correct size — no normalization needed
+  if (srcW >= minW && srcW <= maxW && srcH >= minH && srcH <= maxH) {
+    return null; // signal: use original flow
+  }
+
+  console.log(`[NORMALIZE] Page ${pageIndex}: ${srcW.toFixed(1)}x${srcH.toFixed(1)}pt → scaling to ${TARGET_WIDTH_PT}x${TARGET_HEIGHT_PT}pt`);
+
+  // Embed the oversized page and scale it down
+  const embedded = await targetPdf.embedPage(srcPage);
+  const scaleX = TARGET_WIDTH_PT / srcW;
+  const scaleY = TARGET_HEIGHT_PT / srcH;
+  const scale = Math.min(scaleX, scaleY); // fit proportionally
+
+  const scaledW = srcW * scale;
+  const scaledH = srcH * scale;
+  const offsetX = (TARGET_WIDTH_PT - scaledW) / 2;
+  const offsetY = (TARGET_HEIGHT_PT - scaledH) / 2;
+
+  const newPage = targetPdf.addPage([TARGET_WIDTH_PT, TARGET_HEIGHT_PT]);
+  newPage.drawPage(embedded, {
+    x: offsetX,
+    y: offsetY,
+    width: scaledW,
+    height: scaledH,
+  });
+
+  return { page: embedded, width: TARGET_WIDTH_PT, height: TARGET_HEIGHT_PT };
+}
+
+/**
+ * Copy a single page from source to target, normalizing to 10x15 if needed.
+ * Returns true if page was added.
+ */
+async function copyPageNormalized(
+  sourcePdf: Awaited<ReturnType<typeof PDFDocument.load>>,
+  pageIndex: number,
+  targetPdf: Awaited<ReturnType<typeof PDFDocument.create>>
+): Promise<boolean> {
+  const srcPage = sourcePdf.getPage(pageIndex);
+  const { width: srcW, height: srcH } = srcPage.getSize();
+
+  const minW = TARGET_WIDTH_PT * (1 - SIZE_TOLERANCE);
+  const maxW = TARGET_WIDTH_PT * (1 + SIZE_TOLERANCE);
+  const minH = TARGET_HEIGHT_PT * (1 - SIZE_TOLERANCE);
+  const maxH = TARGET_HEIGHT_PT * (1 + SIZE_TOLERANCE);
+
+  if (srcW >= minW && srcW <= maxW && srcH >= minH && srcH <= maxH) {
+    // Already correct — copy as-is
+    const [copied] = await targetPdf.copyPages(sourcePdf, [pageIndex]);
+    targetPdf.addPage(copied);
+    return true;
+  }
+
+  // Needs normalization
+  console.log(`[NORMALIZE] Copying page ${pageIndex}: ${srcW.toFixed(1)}x${srcH.toFixed(1)}pt → ${TARGET_WIDTH_PT}x${TARGET_HEIGHT_PT}pt`);
+  const embedded = await targetPdf.embedPage(srcPage);
+  const scaleX = TARGET_WIDTH_PT / srcW;
+  const scaleY = TARGET_HEIGHT_PT / srcH;
+  const scale = Math.min(scaleX, scaleY);
+
+  const scaledW = srcW * scale;
+  const scaledH = srcH * scale;
+  const offsetX = (TARGET_WIDTH_PT - scaledW) / 2;
+  const offsetY = (TARGET_HEIGHT_PT - scaledH) / 2;
+
+  const newPage = targetPdf.addPage([TARGET_WIDTH_PT, TARGET_HEIGHT_PT]);
+  newPage.drawPage(embedded, {
+    x: offsetX,
+    y: offsetY,
+    width: scaledW,
+    height: scaledH,
+  });
+  return true;
+}
+
 // Sleep helper
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
