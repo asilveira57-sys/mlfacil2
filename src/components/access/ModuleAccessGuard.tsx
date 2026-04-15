@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useCollaboratorAccess, getModuleKeyFromRouteSync } from '@/hooks/useCollaboratorAccess';
 import { useModuleRouteMap } from '@/hooks/useSystemModules';
 import { useCanAccessModule } from '@/hooks/useCanAccessModule';
+import { useUserRole } from '@/hooks/useUserRole';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModuleAccessDenied } from './ModuleAccessDenied';
@@ -47,16 +48,18 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   const { isCollaborator, isLoading, hasModuleAccess } = useCollaboratorAccess();
   const { data: routeMap } = useModuleRouteMap();
   const { canAccessModule, hasPlanConfig, isLoading: planLoading } = useCanAccessModule();
+  const { isAdmin, loading: roleLoading } = useUserRole();
   const [timedOut, setTimedOut] = useState(false);
   const [planBlocked, setPlanBlocked] = useState(false);
   const hasResolvedOnceRef = useRef(false);
 
-  const combinedLoading = isLoading || planLoading;
+  const combinedLoading = isLoading || planLoading || roleLoading;
   const isPublicRoute =
     location.pathname === '/' ||
     PUBLIC_ROUTE_PREFIXES.some((prefix) =>
       location.pathname === prefix || location.pathname.startsWith(`${prefix}/`),
     );
+  const isAdminRoute = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
 
   useEffect(() => {
     if (!combinedLoading) hasResolvedOnceRef.current = true;
@@ -99,7 +102,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (isPublicRoute) {
+    if (isPublicRoute || isAdminRoute || isAdmin) {
       setPlanBlocked(false);
       return;
     }
@@ -108,7 +111,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
 
     const moduleKey = getModuleKeyFromRouteSync(location.pathname);
 
-    const internalBypassRoutes = ['/dashboard', '/settings', '/admin'];
+    const internalBypassRoutes = ['/dashboard', '/settings'];
     if (internalBypassRoutes.includes(location.pathname)) return;
 
     if (!moduleKey) return;
@@ -131,14 +134,14 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
       setPlanBlocked(true);
       return;
     }
-  }, [combinedLoading, isCollaborator, location.pathname, hasModuleAccess, canAccessModule, hasPlanConfig, navigate, isPublicRoute]);
+  }, [combinedLoading, isCollaborator, isAdmin, location.pathname, hasModuleAccess, canAccessModule, hasPlanConfig, navigate, isPublicRoute, isAdminRoute]);
 
   // Show friendly 403 screen for plan-blocked modules
   if (planBlocked) {
     return <ModuleAccessDenied />;
   }
 
-  if (isPublicRoute) {
+  if (isPublicRoute || isAdminRoute || isAdmin) {
     return <>{children}</>;
   }
 

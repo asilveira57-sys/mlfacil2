@@ -66,6 +66,16 @@ export function useCollaboratorAccess(): CollaboratorAccess {
         return;
       }
 
+      // Check global admin role first (super-admin bypass)
+      const { data: roleData } = await supabase.rpc('get_user_role', { _user_id: user.id });
+      if (roleData === 'admin') {
+        setIsCollaborator(false);
+        setEnabledModules(new Set(['__all__']));
+        setIsLoading(false);
+        initialLoadDoneRef.current = true;
+        return;
+      }
+
       // Check if user is a workspace admin (they have full access)
       const { data: memberData } = await supabase
         .from('workspace_members')
