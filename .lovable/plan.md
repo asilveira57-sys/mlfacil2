@@ -1,92 +1,118 @@
-
+<final-text>
 Objetivo
 
-Restabelecer acesso total e permanente aos dois e-mails informados (`asilveira57@gmail.com` e `etiquetacapixaba2@gmail.com`) em todo o sistema, inclusive em todos os submenus de `/admin`, sem bloqueio por plano, menu ou permissão operacional.
+Corrigir com urgência o bloqueio indevido de clientes pagos no módulo de Etiquetas e eliminar a divergência entre “plano ativo” e “acesso bloqueado”.
 
 Diagnóstico confirmado
 
-Há 2 problemas diferentes acontecendo ao mesmo tempo:
+O pagamento do ADX existe e o direito está ativo.
+Eu confirmei no banco:
 
-1. O bypass atual do guard de módulos está incompleto
-- Em `ModuleAccessGuard.tsx`, o bypass só cobre a rota exata `/admin`.
-- Subrotas como `/admin/canal-oficial` continuam passando pela checagem de plano/módulo.
-- Resultado: o usuário entra no admin, mas ao abrir menus internos recebe “Acesso não disponível”, exatamente como no print.
+- Conta: `loja@adeconex.com.br`
+- Empresa: `ADX`
+- Plano ativo: `51 a 300 pedidos/mês`
+- Entitlement ativo até: `24/04/2026 11:24 UTC`
+- Pagamento aprovado: `150910495973`
 
-2. O reconhecimento de admin está frágil para esses dois e-mails
-- Existe uma migration antiga que tentou semear esses dois e-mails como admin.
-- Mas ela rodou uma única vez: se a conta ainda não existia naquele momento, o `user_roles` não foi criado e nunca mais foi auto-reparado.
-- Além disso, `useCollaboratorAccess` hoje só dá acesso total para `workspace_members.role = 'admin'`, ignorando o papel global vindo de `user_roles`.
-- Resultado: mesmo sendo admin global, o usuário pode continuar sendo tratado como colaborador limitado em menus/checks internos.
+Ou seja: o problema não é cobrança nem ausência de plano.
 
-Correção proposta
+Causa raiz
 
-1. Corrigir o bypass de `/admin` inteiro
-- Alterar `ModuleAccessGuard` para ignorar bloqueio por plano em toda a namespace admin:
-  - `/admin`
-  - `/admin/*`
-- Além disso, se o usuário for admin global, o guard não deve aplicar bloqueio por módulo/plano em nenhuma rota.
+Existe uma divergência entre duas camadas de acesso:
 
-2. Tornar esses dois e-mails “super admin” de forma canônica no backend
-Criar uma correção de backend que:
-- mantenha esses dois e-mails em whitelist administrativa
-- normalize e compare por e-mail em lowercase/trim
-- garanta/administre o papel `admin` no `user_roles`
-- faça backfill para usuários já existentes
+1. `get_user_feature_flags`
+- reconhece corretamente que o cliente está pago
+- retorna:
+  - `has_active_subscription = true`
+  - `can_print_labels = true`
+  - `can_import_sales = true`
 
-Isso evita depender de uma migration antiga que pode ter falhado porque o usuário ainda não existia no momento da execução.
+2. `check_ml_api_access`
+- ainda está retornando `trial_expired`
+- isso faz a tela de Etiquetas bloquear o usuário aqui:
+  - `src/pages/ShippingLabels.tsx`
+  - condição: `if (!mlAllowed && isTrialExpired) return <TrialExpiredScreen />`
 
-3. Fazer auto-reparo permanente do papel admin
-Ajustar a lógica de autorização para que, se o usuário autenticado tiver um dos dois e-mails permitidos:
-- seja tratado como admin mesmo se o `user_roles` ainda estiver inconsistente
-- e o sistema repare o `user_roles` automaticamente/backfill de forma segura
+Resultado:
+- o sistema “sabe” que o cliente está ativo
+- mas a página de Etiquetas usa outra checagem, que contradiz isso
+- por isso o usuário pago vê “Período de teste finalizado”
 
-Assim o problema não volta após login novo, troca de conta ou inconsistência de dados.
+Impacto real encontrado
 
-4. Corrigir a camada de acesso de colaborador
-Em `useCollaboratorAccess`:
-- checar admin global antes de classificar o usuário como colaborador
-- se for admin global, retornar acesso total (`__all__`) e nunca aplicar limitação de perfil/módulo
+Não é só o ADX.
 
-Isso elimina bloqueios internos em menus, seções e recursos administrativos.
+Eu confirmei pelo menos 2 clientes pagos afetados agora:
+- `loja@adeconex.com.br` — bloqueado indevidamente com plano `51 a 300`
+- `overlordcomerciobrasil@gmail.com` — também inconsistido; no caso dele há um plano `ZPL Básico`, e hoje a função está classificando como `trial_expired` em vez de classificar corretamente pela regra do plano
 
-Arquivos / áreas a alterar
+Então o bug é sistêmico na função central de acesso da API do ML, não um caso isolado.
 
-- `src/components/access/ModuleAccessGuard.tsx`
-- `src/hooks/useCollaboratorAccess.ts`
-- nova migration SQL em `supabase/migrations/...`
+Plano de correção
 
-Mudanças técnicas previstas
+1. Corrigir a função de backend `check_ml_api_access`
+Ajustar a lógica para respeitar a mesma prioridade usada no restante do sistema:
+- entitlement ativo deve liberar acesso imediatamente
+- `payment_status = active` não pode cair em `trial_expired`
+- plano ZPL deve retornar motivo correto (`zpl_plan`), nunca `trial_expired`
+- manter resolução por:
+  - `company_users`
+  - `companies.user_id`
+  - `tenant_id`
 
-1. Migration SQL
-- cadastrar os dois e-mails autorizados como fonte oficial de super admin
-- fazer backfill do `user_roles` para os usuários já existentes
-- endurecer a lógica de admin para não depender só do seed histórico
+2. Unificar a regra de acesso da tela de Etiquetas
+Garantir que `/shipping-labels` não dependa de uma interpretação divergente da assinatura.
+A tela deve obedecer a mesma verdade operacional de acesso que já aparece em:
+- histórico de cobrança
+- feature flags
+- status de assinatura
 
-2. `ModuleAccessGuard.tsx`
-- trocar bypass exato por bypass de prefixo para `/admin`
-- pular checagem de plano/módulo para admin global
+3. Corrigir os clientes já afetados
+Executar uma correção de dados para os usuários com:
+- `payment_status = active`
+- mas `check_ml_api_access = trial_expired`
 
-3. `useCollaboratorAccess.ts`
-- incluir checagem de admin global via backend antes da lógica de colaborador/workspace
-- se admin global, devolver acesso total imediatamente
+No mínimo:
+- ADX
+- overlordcomerciobrasil@gmail.com
+
+E fazer o auto-heal para que, ao consultar novamente, o estado fique consistente.
+
+4. Fazer varredura preventiva
+Depois da correção, rodar uma checagem para listar qualquer conta com:
+- pagamento ativo ou entitlement ativo
+- mas acesso ML bloqueado
+
+Isso evita que o suporte descubra caso a caso.
 
 Validação após implementação
 
-1. Logar com `asilveira57@gmail.com`
-- acessar `/admin`
-- abrir `/admin/canal-oficial`
-- abrir outros submenus do admin
-- confirmar que não aparece mais “Acesso não disponível”
+1. Validar ADX
+- abrir conta `loja@adeconex.com.br`
+- acessar Etiquetas
+- confirmar que não aparece mais “Período de teste finalizado”
 
-2. Repetir com `etiquetacapixaba2@gmail.com`
+2. Validar o segundo caso encontrado
+- confirmar que a conta não cai mais em motivo errado
+- se for ZPL, bloquear pela razão correta do plano, não por trial expirado
 
-3. Confirmar também:
-- menu admin aparece normalmente
-- nenhuma tela do admin é filtrada por plano
-- navegação interna entre abas do admin funciona sem bloqueio
-- o acesso total vale para o sistema inteiro, não só para a rota principal do admin
+3. Validar regressão global
+- consultar novamente quantos clientes pagos continuam bloqueados
+- resultado esperado: `0` casos pagos com `trial_expired`
+
+Arquivos/áreas a ajustar
+
+- `src/pages/ShippingLabels.tsx`
+- migration SQL nova para corrigir:
+  - `public.check_ml_api_access`
+  - eventual auto-heal de estado
+  - backfill dos usuários inconsistentes
 
 Resultado esperado
 
-Esses dois e-mails passam a ter acesso administrativo total, estável e permanente.
-Nenhuma subrota de admin volta a ser bloqueada por plano/módulo, e o sistema deixa de depender de um seed antigo e frágil para reconhecer esses usuários como admin.
+Depois dessa correção:
+- cliente pago não volta a ver bloqueio de trial expirado
+- ADX volta a usar Etiquetas normalmente
+- o sistema deixa de ter duas “verdades” diferentes sobre acesso
+- você passa a ter uma base limpa para suporte, sem ficar corrigindo cliente por cliente
+</final-text>
