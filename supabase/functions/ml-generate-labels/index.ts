@@ -703,7 +703,9 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get('Authorization');
+    console.log('[ml-generate-labels] Request received, auth header present:', !!authHeader);
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('[ml-generate-labels] Missing or invalid authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -720,8 +722,9 @@ serve(async (req) => {
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     
     if (userError || !user) {
+      console.error('[ml-generate-labels] Auth failed:', userError?.message || 'No user returned');
       return new Response(
-        JSON.stringify({ error: 'User not authenticated' }),
+        JSON.stringify({ error: 'User not authenticated', details: userError?.message }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
