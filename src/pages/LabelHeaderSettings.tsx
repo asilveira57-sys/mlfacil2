@@ -519,7 +519,7 @@ export default function LabelHeaderSettings() {
                     >
                       {previewLines.length > 0 ? (
                         previewLines.map((line, i) => (
-                          <div key={i} className="truncate">{line}</div>
+                          <div key={i} className={`truncate ${line.bold ? 'font-bold' : ''}`}>{line.text}</div>
                         ))
                       ) : (
                         <div className="text-muted-foreground italic text-center">
