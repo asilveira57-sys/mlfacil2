@@ -29,7 +29,7 @@ const MAX_RETRIES = 5;
 const DELAY_BETWEEN_BATCHES_MS = 100;
 
 // Header configuration
-const HEADER_HEIGHT_PT = 85; // ~30mm header area (increased for new format)
+const HEADER_MIN_HEIGHT_PT = 85; // minimum ~30mm header area
 const HEADER_PADDING_TOP = 8;
 const HEADER_LINE_HEIGHT_FACTOR = 1.3;
 const SEPARATOR_LINE_Y_OFFSET = 4;
@@ -43,8 +43,8 @@ const DEFAULT_HEADER_PREFS = {
   show_sku: true,
   show_variation_attrs: true,
   line_order: ['customer', 'products', 'order', 'comment'],
-  max_product_lines: 3,
-  max_total_lines: 6,
+  max_product_lines: 5,
+  max_total_lines: 8,
   font_size: 9,
 };
 
@@ -94,6 +94,26 @@ function truncate(text: string, maxLength: number): string {
   return text.substring(0, maxLength - 3) + '...';
 }
 
+/** Word-wrap a string into lines that fit within maxChars characters */
+function wrapTextLines(text: string, maxChars: number): string[] {
+  if (!text || text.length <= maxChars) return [text];
+  const words = text.split(' ');
+  const result: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (!current) {
+      current = word;
+    } else if (current.length + 1 + word.length <= maxChars) {
+      current += ' ' + word;
+    } else {
+      result.push(current);
+      current = word;
+    }
+  }
+  if (current) result.push(current);
+  return result.length > 0 ? result : [text];
+}
+
 function sanitize(text: string | null | undefined, maxLength = 90): string {
   if (!text) return '';
   return truncate(
@@ -122,9 +142,13 @@ function buildProductLines(
   for (const item of sorted) {
     if (lines.length >= maxProductLines) break;
 
-    // Product title as main line (bold)
-    const displayTitle = item.title || item.title_short || item.sku || 'Item';
-    lines.push({ text: truncate(displayTitle, maxLineLength), bold: true });
+    // Product title — wrap to multiple lines instead of truncating
+    const displayTitle = sanitize(item.title || item.title_short || item.sku || 'Item', 200);
+    const titleWrapped = wrapTextLines(displayTitle, maxLineLength);
+    for (const tl of titleWrapped) {
+      if (lines.length >= maxProductLines) break;
+      lines.push({ text: tl, bold: true });
+    }
 
     // Qty + SKU line
     if (lines.length < maxProductLines) {
@@ -296,15 +320,19 @@ async function buildHeaderPdfSafe(
     const { width: origWidth, height: origHeight } = embeddedPage;
     
     if (headerLines.length > 0) {
+      // Calculate dynamic header height based on number of lines
+      const lineHeight = fontSize * HEADER_LINE_HEIGHT_FACTOR;
+      const calculatedHeight = HEADER_PADDING_TOP + (headerLines.length * lineHeight) + SEPARATOR_LINE_Y_OFFSET + 6;
+      const headerHeight = Math.max(HEADER_MIN_HEIGHT_PT, calculatedHeight);
+      
       // Create taller page with header
-      const newHeight = origHeight + HEADER_HEIGHT_PT;
+      const newHeight = origHeight + headerHeight;
       const newPage = resultPdf.addPage([origWidth, newHeight]);
       
       // Draw original label at the bottom
       newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
       
-      // Draw header text in the top area
-      const lineHeight = fontSize * HEADER_LINE_HEIGHT_FACTOR;
+      // Draw header text in the top area (no maxWidth — text is pre-wrapped)
       let textY = newHeight - HEADER_PADDING_TOP - fontSize;
       
       for (const line of headerLines) {
@@ -314,7 +342,6 @@ async function buildHeaderPdfSafe(
           size: line.bold ? fontSize + 1 : fontSize,
           font: line.bold ? fontBold : font,
           color: rgb(0, 0, 0),
-          maxWidth: origWidth - 16,
         });
         textY -= lineHeight;
       }
