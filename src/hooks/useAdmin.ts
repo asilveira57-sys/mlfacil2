@@ -221,22 +221,7 @@ export function useAdminTrialManagement() {
     },
   });
 
-  const bulkResetOnboarding = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase.rpc('admin_bulk_reset_onboarding');
-      if (error) throw error;
-      const result = data as unknown as { success: boolean; reset_count?: number; error?: string };
-      if (!result.success) throw new Error(result.error || 'Erro no reset em massa');
-      return result;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'clients'] });
-      toast.success(`Onboarding resetado para ${(data as any).reset_count || 0} veteranos`);
-    },
-    onError: (error) => {
-      toast.error(`Erro no reset em massa: ${error.message}`);
-    },
-  });
+  // bulkResetOnboarding removed — function was dropped to prevent accidental mass resets
 
   const changeUserPlan = useMutation({
     mutationFn: async ({ userId, planTierId }: { userId: string; planTierId: string }) => {
@@ -289,7 +274,7 @@ export function useAdminTrialManagement() {
     },
   });
 
-  return { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan };
+  return { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan };
 }
 
 // Onboarding Cards

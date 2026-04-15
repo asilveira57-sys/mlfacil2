@@ -53,7 +53,7 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan } = useAdminTrialManagement();
 
   const PLAN_TIERS = [
     { id: 'a0000000-0000-0000-0000-000000000001', name: 'ZPL Básico' },
@@ -263,9 +263,6 @@ export function AdminClientes() {
         </div>
         <Button variant="outline" size="sm" onClick={() => refetch()}>
           <RefreshCw className="h-4 w-4 mr-1" /> Atualizar
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => bulkResetOnboarding.mutate(undefined, { onSuccess: () => refetch() })} disabled={bulkResetOnboarding.isPending}>
-          <RotateCcw className="h-4 w-4 mr-1" /> Resetar Veteranos
         </Button>
       </div>
 
