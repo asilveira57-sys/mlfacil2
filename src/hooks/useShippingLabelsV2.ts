@@ -5,6 +5,7 @@ import { useToast } from '@/hooks/use-toast';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { startOfDay, endOfDay, subDays } from 'date-fns';
 import { toast as sonnerToast } from 'sonner';
+import { saveActiveJob, loadActiveJob, clearActiveJob, type ActivePrintJob } from '@/lib/shippingLabelsSession';
 
 // Re-export shared types from V1
 export type { OrderItemSummary } from '@/hooks/useShippingLabels';
@@ -16,6 +17,11 @@ const BRASILIA_TZ = 'America/Sao_Paulo';
 const PAGE_SIZE = 30;
 const SHIPMENT_SYNC_BATCH = 200;
 const INVOICE_SYNC_BATCH = 300;
+
+/** How long to poll for a "not found" job before giving up (ms) */
+const JOB_RECOVERY_TIMEOUT_MS = 90_000;
+/** Polling interval during recovery (ms) */
+const JOB_POLL_INTERVAL_MS = 3_000;
 
 const INITIAL_PROGRESS: GenerationProgress = {
   status: 'idle', total_labels: 0, processed_labels: 0,
@@ -52,6 +58,11 @@ async function fetchAllRowsPaginated<T>(
     offset += batchSize;
   }
   return all;
+}
+
+/** Check if a job status is terminal */
+function isTerminalStatus(status: string): boolean {
+  return ['completed', 'partial', 'error', 'failed', 'cancelled'].includes(status);
 }
 
 interface UseShippingLabelsV2Options {
@@ -96,7 +107,188 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const [isJobGenerating, setIsJobGenerating] = useState(false);
   const lastSyncTimeRef = useRef(0);
   const hasAutoSyncedRef = useRef(false);
+  const recoveryAbortRef = useRef<AbortController | null>(null);
 
+  // ─── Active job tracking ───────────────────────────────────────────
+  // On mount: check if there's a persisted active job and recover it
+  const activeJobRef = useRef<ActivePrintJob | null>(null);
+
+  /**
+   * Whether we currently have an active (non-terminal) generation job.
+   * Used to suppress auto-refresh, auto-sync, and refetchOnMount.
+   */
+  const hasActiveJob = isJobGenerating || !!activeJobRef.current;
+
+  // ─── Recovery on mount ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!sellerId) return;
+    const persisted = loadActiveJob();
+    if (!persisted || persisted.sellerId !== sellerId) return;
+
+    // Restore UI state
+    activeJobRef.current = persisted;
+    setIsJobGenerating(true);
+    setGenerationProgress({
+      status: 'processing',
+      total_labels: persisted.shipmentIds.length,
+      processed_labels: 0,
+      total_batches: 1,
+      completed_batches: 0,
+      error_batches: 0,
+    });
+
+    // If we already had completed data cached, use it
+    if (persisted.completedData) {
+      handleGenerationComplete(persisted.completedData, persisted.format);
+      return;
+    }
+
+    // Otherwise poll the job
+    const abort = new AbortController();
+    recoveryAbortRef.current = abort;
+    pollJobUntilDone(persisted.jobId, persisted.format, abort.signal);
+
+    return () => { abort.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sellerId]);
+
+  // Cleanup abort on unmount
+  useEffect(() => {
+    return () => { recoveryAbortRef.current?.abort(); };
+  }, []);
+
+  // ─── Poll a print job until terminal status ────────────────────────
+  async function pollJobUntilDone(jobId: string, format: string, signal: AbortSignal) {
+    const startedAt = Date.now();
+    let notFoundCount = 0;
+
+    while (!signal.aborted) {
+      await sleep(JOB_POLL_INTERVAL_MS);
+      if (signal.aborted) return;
+
+      const elapsed = Date.now() - startedAt;
+
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) continue;
+
+        const { data, error } = await supabase.functions.invoke('ml-generate-labels-status', {
+          headers,
+          body: { job_id: jobId },
+        });
+
+        if (error || !data) {
+          notFoundCount++;
+          // Resilient: don't clear on transient "not found" — keep polling
+          if (elapsed > JOB_RECOVERY_TIMEOUT_MS && notFoundCount > 5) {
+            console.warn('[V2] Job recovery timed out after', elapsed, 'ms');
+            finalizeJob('error');
+            return;
+          }
+          continue;
+        }
+
+        // Reset not-found counter on any successful response
+        notFoundCount = 0;
+
+        const status = data.status as string;
+        setGenerationProgress({
+          status: isTerminalStatus(status) ? (status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'error') : 'processing',
+          total_labels: data.total_labels || 0,
+          processed_labels: data.processed_labels || 0,
+          total_batches: data.total_batches || 1,
+          completed_batches: data.completed_batches || 0,
+          error_batches: data.error_batches || 0,
+        });
+
+        if (isTerminalStatus(status)) {
+          if (data.file_url) {
+            // Download the file
+            handleGenerationComplete(data, format);
+          } else {
+            finalizeJob(status as any);
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('[V2] Poll error:', err);
+        // Continue polling on transient errors
+      }
+    }
+  }
+
+  function handleGenerationComplete(data: any, format: string) {
+    setIsJobGenerating(false);
+    activeJobRef.current = null;
+    clearActiveJob();
+
+    const status = data.error_batches > 0 ? 'partial' : 'completed';
+    setGenerationProgress({
+      status,
+      total_labels: data.total_labels || 0,
+      processed_labels: data.total_labels || 0,
+      total_batches: 1,
+      completed_batches: 1,
+      error_batches: data.error_batches || 0,
+    });
+
+    // Download file if available
+    if (format === 'pdf' && data.pdf_base64) {
+      downloadPdf(data.pdf_base64, data.download_filename);
+      toast({ title: 'PDF gerado (V2)', description: `${data.total_labels} etiqueta(s) — ${data.page_width_mm || 100}x${data.page_height_mm || 150}mm` });
+    } else if (format === 'zpl' && data.zpl_content) {
+      downloadZpl(data.zpl_content, data.download_filename);
+      toast({ title: 'ZPL gerado (V2)', description: `${data.total_labels} etiqueta(s)` });
+    } else if (data.file_url) {
+      // Fallback: open file URL
+      window.open(data.file_url, '_blank');
+      toast({ title: 'Etiqueta gerada (V2)', description: `${data.total_labels} etiqueta(s)` });
+    }
+
+    if (data.error_batches > 0) {
+      toast({ title: 'Atenção', description: `${data.error_batches} envio(s) falharam`, variant: 'destructive' });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
+    setTimeout(() => setGenerationProgress(INITIAL_PROGRESS), 3000);
+  }
+
+  function finalizeJob(status: 'completed' | 'partial' | 'error' | string) {
+    setIsJobGenerating(false);
+    activeJobRef.current = null;
+    clearActiveJob();
+    setGenerationProgress(prev => ({ ...prev, status: status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'error' }));
+    if (status === 'error') {
+      toast({ title: 'Erro na geração', description: 'Job não concluiu com sucesso.', variant: 'destructive' });
+    }
+    queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
+    setTimeout(() => setGenerationProgress(INITIAL_PROGRESS), 3000);
+  }
+
+  function downloadPdf(base64: string, filename?: string) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || `etiquetas_v2_${Date.now()}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadZpl(content: string, filename?: string) {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || `etiquetas_v2_${Date.now()}.zpl`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ─── Date range ────────────────────────────────────────────────────
   useEffect(() => { setCurrentPage(1); }, [statusFilter, periodFilter, customDateRange, searchQuery, sortField, sortDirection]);
 
   const getDateRange = useCallback((): { dateFrom: string | null; dateTo: string | null } => {
@@ -119,7 +311,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     return { dateFrom: dateFrom?.toISOString() ?? null, dateTo: dateTo?.toISOString() ?? null };
   }, [periodFilter, customDateRange]);
 
-  // Main orders query
+  // ─── Main orders query ─────────────────────────────────────────────
+  // CRITICAL: disable refetchOnMount and refetchOnReconnect while generating
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders-v2', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
@@ -144,6 +337,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     enabled: !!sellerId,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
+    refetchOnMount: !hasActiveJob,
+    refetchOnReconnect: !hasActiveJob,
     placeholderData: (prev: any) => prev,
   });
 
@@ -170,7 +365,6 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         arr.push({ item_id: item.item_id, variation_id: item.variation_id, variation_attributes: item.variation_attributes, sku: item.sku, title_short: item.title_short, title: item.title, quantity: item.quantity, unit_price: item.unit_price, permalink: item.permalink, catalog_product_id: item.catalog_product_id, thumbnail: item.thumbnail });
         rawByOrder.set(item.order_id, arr);
       });
-      // Shipment-to-orders mapping for packs
       const s2o = new Map<string, string[]>();
       for (const o of orders) { if (o.shipment_id) { const e = s2o.get(o.shipment_id) || []; if (!e.includes(o.order_id)) e.push(o.order_id); s2o.set(o.shipment_id, e); } }
       if (packShipmentIds.length > 0) {
@@ -192,10 +386,12 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     },
     enabled: !!sellerId && orders.length > 0,
     staleTime: 60000,
+    refetchOnMount: !hasActiveJob,
+    refetchOnReconnect: !hasActiveJob,
   });
   const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();
 
-  // Sync pipeline (reuses V1 edge functions)
+  // ─── Sync pipeline ─────────────────────────────────────────────────
   const waitForJob = useCallback(async (jobId: string, silent: boolean, maxAttempts = 22): Promise<boolean> => {
     let attempts = 0;
     let notFound = 0;
@@ -212,6 +408,12 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   }, []);
 
   const startSyncPipeline = useCallback(async (silent = false) => {
+    // CRITICAL: block sync while a generation job is active
+    if (hasActiveJob) {
+      if (!silent) console.info('[V2] Sync blocked — active generation job');
+      return;
+    }
+
     const now = Date.now();
     if (isSyncing || (now - lastSyncTimeRef.current) < 5000) return;
     lastSyncTimeRef.current = now;
@@ -233,12 +435,10 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       for (let i = 0; i < allShipmentIds.length; i += 200) { const batch = allShipmentIds.slice(i, i + 200); const { data: ex } = await supabase.from('meli_shipments_cache').select('shipment_id').eq('seller_id', sellerId).in('shipment_id', batch); (ex || []).forEach((s: any) => existingSet.add(s.shipment_id)); }
       const missing = allShipmentIds.filter(id => !existingSet.has(id));
       if (missing.length > 0) { for (let i = 0; i < missing.length; i += SHIPMENT_SYNC_BATCH) { const batch = missing.slice(i, i + SHIPMENT_SYNC_BATCH); if (!silent) setSyncProgress(`Envios ${Math.floor(i / SHIPMENT_SYNC_BATCH) + 1}/${Math.ceil(missing.length / SHIPMENT_SYNC_BATCH)}`); const r = await supabase.functions.invoke('ml-sync-shipments', { headers, body: { seller_id: sellerId, shipment_ids: batch } }); if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED'); if (r.data?.job_id) await waitForJob(r.data.job_id, silent); if (i + SHIPMENT_SYNC_BATCH < missing.length) await sleep(500); } }
-      // Re-check active
       if (!silent) setSyncProgress('Atualizando status...');
       const { data: active } = await supabase.from('meli_shipments_cache').select('shipment_id').eq('seller_id', sellerId).in('shipment_status', ['ready_to_ship', 'handling', 'pending']).order('last_sync_at', { ascending: true }).limit(150);
       const activeIds = (active || []).map((s: any) => s.shipment_id);
       if (activeIds.length > 0) { for (let i = 0; i < activeIds.length; i += SHIPMENT_SYNC_BATCH) { const batch = activeIds.slice(i, i + SHIPMENT_SYNC_BATCH); const r = await supabase.functions.invoke('ml-sync-shipments', { headers, body: { seller_id: sellerId, shipment_ids: batch } }); if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED'); if (r.data?.job_id) await waitForJob(r.data.job_id, silent); } }
-      // Invoices
       if (!silent) { setSyncPhase('invoices'); setSyncProgress('Sincronizando NFs...'); }
       if (orderIds.length > 0) { const { data: exInv } = await supabase.from('meli_invoices_cache').select('order_id').eq('seller_id', sellerId).in('order_id', orderIds); const invoiced = new Set((exInv || []).map((i: any) => i.order_id)); const pending = orderIds.filter(id => !invoiced.has(id)); if (pending.length > 0) { for (let i = 0; i < pending.length; i += INVOICE_SYNC_BATCH) { const batch = pending.slice(i, i + INVOICE_SYNC_BATCH); const r = await supabase.functions.invoke('ml-sync-invoices', { headers, body: { seller_id: sellerId, order_ids: batch } }); if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED'); if (r.data?.job_id) await waitForJob(r.data.job_id, silent); } } }
       setLastSyncAt(new Date().toISOString());
@@ -250,11 +450,11 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       if (error.message === 'TRIAL_EXPIRED') { sonnerToast.error('Período de teste expirou.', { id: 'trial-expired' }); } else if (!silent) { toast({ title: 'Erro na sincronização', description: error.message, variant: 'destructive' }); }
       setIsSyncing(false); setSyncPhase('idle'); setSyncProgress('');
     }
-  }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, waitForJob]);
+  }, [hasActiveJob, isSyncing, sellerId, getDateRange, refetch, queryClient, toast, waitForJob]);
 
-  // Auto sync on mount
+  // Auto sync on mount — blocked during generation
   useEffect(() => {
-    if (!sellerId || hasAutoSyncedRef.current) return;
+    if (!sellerId || hasAutoSyncedRef.current || hasActiveJob) return;
     hasAutoSyncedRef.current = true;
     const check = async () => {
       const { data: scheduler } = await supabase.from('sync_scheduler').select('last_run_at').eq('job_name', 'shipping-labels-sync').maybeSingle();
@@ -266,9 +466,9 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     };
     const t = setTimeout(check, 300);
     return () => clearTimeout(t);
-  }, [sellerId, startSyncPipeline]);
+  }, [sellerId, startSyncPipeline, hasActiveJob]);
 
-  // Label generation — calls V2 edge function
+  // ─── Label generation — V2 edge function ───────────────────────────
   const generateLabelsMutation = useMutation({
     mutationFn: async ({ format, layout, shipmentId }: { format: 'pdf' | 'zpl'; layout: LabelLayout; shipmentId?: string }) => {
       if (!sellerId) throw new Error('Seller ID not set');
@@ -285,6 +485,18 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       setGenerationProgress({ status: 'processing', total_labels: shipmentIds.length, processed_labels: 0, total_batches: 1, completed_batches: 0, error_batches: 0 });
       setIsJobGenerating(true);
 
+      // Persist active job BEFORE the call so we can recover on navigation
+      const jobEntry: ActivePrintJob = {
+        jobId: 'pending', // will update after response
+        sellerId,
+        format,
+        layout,
+        shipmentIds,
+        startedAt: new Date().toISOString(),
+      };
+      activeJobRef.current = jobEntry;
+      saveActiveJob(jobEntry);
+
       // Call V2 edge function
       const response = await supabase.functions.invoke('ml-generate-labels-v2', {
         headers,
@@ -296,42 +508,25 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         if (ve && ve.length > 0) { const reasons = [...new Set(ve.map(e => e.reason))]; throw new Error(`${ve.length} envio(s) inválido(s): ${reasons.join('; ')}`); }
         throw new Error(response.data.message || 'Erro ao gerar etiquetas');
       }
+
+      // Update persisted job with real job_id and completed data
+      if (response.data.job_id) {
+        jobEntry.jobId = response.data.job_id;
+      }
+      jobEntry.completedData = response.data;
+      saveActiveJob(jobEntry);
+
       return response.data;
     },
     onSuccess: (data, variables) => {
-      setIsJobGenerating(false);
       if (!variables.shipmentId) setSelectedIds(new Set());
-      setGenerationProgress({ status: data.error_batches > 0 ? 'partial' : 'completed', total_labels: data.total_labels || 0, processed_labels: data.total_labels || 0, total_batches: 1, completed_batches: 1, error_batches: data.error_batches || 0 });
-      // Download
-      if (variables.format === 'pdf' && data.pdf_base64) {
-        const binary = atob(data.pdf_base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const blob = new Blob([bytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = data.download_filename || `etiquetas_v2_${Date.now()}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: 'PDF gerado (V2)', description: `${data.total_labels} etiqueta(s) — ${data.page_width_mm || 100}x${data.page_height_mm || 150}mm` });
-      } else if (variables.format === 'zpl' && data.zpl_content) {
-        const blob = new Blob([data.zpl_content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = data.download_filename || `etiquetas_v2_${Date.now()}.zpl`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: 'ZPL gerado (V2)', description: `${data.total_labels} etiqueta(s)` });
-      }
-      if (data.error_batches > 0) toast({ title: 'Atenção', description: `${data.error_batches} envio(s) falharam`, variant: 'destructive' });
-      queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
-      setTimeout(() => setGenerationProgress(INITIAL_PROGRESS), 3000);
+      handleGenerationComplete(data, variables.format);
     },
     onError: (error: any) => {
       console.error('V2 generate error:', error);
       setIsJobGenerating(false);
+      activeJobRef.current = null;
+      clearActiveJob();
       setGenerationProgress(prev => ({ ...prev, status: 'error' }));
       toast({ title: 'Erro ao gerar etiquetas', description: error.message, variant: 'destructive' });
       setTimeout(() => setGenerationProgress(INITIAL_PROGRESS), 3000);
