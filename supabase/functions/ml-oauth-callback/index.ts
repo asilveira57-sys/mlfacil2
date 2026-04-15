@@ -85,8 +85,8 @@ serve(async (req) => {
     });
 
     if (!tokenResponse.ok) {
-      const error = await tokenResponse.text();
-      console.error('Token exchange failed:', error);
+      const errorBody = await tokenResponse.text();
+      console.error('Token exchange failed — status:', tokenResponse.status, '| body:', errorBody);
       
       const errorUrl = new URL(`${frontendOrigin}${errorRedirectPath}`);
       errorUrl.searchParams.set(errorParamName, 'token_exchange_failed');
@@ -466,8 +466,24 @@ serve(async (req) => {
       }
     );
 
-    // Redirect to onboarding flow (it will detect ml_connected and show import step)
-    const redirectUrl = new URL(`${frontendOrigin}/primeiro-acesso`);
+    // Smart redirect: if user already completed onboarding, go to settings; otherwise primeiro-acesso
+    let redirectPath = '/primeiro-acesso';
+    try {
+      const { data: accessState } = await supabaseAdmin
+        .from('user_access_state')
+        .select('onboarding_status')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (accessState?.onboarding_status === 'completed') {
+        redirectPath = '/settings?section=empresas-contas';
+        console.log('User already completed onboarding, redirecting to settings');
+      }
+    } catch (e) {
+      console.warn('Could not check onboarding status, defaulting to primeiro-acesso');
+    }
+
+    const redirectUrl = new URL(`${frontendOrigin}${redirectPath}`);
     redirectUrl.searchParams.set('ml_connected', 'true');
     redirectUrl.searchParams.set('nickname', userData.nickname || '');
     

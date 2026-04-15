@@ -99,7 +99,7 @@ serve(async (req) => {
 
     // 4. Final fallback - use the preview URL pattern
     if (!frontendOrigin || frontendOrigin.includes('lovable.dev')) {
-      const previewUrl = Deno.env.get('FRONTEND_URL') || 'https://ddec4858-9aec-466d-afd2-b6bd5577a30c.lovableproject.com';
+      const previewUrl = Deno.env.get('FRONTEND_URL') || 'https://www.mktpfacil.com';
       frontendOrigin = previewUrl;
     }
 
