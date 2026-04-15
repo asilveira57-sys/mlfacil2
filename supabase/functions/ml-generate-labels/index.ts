@@ -320,15 +320,19 @@ async function buildHeaderPdfSafe(
     const { width: origWidth, height: origHeight } = embeddedPage;
     
     if (headerLines.length > 0) {
+      // Calculate dynamic header height based on number of lines
+      const lineHeight = fontSize * HEADER_LINE_HEIGHT_FACTOR;
+      const calculatedHeight = HEADER_PADDING_TOP + (headerLines.length * lineHeight) + SEPARATOR_LINE_Y_OFFSET + 6;
+      const headerHeight = Math.max(HEADER_MIN_HEIGHT_PT, calculatedHeight);
+      
       // Create taller page with header
-      const newHeight = origHeight + HEADER_HEIGHT_PT;
+      const newHeight = origHeight + headerHeight;
       const newPage = resultPdf.addPage([origWidth, newHeight]);
       
       // Draw original label at the bottom
       newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
       
-      // Draw header text in the top area
-      const lineHeight = fontSize * HEADER_LINE_HEIGHT_FACTOR;
+      // Draw header text in the top area (no maxWidth — text is pre-wrapped)
       let textY = newHeight - HEADER_PADDING_TOP - fontSize;
       
       for (const line of headerLines) {
@@ -338,7 +342,6 @@ async function buildHeaderPdfSafe(
           size: line.bold ? fontSize + 1 : fontSize,
           font: line.bold ? fontBold : font,
           color: rgb(0, 0, 0),
-          maxWidth: origWidth - 16,
         });
         textY -= lineHeight;
       }
