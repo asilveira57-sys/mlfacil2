@@ -48,6 +48,20 @@ export function useShippingEligibility(): ShippingEligibility {
       }
 
       const sales30d = count ?? 0;
+
+      // Fail-open: if cache is completely empty, sync never ran — don't block
+      if (sales30d === 0) {
+        const { count: totalCached } = await supabase
+          .from('meli_orders_cache')
+          .select('*', { count: 'exact', head: true })
+          .eq('seller_id', sellerId);
+
+        if ((totalCached ?? 0) === 0) {
+          logEligibility(sellerId, true, 'cache_empty_failopen', 0);
+          return { eligible: true, reason: null, sales30d: 0 };
+        }
+      }
+
       const eligible = sales30d > 0;
       const reason = !eligible ? 'no_sales_30d' : null;
 
