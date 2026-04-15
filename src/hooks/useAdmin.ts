@@ -274,7 +274,7 @@ export function useAdminTrialManagement() {
     },
   });
 
-  return { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, bulkResetOnboarding, changeUserPlan };
+  return { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan };
 }
 
 // Onboarding Cards
