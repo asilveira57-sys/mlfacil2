@@ -20,6 +20,7 @@ import { PageContainer } from '@/components/layout/PageContainer';
 import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparationReport';
 import { useMlApiAccess } from '@/components/access/TrialExpiredBanner';
 import { TrialExpiredScreen } from '@/components/shipping/TrialExpiredScreen';
+import { useUserAccess } from '@/contexts/UserAccessContext';
 import { computeSelectionCapabilities } from '@/lib/shippingLabelRules';
 import { loadFiltersState } from '@/lib/shippingLabelsSession';
 
@@ -42,6 +43,7 @@ export default function ShippingLabels() {
   const [logisticFilter, setLogisticFilter] = useState<'all' | 'flex' | 'coleta' | 'full'>(restoredLogistic);
   const { isAdmin } = useUserRole();
   const { allowed: mlAllowed, loading: mlAccessLoading, isTrialExpired } = useMlApiAccess();
+  const { flags } = useUserAccess();
   const companyId = activeAccount?.companyId || null;
 
   // Shipping cutoff
@@ -244,7 +246,9 @@ export default function ShippingLabels() {
   }
 
   // Show friendly expired screen instead of loading data that will fail
-  if (!mlAllowed && isTrialExpired) {
+  // CRITICAL: Never block if has_active_subscription is true (paid user)
+  const hasActiveSub = flags?.has_active_subscription === true;
+  if (!mlAllowed && isTrialExpired && !hasActiveSub) {
     return <TrialExpiredScreen title={t('title')} />;
   }
 
