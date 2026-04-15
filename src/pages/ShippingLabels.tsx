@@ -43,6 +43,7 @@ export default function ShippingLabels() {
   const [logisticFilter, setLogisticFilter] = useState<'all' | 'flex' | 'coleta' | 'full'>(restoredLogistic);
   const { isAdmin } = useUserRole();
   const { allowed: mlAllowed, loading: mlAccessLoading, isTrialExpired } = useMlApiAccess();
+  const { flags } = useUserAccess();
   const companyId = activeAccount?.companyId || null;
 
   // Shipping cutoff
