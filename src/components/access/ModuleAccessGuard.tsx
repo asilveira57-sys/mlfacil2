@@ -48,16 +48,18 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   const { isCollaborator, isLoading, hasModuleAccess } = useCollaboratorAccess();
   const { data: routeMap } = useModuleRouteMap();
   const { canAccessModule, hasPlanConfig, isLoading: planLoading } = useCanAccessModule();
+  const { isAdmin, loading: roleLoading } = useUserRole();
   const [timedOut, setTimedOut] = useState(false);
   const [planBlocked, setPlanBlocked] = useState(false);
   const hasResolvedOnceRef = useRef(false);
 
-  const combinedLoading = isLoading || planLoading;
+  const combinedLoading = isLoading || planLoading || roleLoading;
   const isPublicRoute =
     location.pathname === '/' ||
     PUBLIC_ROUTE_PREFIXES.some((prefix) =>
       location.pathname === prefix || location.pathname.startsWith(`${prefix}/`),
     );
+  const isAdminRoute = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
 
   useEffect(() => {
     if (!combinedLoading) hasResolvedOnceRef.current = true;
