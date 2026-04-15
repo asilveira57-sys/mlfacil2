@@ -8,6 +8,7 @@ const DEFAULT_PREFERENCES = {
   show_shipment_id: false,
   show_comment: true,
   show_sku: true,
+  show_variation_attrs: true,
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
@@ -21,6 +22,7 @@ export interface HeaderPreferences {
   show_shipment_id: boolean;
   show_comment: boolean;
   show_sku: boolean;
+  show_variation_attrs: boolean;
   line_order: string[];
   max_product_lines: number;
   max_total_lines: number;
@@ -40,6 +42,7 @@ export interface OrderItem {
   title_short: string | null;
   title: string | null;
   quantity: number;
+  variation_attributes?: Record<string, string>[] | null;
 }
 
 export interface HeaderLines {
