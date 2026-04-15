@@ -719,14 +719,27 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    
-    if (userError || !user) {
-      console.error('[ml-generate-labels] Auth failed:', userError?.message || 'No user returned');
-      return new Response(
-        JSON.stringify({ error: 'User not authenticated', details: userError?.message }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    const supabaseAuth = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: claimsData, error: claimsError } = await supabaseAuth.auth.getClaims(token);
+
+    let user: { id: string } | null = null;
+    if (claimsError || !claimsData?.claims?.sub) {
+      const { data: { user: fallbackUser }, error: userError } = await supabaseAuth.auth.getUser();
+      if (userError || !fallbackUser) {
+        console.error('[ml-generate-labels] Auth failed:', claimsError?.message || userError?.message || 'No user returned');
+        return new Response(
+          JSON.stringify({ error: 'User not authenticated', details: claimsError?.message || userError?.message }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      user = { id: fallbackUser.id };
+    } else {
+      user = { id: claimsData.claims.sub as string };
     }
 
     console.log('Authenticated user:', user.id);
