@@ -29,7 +29,7 @@ const MAX_RETRIES = 5;
 const DELAY_BETWEEN_BATCHES_MS = 100;
 
 // Header configuration
-const HEADER_HEIGHT_PT = 65; // ~23mm header area
+const HEADER_HEIGHT_PT = 85; // ~30mm header area (increased for new format)
 const HEADER_PADDING_TOP = 8;
 const HEADER_LINE_HEIGHT_FACTOR = 1.3;
 const SEPARATOR_LINE_Y_OFFSET = 4;
@@ -41,6 +41,7 @@ const DEFAULT_HEADER_PREFS = {
   show_shipment_id: false,
   show_comment: true,
   show_sku: true,
+  show_variation_attrs: true,
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
@@ -103,11 +104,12 @@ function sanitize(text: string | null | undefined, maxLength = 90): string {
 
 // Build product display lines — one item per line with SKU
 function buildProductLines(
-  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[],
+  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number; variation_attributes?: any[] | null }[],
   maxProductLines: number,
   showSku: boolean,
+  showVariationAttrs: boolean,
   maxLineLength = 58
-): string[] {
+): { text: string; bold: boolean }[] {
   if (items.length === 0) return [];
 
   const sorted = [...items].sort((a, b) => {
@@ -115,43 +117,32 @@ function buildProductLines(
     return (a.sku || a.title_short || a.title || '').localeCompare(b.sku || b.title_short || b.title || '');
   });
 
-  // Format each item: "Nx [SKU] Title" — one per line
-  const formatted = sorted.map(item => {
-    const skuPart = showSku && item.sku ? `[${item.sku}] ` : '';
-    const displayText = item.title_short || item.title || item.sku || 'Item';
-    const prefix = `${item.quantity}x ${skuPart}`;
-    const maxTitleLen = maxLineLength - prefix.length;
-    return `${prefix}${truncate(displayText, Math.max(maxTitleLen, 15))}`;
-  });
+  const lines: { text: string; bold: boolean }[] = [];
 
-  const lines: string[] = [];
+  for (const item of sorted) {
+    if (lines.length >= maxProductLines) break;
 
-  for (let i = 0; i < formatted.length; i++) {
-    if (lines.length >= maxProductLines) {
-      const remaining = formatted.length - i;
-      if (remaining > 0 && lines.length > 0) {
-        const suffix = ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}`;
-        const last = lines[lines.length - 1];
-        lines[lines.length - 1] = last.length + suffix.length <= maxLineLength
-          ? last + suffix
-          : truncate(last, maxLineLength - suffix.length) + suffix;
-      }
-      break;
+    // Product title as main line (bold)
+    const displayTitle = item.title || item.title_short || item.sku || 'Item';
+    lines.push({ text: truncate(displayTitle, maxLineLength), bold: true });
+
+    // Qty + SKU line
+    if (lines.length < maxProductLines) {
+      const skuPart = showSku && item.sku ? ` - Apelido: ${item.sku}` : '';
+      lines.push({ text: truncate(`Quantidade: ${item.quantity}${skuPart}`, maxLineLength), bold: false });
     }
 
-    if (lines.length === maxProductLines - 1 && i < formatted.length - 1) {
-      const remaining = formatted.length - i - 1;
-      const suffix = remaining > 0 ? ` +${remaining} ${remaining === 1 ? 'item' : 'itens'}` : '';
-      const line = formatted[i];
-      if (line.length + suffix.length <= maxLineLength) {
-        lines.push(line + suffix);
-      } else {
-        lines.push(truncate(line, maxLineLength - suffix.length) + suffix);
+    // Variation attributes
+    if (showVariationAttrs && item.variation_attributes && lines.length < maxProductLines) {
+      for (const attr of item.variation_attributes) {
+        if (lines.length >= maxProductLines) break;
+        const name = attr?.name || attr?.id || '';
+        const value = attr?.value_name || attr?.value || '';
+        if (name && value) {
+          lines.push({ text: truncate(`${name}: ${value}`, maxLineLength), bold: false });
+        }
       }
-      break;
     }
-
-    lines.push(truncate(formatted[i], maxLineLength));
   }
 
   return lines;
@@ -161,9 +152,9 @@ function buildProductLines(
 function buildHeaderLinesForOrder(
   prefs: typeof DEFAULT_HEADER_PREFS,
   order: { order_id: string; shipment_id: string | null; buyer_name: string | null; order_comment: string | null },
-  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[]
-): string[] {
-  const contents: Record<string, string[]> = {
+  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number; variation_attributes?: any[] | null }[]
+): { text: string; bold: boolean }[] {
+  const contents: Record<string, { text: string; bold: boolean }[]> = {
     customer: [],
     products: [],
     order: [],
@@ -172,24 +163,24 @@ function buildHeaderLinesForOrder(
   };
 
   if (prefs.show_customer && order.buyer_name) {
-    contents.customer = [`Cliente: ${sanitize(order.buyer_name, 40)}`];
+    contents.customer = [{ text: sanitize(order.buyer_name, 40), bold: false }];
   }
   if (prefs.show_products && items.length > 0) {
-    contents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku ?? true);
+    contents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku ?? true, prefs.show_variation_attrs ?? true);
   }
   if (prefs.show_order_id) {
-    contents.order = [`Pedido: ${order.order_id}`];
+    contents.order = [{ text: `Pedido: ${order.order_id}`, bold: false }];
   }
   if (prefs.show_shipment_id && order.shipment_id) {
-    contents.shipment = [`Envio: ${order.shipment_id}`];
+    contents.shipment = [{ text: `Envio: ${order.shipment_id}`, bold: false }];
   }
   if (prefs.show_comment && order.order_comment) {
     const clean = sanitize(order.order_comment, 60);
-    if (clean) contents.comment = [`Obs: ${clean}`];
+    if (clean) contents.comment = [{ text: `Obs: ${clean}`, bold: false }];
   }
 
   // Customer ALWAYS first
-  const lines: string[] = [];
+  const lines: { text: string; bold: boolean }[] = [];
   if (contents.customer.length > 0) {
     for (const line of contents.customer) {
       if (lines.length >= prefs.max_total_lines) break;
@@ -252,7 +243,7 @@ async function fetchSingleShipmentPdf(
 async function buildHeaderPdfSafe(
   shipmentIds: string[],
   accessToken: string,
-  headerDataMap: Map<string, string[]>,
+  headerDataMap: Map<string, { text: string; bold: boolean }[]>,
   fontSize: number,
   updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>,
   skipDanfe: boolean = false,
@@ -268,7 +259,7 @@ async function buildHeaderPdfSafe(
   // Process each shipment individually — deterministic, no index guessing
   for (let idx = 0; idx < shipmentIds.length; idx++) {
     const shipmentId = shipmentIds[idx];
-    const headerLines = headerDataMap.get(shipmentId) || [];
+    const headerLines = headerDataMap.get(shipmentId) || [] as { text: string; bold: boolean }[];
     
     // Report progress every 10 shipments
     if (idx % 10 === 0) {
@@ -317,16 +308,29 @@ async function buildHeaderPdfSafe(
       let textY = newHeight - HEADER_PADDING_TOP - fontSize;
       
       for (const line of headerLines) {
-        newPage.drawText(line, {
+        newPage.drawText(line.text, {
           x: 8,
           y: textY,
-          size: fontSize,
-          font: fontBold,
+          size: line.bold ? fontSize + 1 : fontSize,
+          font: line.bold ? fontBold : font,
           color: rgb(0, 0, 0),
           maxWidth: origWidth - 16,
         });
         textY -= lineHeight;
       }
+      
+      // Draw border box around header area
+      const headerBoxY = origHeight + SEPARATOR_LINE_Y_OFFSET - 1;
+      const headerBoxHeight = newHeight - headerBoxY - 2;
+      newPage.drawRectangle({
+        x: 3,
+        y: headerBoxY,
+        width: origWidth - 6,
+        height: headerBoxHeight,
+        borderColor: rgb(0.15, 0.15, 0.15),
+        borderWidth: 1.0,
+        color: undefined,
+      });
       
       // Draw separator line between header and label
       const separatorY = origHeight + SEPARATOR_LINE_Y_OFFSET;
@@ -879,6 +883,7 @@ serve(async (req) => {
           show_shipment_id: prefData.show_shipment_id,
           show_comment: prefData.show_comment,
           show_sku: prefData.show_sku ?? true,
+          show_variation_attrs: (prefData as any).show_variation_attrs ?? true,
           line_order: prefData.line_order as string[],
           max_product_lines: prefData.max_product_lines,
           max_total_lines: prefData.max_total_lines,
@@ -913,7 +918,7 @@ serve(async (req) => {
 
         const { data: itemsData } = await supabaseAdmin
           .from('meli_order_items_cache')
-          .select('order_id, sku, title_short, title, quantity')
+          .select('order_id, sku, title_short, title, quantity, variation_attributes')
           .eq('seller_id', seller_id)
           .in('order_id', allOrderIds);
 
@@ -926,18 +931,16 @@ serve(async (req) => {
         }
 
         // Build header lines for each shipment — aggregate items from ALL sibling orders
-        const headerDataMap = new Map<string, string[]>();
+        const headerDataMap = new Map<string, { text: string; bold: boolean }[]>();
 
         for (const shipmentId of validShipmentIds) {
           const siblingOrderIds = shipmentToOrderIds.get(shipmentId) || [];
           if (siblingOrderIds.length === 0) continue;
 
-          // Use the first order's metadata for buyer info
           const primaryOrder = (allShipmentOrders || []).find(o => o.shipment_id === shipmentId);
           if (!primaryOrder) continue;
 
-          // Aggregate items from ALL sibling orders in this pack
-          const allItems: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[] = [];
+          const allItems: { sku: string | null; title_short: string | null; title: string | null; quantity: number; variation_attributes?: any[] | null }[] = [];
           for (const oid of siblingOrderIds) {
             for (const i of (itemsByOrder.get(oid) || [])) {
               allItems.push({
@@ -945,6 +948,7 @@ serve(async (req) => {
                 title_short: i.title_short,
                 title: i.title,
                 quantity: i.quantity,
+                variation_attributes: (i as any).variation_attributes || null,
               });
             }
           }

@@ -8315,6 +8315,7 @@ export type Database = {
           show_products: boolean
           show_shipment_id: boolean
           show_sku: boolean
+          show_variation_attrs: boolean
           updated_at: string
           user_id: string
         }
@@ -8332,6 +8333,7 @@ export type Database = {
           show_products?: boolean
           show_shipment_id?: boolean
           show_sku?: boolean
+          show_variation_attrs?: boolean
           updated_at?: string
           user_id: string
         }
@@ -8349,6 +8351,7 @@ export type Database = {
           show_products?: boolean
           show_shipment_id?: boolean
           show_sku?: boolean
+          show_variation_attrs?: boolean
           updated_at?: string
           user_id?: string
         }

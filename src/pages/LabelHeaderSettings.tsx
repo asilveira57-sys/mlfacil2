@@ -19,6 +19,7 @@ const DEFAULT_PREFERENCES: HeaderPreferences = {
   show_shipment_id: false,
   show_comment: true,
   show_sku: true,
+  show_variation_attrs: true,
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
@@ -41,9 +42,9 @@ const SAMPLE_ORDER: OrderData = {
 };
 
 const SAMPLE_ITEMS: OrderItem[] = [
-  { sku: 'W11310109', title_short: 'Hélice Espargidor Superior Lava Louça', title: 'Hélice Espargidor Superior Lava Louça Brastemp', quantity: 1 },
-  { sku: 'XYZ-789', title_short: 'Calça Jeans 42', title: 'Calça Jeans Tamanho 42', quantity: 1 },
-  { sku: 'DEF-456', title_short: 'Tênis Branco 40', title: 'Tênis Branco Tamanho 40', quantity: 1 },
+  { sku: 'W11310109', title_short: 'Hélice Espargidor Superior Lava Louça', title: 'Hélice Espargidor Superior Lava Louça Brastemp', quantity: 1, variation_attributes: [{ name: 'Cor', value_name: 'Transparente + Cinza' }] },
+  { sku: 'XYZ-789', title_short: 'Calça Jeans 42', title: 'Calça Jeans Tamanho 42', quantity: 1, variation_attributes: [{ name: 'Tamanho', value_name: '42' }, { name: 'Cor', value_name: 'Azul Escuro' }] },
+  { sku: 'DEF-456', title_short: 'Tênis Branco 40', title: 'Tênis Branco Tamanho 40', quantity: 1, variation_attributes: [{ name: 'Tamanho', value_name: '40' }] },
   { sku: null, title_short: 'Meia Preta Kit 3 pares', title: 'Meia Preta Kit 3 pares', quantity: 3 },
 ];
 
@@ -87,6 +88,7 @@ export default function LabelHeaderSettings() {
           show_shipment_id: prefData.show_shipment_id,
           show_comment: prefData.show_comment,
           show_sku: prefData.show_sku ?? true,
+          show_variation_attrs: (prefData as any).show_variation_attrs ?? true,
           line_order: prefData.line_order as string[],
           max_product_lines: prefData.max_product_lines,
           max_total_lines: prefData.max_total_lines,
@@ -100,8 +102,8 @@ export default function LabelHeaderSettings() {
   }, [sellerId]);
 
   // Generate preview lines — customer always first, one product per line with SKU
-  const generatePreviewLines = useCallback((): string[] => {
-    const lineContents: Record<string, string[]> = {
+  const generatePreviewLines = useCallback((): { text: string; bold?: boolean }[] => {
+    const lineContents: Record<string, { text: string; bold?: boolean }[]> = {
       customer: [],
       products: [],
       order: [],
@@ -109,55 +111,51 @@ export default function LabelHeaderSettings() {
     };
 
     if (preferences.show_customer && SAMPLE_ORDER.buyer_name) {
-      lineContents.customer = [`Cliente: ${SAMPLE_ORDER.buyer_name}`];
+      lineContents.customer = [{ text: SAMPLE_ORDER.buyer_name }];
     }
 
     if (preferences.show_products && SAMPLE_ITEMS.length > 0) {
       const sortedItems = [...SAMPLE_ITEMS].sort((a, b) => b.quantity - a.quantity);
-      const lines: string[] = [];
-      const maxLineLength = 70;
+      const lines: { text: string; bold?: boolean }[] = [];
 
       for (let i = 0; i < sortedItems.length; i++) {
-        if (lines.length >= preferences.max_product_lines) {
-          const remaining = sortedItems.length - i;
-          if (remaining > 0 && lines.length > 0) {
-            const suffix = ` +${remaining} itens`;
-            lines[lines.length - 1] = lines[lines.length - 1] + suffix;
-          }
-          break;
-        }
+        if (lines.length >= preferences.max_product_lines) break;
 
         const item = sortedItems[i];
-        const skuPart = preferences.show_sku && item.sku ? `[${item.sku}] ` : '';
-        const displayText = item.title_short || item.title || 'Item';
-        const prefix = `${item.quantity}x ${skuPart}`;
-        const maxTitleLen = maxLineLength - prefix.length;
-        const formatted = `${prefix}${displayText.substring(0, Math.max(maxTitleLen, 15))}`;
+        const displayTitle = item.title || item.title_short || 'Item';
+        lines.push({ text: displayTitle.substring(0, 60), bold: true });
 
-        if (lines.length === preferences.max_product_lines - 1 && i < sortedItems.length - 1) {
-          const remaining = sortedItems.length - i - 1;
-          const suffix = remaining > 0 ? ` +${remaining} itens` : '';
-          lines.push(formatted + suffix);
-          break;
+        if (lines.length < preferences.max_product_lines) {
+          const skuPart = preferences.show_sku && item.sku ? ` - Apelido: ${item.sku}` : '';
+          lines.push({ text: `Quantidade: ${item.quantity}${skuPart}` });
         }
 
-        lines.push(formatted);
+        if (preferences.show_variation_attrs && item.variation_attributes && lines.length < preferences.max_product_lines) {
+          for (const attr of item.variation_attributes) {
+            if (lines.length >= preferences.max_product_lines) break;
+            const name = (attr as any).name || '';
+            const value = (attr as any).value_name || '';
+            if (name && value) {
+              lines.push({ text: `${name}: ${value}` });
+            }
+          }
+        }
       }
 
       lineContents.products = lines;
     }
 
     if (preferences.show_order_id) {
-      lineContents.order = [`Pedido: ${SAMPLE_ORDER.order_id}`];
+      lineContents.order = [{ text: `Pedido: ${SAMPLE_ORDER.order_id}` }];
     }
 
     if (preferences.show_comment && SAMPLE_ORDER.order_comment) {
       const cleanComment = SAMPLE_ORDER.order_comment.substring(0, 50);
-      lineContents.comment = [`Obs: ${cleanComment}...`];
+      lineContents.comment = [{ text: `Obs: ${cleanComment}...` }];
     }
 
     // Customer ALWAYS first, then remaining in configured order
-    const allLines: string[] = [];
+    const allLines: { text: string; bold?: boolean }[] = [];
     if (lineContents.customer.length > 0) {
       for (const line of lineContents.customer) {
         if (allLines.length >= preferences.max_total_lines) break;
@@ -233,7 +231,8 @@ export default function LabelHeaderSettings() {
           max_product_lines: preferences.max_product_lines,
           max_total_lines: preferences.max_total_lines,
           font_size: preferences.font_size,
-        }, { onConflict: 'seller_id' });
+          show_variation_attrs: preferences.show_variation_attrs,
+        } as any, { onConflict: 'seller_id' });
 
       if (error) throw error;
 
@@ -330,6 +329,16 @@ export default function LabelHeaderSettings() {
                     checked={preferences.show_sku}
                     onCheckedChange={(checked) => 
                       setPreferences(prev => ({ ...prev, show_sku: checked }))
+                    }
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="show_variation_attrs" className="flex-1">Atributos de Variação (Cor, Tamanho...)</Label>
+                  <Switch
+                    id="show_variation_attrs"
+                    checked={preferences.show_variation_attrs}
+                    onCheckedChange={(checked) => 
+                      setPreferences(prev => ({ ...prev, show_variation_attrs: checked }))
                     }
                   />
                 </div>
@@ -521,7 +530,7 @@ export default function LabelHeaderSettings() {
                     >
                       {previewLines.length > 0 ? (
                         previewLines.map((line, i) => (
-                          <div key={i} className="truncate">{line}</div>
+                          <div key={i} className={`truncate ${line.bold ? 'font-bold' : ''}`}>{line.text}</div>
                         ))
                       ) : (
                         <div className="text-muted-foreground italic text-center">
