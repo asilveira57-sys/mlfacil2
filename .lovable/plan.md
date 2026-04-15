@@ -1,38 +1,59 @@
 
 
-# Tratar Falhas de Conexão ML sem Quebrar o Existente
+# Normalizar Tamanho de Página das Etiquetas para 10x15cm
 
-## Situação atual do rafastore
+## Problema
 
-O cliente **já está conectado** — a conta ML `RAFA_STORE` foi criada hoje às 14:26, status `connected`, trial ativo. Das 4 tentativas, a última funcionou.
+A API do Mercado Livre retorna PDFs em tamanhos diferentes dependendo da **configuração da conta do vendedor no painel ML**. Vendedores configurados para "impressora térmica" recebem páginas 10x15cm. Vendedores configurados para "folha A4" recebem PDFs em A4 paisagem (842x595pt), com a etiqueta centralizada na folha.
 
-## Problemas identificados (2 pontos frágeis)
+Nosso sistema copia as páginas como vêm do ML, sem normalizar o tamanho. Resultado: contas como MKMODAS e OLGA recebem PDFs A4 quando deveriam receber 10x15.
 
-### 1. Fallback de URL incorreto no `ml-auth-url`
-Linha 102: o fallback hardcoded ainda usa `https://ddec4858-9aec-466d-afd2-b6bd5577a30c.lovableproject.com` — um domínio de projeto antigo. Se o `FRONTEND_URL` secret não estiver configurado E o body não enviar `frontendOrigin`, o callback redireciona para um domínio morto e o usuário perde a sessão.
+## Causa raiz
 
-### 2. Redirect fixo para `/primeiro-acesso` no callback
-Linha 470 do `ml-oauth-callback`: após sucesso, **sempre** redireciona para `/primeiro-acesso`. Se o usuário já completou onboarding (reconexão, troca de conta), ele vê a tela de primeiro acesso desnecessariamente — confuso e pode parecer que "não conectou".
+Nos 3 pipelines de geração (standard, header, e per-shipment), o código usa `copyPages` ou `embedPage` que **preservam** as dimensões originais do PDF do ML. Nenhuma normalização de tamanho é feita.
 
-## Correções propostas (mínimas, cirúrgicas)
+## Solução proposta
 
-### Arquivo 1: `supabase/functions/ml-auth-url/index.ts`
-- Trocar o fallback hardcoded de `lovableproject.com` para `https://www.mktpfacil.com` (domínio de produção)
-- Apenas a string na linha 102 muda
+Criar uma função `normalizePageTo10x15` que é aplicada a cada página baixada do ML **antes** de inseri-la no PDF final. A função:
 
-### Arquivo 2: `supabase/functions/ml-oauth-callback/index.ts`
-- **Redirect inteligente** (linhas 469-474): após salvar a conta com sucesso, verificar no banco se `user_access_state.onboarding_status = 'completed'`. Se sim, redirecionar para `/settings?section=empresas-contas&ml_connected=true`. Se não, manter o redirect para `/primeiro-acesso?ml_connected=true`.
-- **Logging de erro expandido** (linha 89): no bloco de falha do token exchange, logar o status HTTP e o body completo da resposta do ML, para que tentativas futuras deixem rastro nos logs.
+1. Verifica se a página já está no tamanho correto (~283x425pt ±10%). Se sim, retorna sem alteração.
+2. Se a página é maior (A4), usa `embedPage` para **escalar** a página inteira para caber em 283x425pt, mantendo proporção e centralizando.
+3. Funciona tanto para A4 portrait quanto landscape.
+
+### Pontos de inserção (3 locais no código)
+
+1. **`buildHeaderPdfSafe`** (linha 319): Após `embedPage(sourcePdf.getPage(0))`, normalizar `origWidth/origHeight` antes de criar a página com header.
+
+2. **Pipeline standard `isPerShipmentPdf`** (linha 1104): Após `copyPages(sourcePdf, [0])`, verificar tamanho e re-escalar se necessário.
+
+3. **DANFE pages** (linhas 381 e 1109): Normalizar também as páginas de DANFE — se vieram em A4, escalar para 10x15.
+
+### Dimensões alvo
+
+```text
+10cm x 15cm = 283.46pt x 425.20pt (1pt = 0.3528mm)
+Tolerância: ±15% (241-326pt largura, 361-489pt altura)
+Se fora da tolerância → escalar para caber
+```
 
 ### O que NÃO muda
-- Nenhum arquivo frontend
-- Nenhuma migration SQL
-- O fluxo de PKCE, troca de token e salvamento de conta permanece idêntico
-- A lógica de `mp-auth-url` (fluxo finance) não é tocada
-- O fluxo de primeiro acesso continua funcionando normalmente para quem ainda não completou onboarding
 
-### Resumo do impacto
-- Duas edge functions com mudanças cirúrgicas (fallback URL + redirect condicional + logging)
-- Zero risco para clientes existentes — quem já usa não percebe diferença
-- Clientes que reconectam vão direto para a tela certa em vez de ver o primeiro acesso de novo
+- Frontend (nenhum arquivo)
+- Lógica de Flex/Coleta/NF
+- Lógica de header (texto, posicionamento, linhas)
+- Lógica de DANFE skip
+- Pipeline ZPL (não é PDF)
+- Nenhuma migration SQL
+- Preferências de cabeçalho
+
+### Segurança da mudança
+
+- Se a página já é 10x15, a normalização é um no-op (zero impacto)
+- Clientes que já recebem etiquetas corretas não percebem diferença
+- Clientes com A4 passam a receber 10x15 automaticamente
+- A escala é proporcional — nenhum conteúdo é cortado
+
+### Arquivo alterado
+
+- `supabase/functions/ml-generate-labels/index.ts` — adicionar função `normalizePageTo10x15` e aplicar nos 3 pontos de inserção
 
