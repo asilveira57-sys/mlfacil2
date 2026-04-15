@@ -21,12 +21,32 @@ const INVOICE_SYNC_BATCH = 300;
 /** How long to poll for a "not found" job before giving up (ms) */
 const JOB_RECOVERY_TIMEOUT_MS = 90_000;
 /** Polling interval during recovery (ms) */
-const JOB_POLL_INTERVAL_MS = 3_000;
+const JOB_POLL_INTERVAL_MS = 2_000;
+/** Max consecutive not-found before giving up */
+const MAX_NOT_FOUND_ATTEMPTS = 22;
 
 const INITIAL_PROGRESS: GenerationProgress = {
   status: 'idle', total_labels: 0, processed_labels: 0,
   total_batches: 0, completed_batches: 0, error_batches: 0,
 };
+
+// ─── Debug helpers ───────────────────────────────────────────────────
+function dbg(...args: any[]) {
+  if (typeof window !== 'undefined' && (window as any).__labelsDebug) {
+    console.log('[labels-v2]', ...args);
+  }
+}
+
+function logRecovery(tag: string, ...args: any[]) {
+  console.info(`[recovery] ${tag}`, ...args);
+  dbg(`[recovery] ${tag}`, ...args);
+}
+
+// ─── localStorage-based active job check (sync, no hooks) ────────────
+function hasActiveGenerationJob(): boolean {
+  const job = loadActiveJob();
+  return !!job;
+}
 
 async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -87,6 +107,14 @@ export interface PrintJobV2 {
   created_at: string;
 }
 
+/**
+ * Compute initial "has active job" once at module load / hook init.
+ * This is a STABLE value read once so useQuery options don't flip between renders.
+ */
+function computeInitialActiveJob(): boolean {
+  return hasActiveGenerationJob();
+}
+
 export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -104,30 +132,39 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const [syncProgress, setSyncProgress] = useState('');
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(INITIAL_PROGRESS);
-  const [isJobGenerating, setIsJobGenerating] = useState(false);
+
+  // ─── Active job state (single source of truth) ─────────────────────
+  // Use useState so it's reactive AND stable for useQuery options.
+  const [activeJobState, setActiveJobState] = useState<ActivePrintJob | null>(() => {
+    const persisted = loadActiveJob();
+    if (persisted && sellerId && persisted.sellerId === sellerId) return persisted;
+    if (persisted && !sellerId) return persisted; // will validate seller on effect
+    return null;
+  });
+
+  const hasActiveJob = !!activeJobState;
+
   const lastSyncTimeRef = useRef(0);
   const hasAutoSyncedRef = useRef(false);
   const recoveryAbortRef = useRef<AbortController | null>(null);
 
-  // ─── Active job tracking ───────────────────────────────────────────
-  // On mount: check if there's a persisted active job and recover it
-  const activeJobRef = useRef<ActivePrintJob | null>(null);
-
-  /**
-   * Whether we currently have an active (non-terminal) generation job.
-   * Used to suppress auto-refresh, auto-sync, and refetchOnMount.
-   */
-  const hasActiveJob = isJobGenerating || !!activeJobRef.current;
-
   // ─── Recovery on mount ─────────────────────────────────────────────
   useEffect(() => {
     if (!sellerId) return;
+
     const persisted = loadActiveJob();
-    if (!persisted || persisted.sellerId !== sellerId) return;
+    if (!persisted || persisted.sellerId !== sellerId) {
+      // No active job for this seller
+      if (activeJobState && activeJobState.sellerId !== sellerId) {
+        setActiveJobState(null);
+      }
+      return;
+    }
+
+    logRecovery('start', `jobId=${persisted.jobId}, format=${persisted.format}, shipments=${persisted.shipmentIds.length}`);
 
     // Restore UI state
-    activeJobRef.current = persisted;
-    setIsJobGenerating(true);
+    setActiveJobState(persisted);
     setGenerationProgress({
       status: 'processing',
       total_labels: persisted.shipmentIds.length,
@@ -137,13 +174,14 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       error_batches: 0,
     });
 
-    // If we already had completed data cached, use it
+    // If we already had completed data cached, use it directly
     if (persisted.completedData) {
+      logRecovery('cached-data', 'Using cached completed data');
       handleGenerationComplete(persisted.completedData, persisted.format);
       return;
     }
 
-    // Otherwise poll the job
+    // If jobId is still "pending", poll until we get a real ID or timeout
     const abort = new AbortController();
     recoveryAbortRef.current = abort;
     pollJobUntilDone(persisted.jobId, persisted.format, abort.signal);
@@ -161,16 +199,40 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   async function pollJobUntilDone(jobId: string, format: string, signal: AbortSignal) {
     const startedAt = Date.now();
     let notFoundCount = 0;
+    let attempt = 0;
+
+    logRecovery('poll-start', `jobId=${jobId}`);
 
     while (!signal.aborted) {
       await sleep(JOB_POLL_INTERVAL_MS);
       if (signal.aborted) return;
 
+      attempt++;
       const elapsed = Date.now() - startedAt;
+      dbg(`[poll] attempt=${attempt}, elapsed=${elapsed}ms, jobId=${jobId}`);
+
+      // For "pending" jobs, we need to re-read localStorage in case the mutation updated it
+      if (jobId === 'pending') {
+        const refreshed = loadActiveJob();
+        if (refreshed && refreshed.jobId !== 'pending') {
+          jobId = refreshed.jobId;
+          logRecovery('pending-resolved', `Real jobId=${jobId}`);
+        } else if (elapsed > JOB_RECOVERY_TIMEOUT_MS) {
+          logRecovery('pending-timeout', 'Job never got a real ID, giving up');
+          finalizeJob('error');
+          return;
+        } else {
+          logRecovery('pending-waiting', `attempt ${attempt}, still pending...`);
+          continue;
+        }
+      }
 
       try {
         const headers = await getAuthHeaders();
-        if (!headers) continue;
+        if (!headers) {
+          dbg('[poll] no auth headers, retrying...');
+          continue;
+        }
 
         const { data, error } = await supabase.functions.invoke('ml-generate-labels-status', {
           headers,
@@ -179,9 +241,11 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
 
         if (error || !data) {
           notFoundCount++;
+          logRecovery('job not found', `attempt ${notFoundCount}/${MAX_NOT_FOUND_ATTEMPTS}`);
+
           // Resilient: don't clear on transient "not found" — keep polling
-          if (elapsed > JOB_RECOVERY_TIMEOUT_MS && notFoundCount > 5) {
-            console.warn('[V2] Job recovery timed out after', elapsed, 'ms');
+          if (notFoundCount >= MAX_NOT_FOUND_ATTEMPTS || elapsed > JOB_RECOVERY_TIMEOUT_MS) {
+            logRecovery('timeout', `notFound=${notFoundCount}, elapsed=${elapsed}ms`);
             finalizeJob('error');
             return;
           }
@@ -192,6 +256,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         notFoundCount = 0;
 
         const status = data.status as string;
+        dbg(`[poll] status=${status}, processed=${data.processed_labels}/${data.total_labels}`);
+
         setGenerationProgress({
           status: isTerminalStatus(status) ? (status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'error') : 'processing',
           total_labels: data.total_labels || 0,
@@ -202,24 +268,28 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         });
 
         if (isTerminalStatus(status)) {
+          logRecovery('terminal status', `status=${status}`);
           if (data.file_url) {
-            // Download the file
             handleGenerationComplete(data, format);
           } else {
             finalizeJob(status as any);
           }
           return;
         }
+
+        logRecovery('keep active job', `status=${status}`);
       } catch (err) {
         console.error('[V2] Poll error:', err);
+        dbg('[poll] transient error, continuing...', err);
         // Continue polling on transient errors
       }
     }
   }
 
   function handleGenerationComplete(data: any, format: string) {
-    setIsJobGenerating(false);
-    activeJobRef.current = null;
+    logRecovery('complete', `labels=${data.total_labels}, errors=${data.error_batches || 0}`);
+
+    setActiveJobState(null);
     clearActiveJob();
 
     const status = data.error_batches > 0 ? 'partial' : 'completed';
@@ -240,7 +310,6 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       downloadZpl(data.zpl_content, data.download_filename);
       toast({ title: 'ZPL gerado (V2)', description: `${data.total_labels} etiqueta(s)` });
     } else if (data.file_url) {
-      // Fallback: open file URL
       window.open(data.file_url, '_blank');
       toast({ title: 'Etiqueta gerada (V2)', description: `${data.total_labels} etiqueta(s)` });
     }
@@ -254,8 +323,9 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   }
 
   function finalizeJob(status: 'completed' | 'partial' | 'error' | string) {
-    setIsJobGenerating(false);
-    activeJobRef.current = null;
+    logRecovery('finalize', `status=${status}`);
+
+    setActiveJobState(null);
     clearActiveJob();
     setGenerationProgress(prev => ({ ...prev, status: status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'error' }));
     if (status === 'error') {
@@ -312,11 +382,15 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   }, [periodFilter, customDateRange]);
 
   // ─── Main orders query ─────────────────────────────────────────────
-  // CRITICAL: disable refetchOnMount and refetchOnReconnect while generating
+  // CRITICAL: use stable initial value to avoid hook queue issues.
+  // hasActiveJob is a state var so it's stable across renders.
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders-v2', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
       if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
+
+      dbg('[query] fetching orders, hasActiveJob=', hasActiveJob);
+
       const { dateFrom, dateTo } = getDateRange();
       const { data, error } = await supabase.rpc('get_shipping_orders', {
         p_seller_id: sellerId,
@@ -411,6 +485,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     // CRITICAL: block sync while a generation job is active
     if (hasActiveJob) {
       if (!silent) console.info('[V2] Sync blocked — active generation job');
+      dbg('[sync] blocked by active job');
       return;
     }
 
@@ -483,7 +558,6 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       if (shipmentIds.length === 0) throw new Error('Nenhum envio válido selecionado');
 
       setGenerationProgress({ status: 'processing', total_labels: shipmentIds.length, processed_labels: 0, total_batches: 1, completed_batches: 0, error_batches: 0 });
-      setIsJobGenerating(true);
 
       // Persist active job BEFORE the call so we can recover on navigation
       const jobEntry: ActivePrintJob = {
@@ -494,8 +568,10 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         shipmentIds,
         startedAt: new Date().toISOString(),
       };
-      activeJobRef.current = jobEntry;
+      setActiveJobState(jobEntry);
       saveActiveJob(jobEntry);
+
+      dbg('[generate] started, shipments=', shipmentIds.length);
 
       // Call V2 edge function
       const response = await supabase.functions.invoke('ml-generate-labels-v2', {
@@ -512,6 +588,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       // Update persisted job with real job_id and completed data
       if (response.data.job_id) {
         jobEntry.jobId = response.data.job_id;
+        dbg('[generate] real jobId=', response.data.job_id);
       }
       jobEntry.completedData = response.data;
       saveActiveJob(jobEntry);
@@ -524,8 +601,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     },
     onError: (error: any) => {
       console.error('V2 generate error:', error);
-      setIsJobGenerating(false);
-      activeJobRef.current = null;
+      setActiveJobState(null);
       clearActiveJob();
       setGenerationProgress(prev => ({ ...prev, status: 'error' }));
       toast({ title: 'Erro ao gerar etiquetas', description: error.message, variant: 'destructive' });
@@ -557,7 +633,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     selectedIds, toggleSelection, selectAll, clearSelection,
     isSyncing, syncPhase, syncProgress, sync, lastSyncAt, statusCounts,
     generateLabels: generateLabelsMutation.mutate,
-    isGenerating: generateLabelsMutation.isPending || isJobGenerating,
+    isGenerating: generateLabelsMutation.isPending || hasActiveJob,
     generationProgress, orderItems,
   };
 }
