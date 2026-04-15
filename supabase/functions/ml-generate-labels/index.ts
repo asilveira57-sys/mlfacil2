@@ -243,7 +243,7 @@ async function fetchSingleShipmentPdf(
 async function buildHeaderPdfSafe(
   shipmentIds: string[],
   accessToken: string,
-  headerDataMap: Map<string, string[]>,
+  headerDataMap: Map<string, { text: string; bold: boolean }[]>,
   fontSize: number,
   updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>,
   skipDanfe: boolean = false,
@@ -259,7 +259,7 @@ async function buildHeaderPdfSafe(
   // Process each shipment individually — deterministic, no index guessing
   for (let idx = 0; idx < shipmentIds.length; idx++) {
     const shipmentId = shipmentIds[idx];
-    const headerLines = headerDataMap.get(shipmentId) || [];
+    const headerLines = headerDataMap.get(shipmentId) || [] as { text: string; bold: boolean }[];
     
     // Report progress every 10 shipments
     if (idx % 10 === 0) {
@@ -308,11 +308,11 @@ async function buildHeaderPdfSafe(
       let textY = newHeight - HEADER_PADDING_TOP - fontSize;
       
       for (const line of headerLines) {
-        newPage.drawText(line, {
+        newPage.drawText(line.text, {
           x: 8,
           y: textY,
-          size: fontSize,
-          font: fontBold,
+          size: line.bold ? fontSize + 1 : fontSize,
+          font: line.bold ? fontBold : font,
           color: rgb(0, 0, 0),
           maxWidth: origWidth - 16,
         });
