@@ -142,9 +142,13 @@ function buildProductLines(
   for (const item of sorted) {
     if (lines.length >= maxProductLines) break;
 
-    // Product title as main line (bold)
-    const displayTitle = item.title || item.title_short || item.sku || 'Item';
-    lines.push({ text: truncate(displayTitle, maxLineLength), bold: true });
+    // Product title — wrap to multiple lines instead of truncating
+    const displayTitle = sanitize(item.title || item.title_short || item.sku || 'Item', 200);
+    const titleWrapped = wrapTextLines(displayTitle, maxLineLength);
+    for (const tl of titleWrapped) {
+      if (lines.length >= maxProductLines) break;
+      lines.push({ text: tl, bold: true });
+    }
 
     // Qty + SKU line
     if (lines.length < maxProductLines) {
