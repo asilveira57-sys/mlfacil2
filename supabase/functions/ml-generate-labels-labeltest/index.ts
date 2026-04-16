@@ -8,9 +8,9 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-function respond(ok: boolean, payload: Record<string, unknown>) {
+function respond(ok: boolean, payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify({ ok, ...payload }), {
-    status: 200,
+    status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
@@ -27,14 +27,19 @@ const LAYOUTS: Record<string, { widthMm: number; heightMm: number; includeHeader
   'mlfacil_100x175_header':     { widthMm: 100, heightMm: 175, includeHeader: true,  includeDanfe: true },
 };
 
-// Labelary ZPL→PNG config (legacy-faithful)
-const LABELARY_DPI = 8;        // 8 dpmm = 203 DPI (thermal standard)
-const LABELARY_W_INCH = 4;     // ~101.6mm
-const LABELARY_H_INCH = 6;     // ~152.4mm
-const LABELARY_URL = `http://api.labelary.com/v1/printers/${LABELARY_DPI}dpmm/labels/${LABELARY_W_INCH}x${LABELARY_H_INCH}/0/`;
+// ─── Labelary config per layout ─────────────────────────────────────
+const LABELARY_DPMM = 8; // 8 dpmm = 203 DPI (thermal standard)
+
+function getLabelaryParams(layout: string) {
+  // 100mm ≈ 3.94in, 150mm ≈ 5.91in, 175mm ≈ 6.89in
+  const layoutInfo = LAYOUTS[layout];
+  const wInch = parseFloat((layoutInfo.widthMm / 25.4).toFixed(2));
+  const hInch = parseFloat((layoutInfo.heightMm / 25.4).toFixed(2));
+  return { dpmm: LABELARY_DPMM, wInch, hInch };
+}
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-const getBackoff = (attempt: number) => Math.pow(2, attempt - 1) * 1000;
+const getBackoff = (attempt: number) => Math.min(Math.pow(2, attempt - 1) * 1000, 8000);
 
 function truncate(t: string, max: number) { return t.length <= max ? t : t.substring(0, max - 3) + '...'; }
 function sanitize(t: string | null | undefined, max = 90) { if (!t) return ''; return truncate(t.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim(), max); }
@@ -94,49 +99,99 @@ function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(b);
 }
 
+// ─── ZPL validation ─────────────────────────────────────────────────
+function validateZpl(raw: string): { valid: boolean; cleaned: string; reason_code?: string; reason_message?: string } {
+  if (!raw || raw.trim().length === 0) {
+    return { valid: false, cleaned: '', reason_code: 'INVALID_ZPL_EMPTY', reason_message: 'ZPL vazio recebido da API ML' };
+  }
+  // Remove BOM and invalid control chars (keep printable + common whitespace)
+  let cleaned = raw.replace(/^\uFEFF/, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+  if (!cleaned.includes('^XA') || !cleaned.includes('^XZ')) {
+    return { valid: false, cleaned, reason_code: 'INVALID_ZPL_STRUCTURE', reason_message: 'ZPL não contém marcadores ^XA/^XZ válidos' };
+  }
+  return { valid: true, cleaned };
+}
+
 // ─── ZPL fetch from ML API ──────────────────────────────────────────
-async function fetchZplFromMl(shipmentId: string, token: string): Promise<string | null> {
+async function fetchZplFromMl(shipmentId: string, token: string): Promise<{ zpl: string | null; reason_code?: string; reason_message?: string }> {
   for (let a = 1; a <= 3; a++) {
+    const t0 = Date.now();
     try {
       const r = await fetch(
         `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a)); continue; }
-      if (!r.ok) {
-        console.error(`[labeltest] ML ZPL error for ${shipmentId}: ${r.status}`);
-        return null;
+      const latency = Date.now() - t0;
+      if ((r.status === 429 || r.status >= 500) && a < 3) {
+        console.warn(`[labeltest] ML ZPL ${shipmentId} attempt ${a}: status=${r.status} latency=${latency}ms — retrying`);
+        await sleep(getBackoff(a));
+        continue;
       }
-      return await r.text();
-    } catch (e) {
-      console.error(`[labeltest] ZPL fetch error ${shipmentId} attempt ${a}:`, e);
+      if (!r.ok) {
+        console.error(`[labeltest] ML ZPL error ${shipmentId}: status=${r.status} latency=${latency}ms`);
+        return { zpl: null, reason_code: 'ML_ZPL_FETCH_FAILED', reason_message: `API ML retornou status ${r.status}` };
+      }
+      const text = await r.text();
+      console.log(`[labeltest] ML ZPL fetched: ${shipmentId} ${text.length} chars ${latency}ms`);
+      return { zpl: text };
+    } catch (e: any) {
+      const latency = Date.now() - t0;
+      console.error(`[labeltest] ZPL fetch error ${shipmentId} attempt ${a}: ${e.message} ${latency}ms`);
       if (a < 3) await sleep(getBackoff(a));
     }
   }
-  return null;
+  return { zpl: null, reason_code: 'ML_ZPL_FETCH_TIMEOUT', reason_message: 'Falha ao buscar ZPL após 3 tentativas' };
 }
 
-// ─── ZPL → PNG via Labelary (legacy-faithful) ───────────────────────
-async function zplToImage(zplContent: string, shipmentId: string): Promise<Uint8Array | null> {
-  for (let a = 1; a <= 3; a++) {
+// ─── ZPL → PNG via Labelary (resilient with per-layout dimensions) ──
+async function zplToImage(
+  zplContent: string,
+  shipmentId: string,
+  layout: string,
+): Promise<{ image: Uint8Array | null; reason_code?: string; reason_message?: string }> {
+  const { dpmm, wInch, hInch } = getLabelaryParams(layout);
+  const url = `http://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${wInch}x${hInch}/0/`;
+  const MAX_ATTEMPTS = 5;
+
+  for (let a = 1; a <= MAX_ATTEMPTS; a++) {
+    const t0 = Date.now();
+    const timeoutMs = 10000 + (a * 2000); // progressive timeout: 12s, 14s, 16s, 18s, 20s
     try {
-      const r = await fetch(LABELARY_URL, {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const r = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'image/png' },
         body: zplContent,
+        signal: controller.signal,
       });
-      if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a) + 200); continue; }
-      if (!r.ok) {
-        console.error(`[labeltest] Labelary error for ${shipmentId}: ${r.status}`);
-        return null;
+      clearTimeout(timer);
+      const latency = Date.now() - t0;
+
+      if (r.status === 429 || r.status >= 500) {
+        const snippet = (await r.text().catch(() => '')).substring(0, 100);
+        console.warn(`[labeltest] Labelary ${shipmentId} attempt ${a}/${MAX_ATTEMPTS}: status=${r.status} latency=${latency}ms snippet="${snippet}"`);
+        if (a < MAX_ATTEMPTS) { await sleep(getBackoff(a) + 300); continue; }
+        return { image: null, reason_code: 'LABELARY_SERVER_ERROR', reason_message: `Labelary retornou ${r.status} após ${MAX_ATTEMPTS} tentativas` };
       }
-      return new Uint8Array(await r.arrayBuffer());
-    } catch (e) {
-      console.error(`[labeltest] Labelary error ${shipmentId} attempt ${a}:`, e);
-      if (a < 3) await sleep(getBackoff(a));
+
+      if (!r.ok) {
+        const snippet = (await r.text().catch(() => '')).substring(0, 200);
+        console.error(`[labeltest] Labelary ${shipmentId}: status=${r.status} latency=${latency}ms body="${snippet}"`);
+        return { image: null, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: `Labelary retornou status ${r.status}: ${snippet.substring(0, 80)}` };
+      }
+
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      console.log(`[labeltest] Labelary OK: ${shipmentId} ${(bytes.length / 1024).toFixed(0)}KB ${latency}ms dpmm=${dpmm} ${wInch}x${hInch}in`);
+      return { image: bytes };
+    } catch (e: any) {
+      const latency = Date.now() - t0;
+      const isTimeout = e.name === 'AbortError';
+      console.error(`[labeltest] Labelary ${shipmentId} attempt ${a}/${MAX_ATTEMPTS}: ${isTimeout ? 'TIMEOUT' : e.message} ${latency}ms`);
+      if (a < MAX_ATTEMPTS) await sleep(getBackoff(a));
     }
   }
-  return null;
+  return { image: null, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: `Conversão Labelary falhou após ${MAX_ATTEMPTS} tentativas` };
 }
 
 // ─── Fetch DANFE PDF from ML (for layouts that need it) ─────────────
@@ -169,7 +224,7 @@ serve(async (req) => {
   const t0 = Date.now();
   try {
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) return respond(false, { error: 'Missing auth' });
+    if (!authHeader?.startsWith('Bearer ')) return respond(false, { error: 'Missing auth' }, 401);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseAdmin = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
@@ -178,19 +233,19 @@ serve(async (req) => {
     });
 
     const { data: { user }, error: userErr } = await supabaseAuth.auth.getUser();
-    if (userErr || !user) return respond(false, { error: 'Not authenticated' });
+    if (userErr || !user) return respond(false, { error: 'Not authenticated' }, 401);
 
     const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
     const gate = await assertMlApiAccess(supabaseAdmin, user.id);
-    if (!gate.allowed) return respond(false, { error: 'Access denied', error_code: 'TRIAL_EXPIRED' });
+    if (!gate.allowed) return respond(false, { error: 'Access denied', error_code: 'TRIAL_EXPIRED' }, 403);
 
     let body: any;
-    try { body = await req.json(); } catch { return respond(false, { error: 'Invalid JSON body' }); }
+    try { body = await req.json(); } catch { return respond(false, { error: 'Invalid JSON body' }, 400); }
 
     const { seller_id, shipment_ids, format, layout = 'meli_100x150' } = body;
-    if (!seller_id || !shipment_ids?.length) return respond(false, { error: 'seller_id and shipment_ids required' });
-    if (!['pdf', 'zpl'].includes(format)) return respond(false, { error: 'format must be pdf or zpl' });
-    if (!LAYOUTS[layout]) return respond(false, { error: 'Invalid layout' });
+    if (!seller_id || !shipment_ids?.length) return respond(false, { error: 'seller_id and shipment_ids required' }, 400);
+    if (!['pdf', 'zpl'].includes(format)) return respond(false, { error: 'format must be pdf or zpl' }, 400);
+    if (!LAYOUTS[layout]) return respond(false, { error: 'Invalid layout' }, 400);
 
     const layoutInfo = LAYOUTS[layout];
     const targetWPt = layoutInfo.widthMm * MM_TO_PT;
@@ -202,9 +257,9 @@ serve(async (req) => {
     const { data: mlAccount } = await supabaseAdmin
       .from('ml_accounts').select('access_token, ml_user_id')
       .eq('user_id', user.id).eq('ml_user_id', seller_id).eq('is_active', true).maybeSingle();
-    if (!mlAccount) return respond(false, { error: 'ML account not found' });
+    if (!mlAccount) return respond(false, { error: 'ML account not found' }, 404);
 
-    // Validate shipments — reprint-aware eligibility (mirrors labeltestEligibility.ts)
+    // Validate shipments — reprint-aware eligibility
     const REPRINT_SUBSTATUSES = new Set([
       'ready_to_print', 'printed', 'ready_for_pickup', 'in_packing_list',
       'invoice_issued', 'invoice_validated', 'not_required',
@@ -228,7 +283,6 @@ serve(async (req) => {
         continue;
       }
       if (!s.label_available) {
-        // Reprint-eligible substatuses override label_available flag
         const sub = s.shipment_substatus || '';
         if (!REPRINT_SUBSTATUSES.has(sub)) {
           validationErrors.push({ shipment_id: sid, reason_code: 'sem_label_available', reason_message: `Etiqueta não disponível (substatus: ${sub || 'vazio'})` });
@@ -240,7 +294,13 @@ serve(async (req) => {
     }
 
     if (validIds.length === 0) {
-      return respond(false, { error: 'Nenhum envio válido', validation_errors: validationErrors });
+      return respond(false, {
+        error: 'Nenhum envio válido',
+        data: {
+          success_count: 0, error_count: validationErrors.length,
+          errors: validationErrors,
+        },
+      }, 422);
     }
 
     const fileHash = hashCode(`${seller_id}_${validIds.join(',')}_${Date.now()}`);
@@ -262,29 +322,36 @@ serve(async (req) => {
     let finalZplContent: string | null = null;
     let totalSuccess = 0;
     let totalPages = 0;
+    const perShipmentErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const perShipmentLog: any[] = [];
 
-    // ─────────────────────────────────────────────────────────────────
-    // STEP 1: Fetch ZPL for ALL shipments from ML API
-    // ─────────────────────────────────────────────────────────────────
+    // ─── STEP 1: Fetch ZPL for ALL shipments from ML API ──────────
     console.log(`[labeltest] Step 1: Fetching ZPL for ${validIds.length} shipments`);
     const zplByShipment = new Map<string, string>();
 
     for (const sid of validIds) {
-      const zpl = await fetchZplFromMl(sid, mlAccount.access_token);
-      if (zpl) {
-        zplByShipment.set(sid, zpl);
-        console.log(`[labeltest] ZPL fetched: ${sid} (${zpl.length} chars)`);
-      } else {
-        perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'ZPL download failed from ML' });
-        console.error(`[labeltest] ZPL failed: ${sid}`);
+      const result = await fetchZplFromMl(sid, mlAccount.access_token);
+      if (!result.zpl) {
+        perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
+        continue;
       }
+      // Validate ZPL content
+      const validation = validateZpl(result.zpl);
+      if (!validation.valid) {
+        perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
+        console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
+        continue;
+      }
+      zplByShipment.set(sid, validation.cleaned);
+      console.log(`[labeltest] ZPL validated: ${sid} (${validation.cleaned.length} chars)`);
       // Rate limit between ML calls
       if (validIds.indexOf(sid) < validIds.length - 1) await sleep(150);
     }
 
     if (format === 'zpl') {
-      // ─── ZPL format: just concatenate and return ────────────────
+      // ─── ZPL format: concatenate valid and return ─────────────
       const zplParts: string[] = [];
       for (const sid of validIds) {
         const zpl = zplByShipment.get(sid);
@@ -297,29 +364,27 @@ serve(async (req) => {
       }
       finalZplContent = zplParts.join('\n');
     } else {
-      // ─── PDF format: ZPL → Labelary PNG → pdf-lib PDF ──────────
-      // STEP 2: Convert ZPL to PNG via Labelary
-      console.log(`[labeltest] Step 2: Converting ${zplByShipment.size} ZPLs to PNG via Labelary`);
+      // ─── PDF format: ZPL → Labelary PNG → pdf-lib PDF ────────
+      console.log(`[labeltest] Step 2: Converting ${zplByShipment.size} ZPLs to PNG via Labelary (layout=${layout})`);
       const imageByShipment = new Map<string, Uint8Array>();
 
       for (const [sid, zpl] of zplByShipment) {
-        const png = await zplToImage(zpl, sid);
-        if (png) {
-          imageByShipment.set(sid, png);
-          console.log(`[labeltest] Labelary OK: ${sid} (${(png.length / 1024).toFixed(0)}KB)`);
+        const result = await zplToImage(zpl, sid, layout);
+        if (result.image) {
+          imageByShipment.set(sid, result.image);
         } else {
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Labelary conversion failed' });
-          console.error(`[labeltest] Labelary failed: ${sid}`);
+          // FALLBACK: mark this shipment as error, continue others
+          perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'LABELARY_CONVERSION_FAILED', reason_message: result.reason_message || 'Conversão Labelary falhou' });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
+          console.error(`[labeltest] Labelary failed for ${sid}: ${result.reason_code} — continuing with remaining`);
         }
-        // Rate limit between Labelary calls
         await sleep(200);
       }
 
-      // STEP 3: Build PDF with fixed dimensions (legacy-faithful)
-      console.log(`[labeltest] Step 3: Building PDF, layout=${layout}`);
+      // STEP 3: Build PDF with fixed dimensions
+      console.log(`[labeltest] Step 3: Building PDF, layout=${layout}, images=${imageByShipment.size}`);
       const resultPdf = await PDFDocument.create();
 
-      // Load fonts for header layout
       let font: any = null;
       let fontBold: any = null;
       if (layoutInfo.includeHeader) {
@@ -327,7 +392,6 @@ serve(async (req) => {
         fontBold = await resultPdf.embedFont(StandardFonts.HelveticaBold);
       }
 
-      // Load header prefs + order data
       let headerPrefs = { ...DEFAULT_HEADER_PREFS };
       const orderItemsMap = new Map<string, any[]>();
       const ordersMap = new Map<string, any>();
@@ -356,7 +420,7 @@ serve(async (req) => {
         }
       }
 
-      // STEP 4: For each shipment, embed label image into PDF page
+      // STEP 4: Embed each label image into PDF
       for (const sid of validIds) {
         const imgBytes = imageByShipment.get(sid);
         if (!imgBytes) continue; // already logged as error
@@ -365,11 +429,7 @@ serve(async (req) => {
           const pngImage = await resultPdf.embedPng(imgBytes);
 
           if (layoutInfo.includeHeader) {
-            // ─── Header layout: 100x175mm ─────────────────────────
-            // Top 25mm = header text, bottom 150mm = label image
             const page = resultPdf.addPage([targetWPt, targetHPt]);
-
-            // Draw label image in bottom 150mm area (full width)
             const labelAreaY = 0;
             const labelAreaH = LABEL_H_PT;
             const imgAspect = pngImage.width / pngImage.height;
@@ -377,21 +437,12 @@ serve(async (req) => {
 
             let drawW: number, drawH: number, drawX: number, drawY: number;
             if (imgAspect > targetAspect) {
-              // Image wider: fit to width
-              drawW = LABEL_W_PT;
-              drawH = LABEL_W_PT / imgAspect;
-              drawX = 0;
-              drawY = labelAreaY + (labelAreaH - drawH) / 2;
+              drawW = LABEL_W_PT; drawH = LABEL_W_PT / imgAspect; drawX = 0; drawY = labelAreaY + (labelAreaH - drawH) / 2;
             } else {
-              // Image taller: fit to height
-              drawH = labelAreaH;
-              drawW = labelAreaH * imgAspect;
-              drawX = (LABEL_W_PT - drawW) / 2;
-              drawY = labelAreaY;
+              drawH = labelAreaH; drawW = labelAreaH * imgAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = labelAreaY;
             }
             page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
 
-            // Draw header text in top 25mm
             const orderId = shipMap.get(sid)?.order_id;
             const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
             const orderItems = orderItemsMap.get(orderId) || [];
@@ -407,47 +458,31 @@ serve(async (req) => {
               yPos -= lineH;
             }
 
-            // Separator line between header and label
             const sepY = LABEL_H_PT;
-            page.drawLine({
-              start: { x: 4, y: sepY },
-              end: { x: LABEL_W_PT - 4, y: sepY },
-              thickness: 0.5, color: rgb(0.5, 0.5, 0.5),
-            });
-
+            page.drawLine({ start: { x: 4, y: sepY }, end: { x: LABEL_W_PT - 4, y: sepY }, thickness: 0.5, color: rgb(0.5, 0.5, 0.5) });
             totalPages++;
           } else {
-            // ─── Standard/no-NF layout: 100x150mm ────────────────
             const page = resultPdf.addPage([targetWPt, targetHPt]);
-
-            // Fit image to full page (0 margins, like legacy)
             const imgAspect = pngImage.width / pngImage.height;
             const pageAspect = targetWPt / targetHPt;
 
             let drawW: number, drawH: number, drawX: number, drawY: number;
             if (imgAspect > pageAspect) {
-              drawW = targetWPt;
-              drawH = targetWPt / imgAspect;
-              drawX = 0;
-              drawY = (targetHPt - drawH) / 2;
+              drawW = targetWPt; drawH = targetWPt / imgAspect; drawX = 0; drawY = (targetHPt - drawH) / 2;
             } else {
-              drawH = targetHPt;
-              drawW = targetHPt * imgAspect;
-              drawX = (targetWPt - drawW) / 2;
-              drawY = 0;
+              drawH = targetHPt; drawW = targetHPt * imgAspect; drawX = (targetWPt - drawW) / 2; drawY = 0;
             }
             page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
             totalPages++;
           }
 
-          // If DANFE is needed and layout includes it, fetch PDF and embed DANFE page
+          // DANFE
           if (layoutInfo.includeDanfe && layout !== 'meli_100x150_no_nf') {
             const danfeBytes = await fetchDanfePdf(sid, mlAccount.access_token);
             if (danfeBytes) {
               try {
                 const danfePdf = await PDFDocument.load(danfeBytes);
                 const pageCount = danfePdf.getPageCount();
-                // DANFE is typically the 2nd page in ML's PDF
                 if (pageCount > 1) {
                   const [danfePage] = await resultPdf.copyPages(danfePdf, [1]);
                   resultPdf.addPage(danfePage);
@@ -461,18 +496,14 @@ serve(async (req) => {
           }
 
           totalSuccess++;
-          perShipmentLog.push({
-            shipment_id: sid, status: 'ok',
-            source: 'zpl_labelary',
-            output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
-          });
+          perShipmentLog.push({ shipment_id: sid, status: 'ok', source: 'zpl_labelary', output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm });
         } catch (embedErr: any) {
           console.error(`[labeltest] Embed error for ${sid}:`, embedErr);
+          perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir imagem: ${embedErr.message}` });
           perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'PDF embed failed: ' + embedErr.message });
         }
       }
 
-      // Save final PDF only if we have pages
       if (totalPages > 0) {
         const pdfBytes = await resultPdf.save();
         finalPdfBase64 = uint8ToBase64(pdfBytes);
@@ -486,19 +517,22 @@ serve(async (req) => {
     const elapsed = Date.now() - t0;
     const finalStatus = totalSuccess === validIds.length ? 'concluido' : totalSuccess > 0 ? 'parcial' : 'erro';
 
+    // Merge all errors
+    const allErrors = [...validationErrors, ...perShipmentErrors];
+
     // Structured log summary
     console.log(`[labeltest] === GENERATION SUMMARY ===`);
     console.log(JSON.stringify({
       requested_shipments: shipment_ids.length,
       valid_shipments: validIds.length,
       processed_labels: totalSuccess,
+      error_count: allErrors.length,
       total_pages: totalPages,
       pdf_size_bytes: finalPdfBase64 ? Math.round(finalPdfBase64.length * 0.75) : 0,
       zpl_size_bytes: finalZplContent?.length || 0,
-      validation_errors_count: validationErrors.length,
-      per_shipment_errors: perShipmentLog.filter(p => p.status === 'error').length,
       status: finalStatus,
       elapsed_ms: elapsed,
+      errors: allErrors,
     }));
 
     if (jobId) {
@@ -510,21 +544,20 @@ serve(async (req) => {
       } as any).eq('id', jobId);
     }
 
-    // CRITICAL: If 0 labels succeeded, return failure — never allow empty PDF download
+    // CRITICAL: If 0 labels succeeded, return failure
     if (totalSuccess <= 0) {
       console.error(`[labeltest] ZERO labels generated — returning error`);
       return respond(false, {
-        error: 'Nenhuma etiqueta válida foi gerada. Verifique seleção, status e nota fiscal dos envios.',
+        error: 'Nenhuma etiqueta válida foi gerada',
         data: {
           job_id: jobId,
-          total_success: 0,
-          total_pages: 0,
-          processed_labels: 0,
-          validation_errors: validationErrors,
+          success_count: 0,
+          error_count: allErrors.length,
+          errors: allErrors,
           per_shipment: perShipmentLog,
           processing_time_ms: elapsed,
         },
-      });
+      }, 422);
     }
 
     return respond(true, {
@@ -532,9 +565,11 @@ serve(async (req) => {
         job_id: jobId,
         pdf_base64: finalPdfBase64,
         zpl_content: finalZplContent,
+        success_count: totalSuccess,
+        error_count: perShipmentErrors.length,
+        errors: allErrors,
         total_success: totalSuccess,
         total_pages: totalPages,
-        validation_errors: validationErrors,
         per_shipment: perShipmentLog,
         layout,
         page_width_mm: layoutInfo.widthMm,
@@ -548,6 +583,6 @@ serve(async (req) => {
     return respond(false, {
       error: error.message || 'Internal server error',
       diagnostics: { error_stage: 'unhandled', processing_time_ms: Date.now() - t0 },
-    });
+    }, 500);
   }
 });

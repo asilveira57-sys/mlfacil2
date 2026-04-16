@@ -51,7 +51,7 @@ export function LabelGenerationProgress({ progress }: LabelGenerationProgressPro
       case 'completed':
         return `${progress.processed_labels} etiqueta(s) gerada(s) com sucesso!`;
       case 'partial':
-        return `${progress.processed_labels} gerada(s), ${progress.error_batches} lote(s) com erro`;
+        return `${progress.processed_labels} gerada(s), ${progress.error_batches} falharam`;
       case 'error':
         return 'Erro ao gerar etiquetas';
       default:
