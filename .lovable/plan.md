@@ -1,48 +1,35 @@
 
 
-# Desbloquear MEGATOOLSF — Fail-Open quando Cache Está Vazio
+## Diagnosis
 
-## Diagnóstico
+Two bugs prevent headers from appearing on labels in the labelTest module:
 
-O seller MEGATOOLSF (`seller_id: 127163577`) está com **zero registros** na `meli_orders_cache` — nenhum pedido de qualquer status, em qualquer data. Isso indica que a sincronização de pedidos nunca rodou para essa conta, não que ele não tem vendas.
+1. **Wrong table name** (line 459 of `index.ts`): The edge function queries `shipping_label_header_prefs` but the actual database table is `meli_label_header_preferences`. This causes the preferences query to silently return null.
 
-A verificação de elegibilidade (`useShippingEligibility`) faz `COUNT(*) WHERE order_status = 'paid' AND last 30 days`, encontra 0, e bloqueia o acesso.
+2. **Direct PDF fallback skips header rendering** (lines 489-508): When ZPL is invalid and the system falls back to ML's direct PDF, it copies pages verbatim via `copyPages()` — no header area is created, no text is drawn. The 100x175 layout is effectively ignored.
 
-## Solução
+## Fix Plan
 
-Aplicar a política de fail-open já existente no projeto: se o cache total do seller está vazio (zero registros em qualquer status/data), considerar como "dados não sincronizados" e liberar o acesso.
+### File: `supabase/functions/ml-generate-labels-labeltest/index.ts`
 
-## Alteração
+**Fix 1 — Table name** (line 459):
+- Change `shipping_label_header_prefs` → `meli_label_header_preferences`
 
-**Arquivo:** `src/hooks/useShippingEligibility.ts`
+**Fix 2 — Add header to direct PDF fallback path** (lines 489-508):
+- When `layoutInfo.includeHeader` is true and the fallback PDF path is used:
+  - Create a new 100x175mm page
+  - Load the fallback PDF, extract page 0 (label)
+  - Embed it as a sub-page in the bottom 150mm area (same as the Labelary path)
+  - Draw the header text in the top 25mm area using the same `buildHeaderLines` logic
+  - Draw the separator line
+- When header is NOT needed, keep current behavior (copy pages directly)
 
-Na `queryFn`, antes de declarar inelegível, verificar se o seller tem **algum** registro no cache. Se não tiver nenhum, é fail-open (cache não populado):
+**Fix 3 — DANFE extraction from direct PDF fallback**:
+- If the direct PDF has >1 page and `includeDanfe` is true, also copy page index 1 (DANFE) as a separate page — same logic as the ZPL path already does via `fetchDanfePdf`.
 
-```typescript
-// Após a query de 30 dias retornar 0...
-if (sales30d === 0) {
-  // Check if cache has ANY orders for this seller (any status, any date)
-  const { count: totalCached } = await supabase
-    .from('meli_orders_cache')
-    .select('*', { count: 'exact', head: true })
-    .eq('seller_id', sellerId);
+### No other files changed. No shipping-labels module changes.
 
-  if ((totalCached ?? 0) === 0) {
-    // Cache empty = sync never ran, fail-open
-    return { eligible: true, reason: null, sales30d: 0 };
-  }
-}
-```
+## Technical Detail
 
-Se o cache tem registros mas nenhum pago nos últimos 30 dias, aí sim bloqueia (comportamento atual).
-
-## Impacto
-
-- MEGATOOLSF: desbloqueado imediatamente
-- Contas com cache populado: zero mudança
-- Contas novas antes do primeiro sync: acesso liberado (correto)
-- Segurança: mantida — contas com dados reais e sem vendas continuam bloqueadas
-
-## Arquivo alterado
-- `src/hooks/useShippingEligibility.ts` (uma verificação adicional)
+The direct PDF fallback will convert the copied PDF page into an embedded object using `pdf-lib`'s `embedPage()` method, which allows placing it at a specific position within a new page — preserving the header+label layout structure.
 
