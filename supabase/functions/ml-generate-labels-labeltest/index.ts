@@ -112,6 +112,37 @@ function validateZpl(raw: string): { valid: boolean; cleaned: string; reason_cod
   return { valid: true, cleaned };
 }
 
+// ─── Fallback: fetch label as PDF directly from ML API ──────────────
+async function fetchLabelPdfDirect(shipmentId: string, token: string): Promise<{ pdfBytes: Uint8Array | null; reason_code?: string; reason_message?: string }> {
+  for (let a = 1; a <= 3; a++) {
+    const t0 = Date.now();
+    try {
+      const r = await fetch(
+        `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const latency = Date.now() - t0;
+      if ((r.status === 429 || r.status >= 500) && a < 3) {
+        console.warn(`[labeltest] ML PDF direct ${shipmentId} attempt ${a}: status=${r.status} latency=${latency}ms — retrying`);
+        await sleep(getBackoff(a));
+        continue;
+      }
+      if (!r.ok) {
+        console.error(`[labeltest] ML PDF direct error ${shipmentId}: status=${r.status} latency=${latency}ms`);
+        return { pdfBytes: null, reason_code: 'ML_PDF_FETCH_FAILED', reason_message: `API ML retornou status ${r.status}` };
+      }
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      console.log(`[labeltest] ML PDF direct fetched: ${shipmentId} ${(bytes.length / 1024).toFixed(0)}KB ${latency}ms`);
+      return { pdfBytes: bytes };
+    } catch (e: any) {
+      const latency = Date.now() - t0;
+      console.error(`[labeltest] PDF direct fetch error ${shipmentId} attempt ${a}: ${e.message} ${latency}ms`);
+      if (a < 3) await sleep(getBackoff(a));
+    }
+  }
+  return { pdfBytes: null, reason_code: 'ML_PDF_FETCH_TIMEOUT', reason_message: 'Falha ao buscar PDF direto após 3 tentativas' };
+}
+
 // ─── ZPL fetch from ML API ──────────────────────────────────────────
 async function fetchZplFromMl(shipmentId: string, token: string): Promise<{ zpl: string | null; reason_code?: string; reason_message?: string }> {
   for (let a = 1; a <= 3; a++) {
