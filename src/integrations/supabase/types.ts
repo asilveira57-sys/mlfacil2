@@ -8763,6 +8763,7 @@ export type Database = {
           job_completed_at: string | null
           job_started_at: string | null
           layout: string
+          module: string | null
           page_height_mm: number | null
           page_height_pt: number | null
           page_width_mm: number | null
@@ -8791,6 +8792,7 @@ export type Database = {
           job_completed_at?: string | null
           job_started_at?: string | null
           layout?: string
+          module?: string | null
           page_height_mm?: number | null
           page_height_pt?: number | null
           page_width_mm?: number | null
@@ -8819,6 +8821,7 @@ export type Database = {
           job_completed_at?: string | null
           job_started_at?: string | null
           layout?: string
+          module?: string | null
           page_height_mm?: number | null
           page_height_pt?: number | null
           page_width_mm?: number | null

@@ -573,8 +573,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
 
       dbg('[generate] started, shipments=', shipmentIds.length);
 
-      // Call V2 edge function
-      const response = await supabase.functions.invoke('ml-generate-labels-v2', {
+      // Call labeltest edge function (dimension-normalized)
+      const response = await supabase.functions.invoke('ml-generate-labels-labeltest', {
         headers,
         body: { seller_id: sellerId, shipment_ids: shipmentIds, format, layout },
       });
