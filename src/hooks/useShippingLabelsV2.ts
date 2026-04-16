@@ -287,35 +287,37 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   }
 
   function handleGenerationComplete(data: any, format: string) {
-    logRecovery('complete', `labels=${data.total_labels}, errors=${data.error_batches || 0}`);
+    const labelCount = data.total_success || data.total_labels || 0;
+    const errorCount = data.error_batches || (data.validation_errors?.length) || 0;
+    logRecovery('complete', `labels=${labelCount}, errors=${errorCount}`);
 
     setActiveJobState(null);
     clearActiveJob();
 
-    const status = data.error_batches > 0 ? 'partial' : 'completed';
+    const status = errorCount > 0 ? 'partial' : 'completed';
     setGenerationProgress({
       status,
-      total_labels: data.total_labels || 0,
-      processed_labels: data.total_labels || 0,
+      total_labels: labelCount,
+      processed_labels: labelCount,
       total_batches: 1,
       completed_batches: 1,
-      error_batches: data.error_batches || 0,
+      error_batches: errorCount,
     });
 
     // Download file if available
     if (format === 'pdf' && data.pdf_base64) {
       downloadPdf(data.pdf_base64, data.download_filename);
-      toast({ title: 'PDF gerado (V2)', description: `${data.total_labels} etiqueta(s) — ${data.page_width_mm || 100}x${data.page_height_mm || 150}mm` });
+      toast({ title: 'PDF gerado (V2)', description: `${labelCount} etiqueta(s) — ${data.page_width_mm || 100}x${data.page_height_mm || 150}mm` });
     } else if (format === 'zpl' && data.zpl_content) {
       downloadZpl(data.zpl_content, data.download_filename);
-      toast({ title: 'ZPL gerado (V2)', description: `${data.total_labels} etiqueta(s)` });
+      toast({ title: 'ZPL gerado (V2)', description: `${labelCount} etiqueta(s)` });
     } else if (data.file_url) {
       window.open(data.file_url, '_blank');
-      toast({ title: 'Etiqueta gerada (V2)', description: `${data.total_labels} etiqueta(s)` });
+      toast({ title: 'Etiqueta gerada (V2)', description: `${labelCount} etiqueta(s)` });
     }
 
-    if (data.error_batches > 0) {
-      toast({ title: 'Atenção', description: `${data.error_batches} envio(s) falharam`, variant: 'destructive' });
+    if (errorCount > 0) {
+      toast({ title: 'Atenção', description: `${errorCount} envio(s) falharam`, variant: 'destructive' });
     }
 
     queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
@@ -578,22 +580,31 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         headers,
         body: { seller_id: sellerId, shipment_ids: shipmentIds, format, layout },
       });
-      if (response.error) throw new Error(response.error.message);
-      if (!response.data.success) {
-        const ve = response.data.validationErrors as Array<{ shipment_id: string; reason: string }> | undefined;
+      if (response.error) throw new Error(response.error.message || 'Edge Function returned a non-2xx status code');
+      const resData = response.data;
+      // Handle { ok: true/false, data: {...}, error: "..." } format
+      if (resData?.ok === false) {
+        const ve = resData?.data?.validation_errors as Array<{ shipment_id: string; reason: string }> | undefined;
         if (ve && ve.length > 0) { const reasons = [...new Set(ve.map(e => e.reason))]; throw new Error(`${ve.length} envio(s) inválido(s): ${reasons.join('; ')}`); }
-        throw new Error(response.data.message || 'Erro ao gerar etiquetas');
+        throw new Error(resData?.error || 'Erro ao gerar etiquetas');
       }
+      // Also handle legacy { success: false } format
+      if (resData?.success === false && !resData?.ok) {
+        throw new Error(resData?.error || resData?.message || 'Erro ao gerar etiquetas');
+      }
+
+      // Extract inner data (new format nests under .data)
+      const resultData = resData?.data || resData;
 
       // Update persisted job with real job_id and completed data
-      if (response.data.job_id) {
-        jobEntry.jobId = response.data.job_id;
-        dbg('[generate] real jobId=', response.data.job_id);
+      if (resultData.job_id) {
+        jobEntry.jobId = resultData.job_id;
+        dbg('[generate] real jobId=', resultData.job_id);
       }
-      jobEntry.completedData = response.data;
+      jobEntry.completedData = resultData;
       saveActiveJob(jobEntry);
 
-      return response.data;
+      return resultData;
     },
     onSuccess: (data, variables) => {
       if (!variables.shipmentId) setSelectedIds(new Set());
