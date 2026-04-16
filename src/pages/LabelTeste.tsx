@@ -9,7 +9,7 @@ import type { ShippingOrder, LabelLayout } from '@/hooks/useShippingLabelsV2';
 import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
 import { ShippingPagination } from '@/components/shipping/ShippingPagination';
-import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
+import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { PrintHistoryV2 } from '@/components/shipping-v2/PrintHistoryV2';
 import { PrintInstructionsV2 } from '@/components/shipping-v2/PrintInstructionsV2';
@@ -63,10 +63,11 @@ export default function LabelTeste() {
 
   const handleSelectAll = useCallback(() => { selectAll(filteredOrders); }, [selectAll, filteredOrders]);
   const handleViewDetails = (order: ShippingOrder) => { setSelectedOrder(order); setDrawerOpen(true); };
-  const handleGenerateLabels = (format: 'pdf' | 'zpl', layout: LabelLayout) => { generateLabels({ format, layout }); };
+  const handleGenerateLabels = (format: 'pdf' | 'zpl', layout: LabelTestLayout) => { generateLabels({ format, layout: layout as LabelLayout }); };
   const handleReprintLabel = (shipmentId: string, format: 'pdf' | 'zpl', layout: LabelLayout) => { generateLabels({ format, layout, shipmentId }); };
   const selectedOrders = orders.filter((o: ShippingOrder) => selectedIds.has(o.id));
-  const capabilities = computeSelectionCapabilities(selectedOrders);
+  const capabilities = computeCapabilitiesV2(selectedOrders);
+  const diagnostics = computeSelectionDiagnostics(selectedOrders);
 
   if (accountLoading || !initialized || mlAccessLoading) {
     return (
@@ -163,13 +164,14 @@ export default function LabelTeste() {
       </main>
 
       {/* Bulk actions */}
-      <BulkActionsBar
+      <BulkActionsBarV2
         selectedCount={selectedIds.size}
         onClear={clearSelection}
         onGenerateLabels={handleGenerateLabels}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
         capabilities={capabilities}
+        diagnostics={diagnostics}
       />
 
       {/* Details drawer */}
