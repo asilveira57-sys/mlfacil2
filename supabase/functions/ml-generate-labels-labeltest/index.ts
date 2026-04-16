@@ -485,7 +485,31 @@ serve(async (req) => {
         if (!imgBytes && !fallbackPdfBytes) continue; // already logged as error
 
         try {
-          const pngImage = await resultPdf.embedPng(imgBytes);
+          // ── Direct PDF fallback path: copy pages from ML PDF ──
+          if (!imgBytes && fallbackPdfBytes) {
+            try {
+              const srcPdf = await PDFDocument.load(fallbackPdfBytes);
+              const srcPageCount = srcPdf.getPageCount();
+              // Copy first page (the label itself)
+              const indices = Array.from({ length: srcPageCount }, (_, i) => i);
+              const copiedPages = await resultPdf.copyPages(srcPdf, indices);
+              for (const cp of copiedPages) {
+                resultPdf.addPage(cp);
+                totalPages++;
+              }
+              totalSuccess++;
+              perShipmentLog.push({ shipment_id: sid, status: 'ok', source: 'ml_pdf_direct', pages: srcPageCount, output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm });
+              console.log(`[labeltest] Direct PDF embedded for ${sid}: ${srcPageCount} pages`);
+            } catch (pdfErr: any) {
+              console.error(`[labeltest] Direct PDF embed error for ${sid}:`, pdfErr);
+              perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir PDF direto: ${pdfErr.message}` });
+              perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Direct PDF embed failed: ' + pdfErr.message });
+            }
+            continue;
+          }
+
+          // ── Standard path: Labelary PNG → embed ──
+          const pngImage = await resultPdf.embedPng(imgBytes!);
 
           if (layoutInfo.includeHeader) {
             const page = resultPdf.addPage([targetWPt, targetHPt]);
