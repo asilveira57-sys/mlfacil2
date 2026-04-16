@@ -112,6 +112,37 @@ function validateZpl(raw: string): { valid: boolean; cleaned: string; reason_cod
   return { valid: true, cleaned };
 }
 
+// ─── Fallback: fetch label as PDF directly from ML API ──────────────
+async function fetchLabelPdfDirect(shipmentId: string, token: string): Promise<{ pdfBytes: Uint8Array | null; reason_code?: string; reason_message?: string }> {
+  for (let a = 1; a <= 3; a++) {
+    const t0 = Date.now();
+    try {
+      const r = await fetch(
+        `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const latency = Date.now() - t0;
+      if ((r.status === 429 || r.status >= 500) && a < 3) {
+        console.warn(`[labeltest] ML PDF direct ${shipmentId} attempt ${a}: status=${r.status} latency=${latency}ms — retrying`);
+        await sleep(getBackoff(a));
+        continue;
+      }
+      if (!r.ok) {
+        console.error(`[labeltest] ML PDF direct error ${shipmentId}: status=${r.status} latency=${latency}ms`);
+        return { pdfBytes: null, reason_code: 'ML_PDF_FETCH_FAILED', reason_message: `API ML retornou status ${r.status}` };
+      }
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      console.log(`[labeltest] ML PDF direct fetched: ${shipmentId} ${(bytes.length / 1024).toFixed(0)}KB ${latency}ms`);
+      return { pdfBytes: bytes };
+    } catch (e: any) {
+      const latency = Date.now() - t0;
+      console.error(`[labeltest] PDF direct fetch error ${shipmentId} attempt ${a}: ${e.message} ${latency}ms`);
+      if (a < 3) await sleep(getBackoff(a));
+    }
+  }
+  return { pdfBytes: null, reason_code: 'ML_PDF_FETCH_TIMEOUT', reason_message: 'Falha ao buscar PDF direto após 3 tentativas' };
+}
+
 // ─── ZPL fetch from ML API ──────────────────────────────────────────
 async function fetchZplFromMl(shipmentId: string, token: string): Promise<{ zpl: string | null; reason_code?: string; reason_message?: string }> {
   for (let a = 1; a <= 3; a++) {
@@ -328,20 +359,47 @@ serve(async (req) => {
     // ─── STEP 1: Fetch ZPL for ALL shipments from ML API ──────────
     console.log(`[labeltest] Step 1: Fetching ZPL for ${validIds.length} shipments`);
     const zplByShipment = new Map<string, string>();
+    const directPdfByShipment = new Map<string, Uint8Array>(); // fallback for invalid ZPL
 
     for (const sid of validIds) {
       const result = await fetchZplFromMl(sid, mlAccount.access_token);
       if (!result.zpl) {
-        perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
-        perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
+        // If ZPL fetch failed entirely and format is pdf, try direct PDF fallback
+        if (format === 'pdf') {
+          console.log(`[labeltest] ZPL fetch failed for ${sid}, trying direct PDF fallback`);
+          const pdfResult = await fetchLabelPdfDirect(sid, mlAccount.access_token);
+          if (pdfResult.pdfBytes) {
+            directPdfByShipment.set(sid, pdfResult.pdfBytes);
+            console.log(`[labeltest] Direct PDF fallback OK for ${sid}`);
+          } else {
+            perShipmentErrors.push({ shipment_id: sid, reason_code: pdfResult.reason_code || 'ML_FETCH_FAILED', reason_message: pdfResult.reason_message || 'Falha ao baixar etiqueta' });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', error: pdfResult.reason_message });
+          }
+        } else {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
+        }
         continue;
       }
       // Validate ZPL content
       const validation = validateZpl(result.zpl);
       if (!validation.valid) {
-        perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
-        perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
-        console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
+        // ZPL invalid — for PDF format, fallback to direct PDF from ML
+        if (format === 'pdf') {
+          console.log(`[labeltest] ZPL invalid for ${sid} (${validation.reason_code}), trying direct PDF fallback`);
+          const pdfResult = await fetchLabelPdfDirect(sid, mlAccount.access_token);
+          if (pdfResult.pdfBytes) {
+            directPdfByShipment.set(sid, pdfResult.pdfBytes);
+            console.log(`[labeltest] Direct PDF fallback OK for ${sid}`);
+          } else {
+            perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: `${validation.reason_message!} (fallback PDF também falhou)` });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
+          }
+        } else {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
+          console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
+        }
         continue;
       }
       zplByShipment.set(sid, validation.cleaned);
@@ -420,13 +478,38 @@ serve(async (req) => {
         }
       }
 
-      // STEP 4: Embed each label image into PDF
+      // STEP 4: Embed each label into PDF (from Labelary PNG or direct PDF fallback)
       for (const sid of validIds) {
         const imgBytes = imageByShipment.get(sid);
-        if (!imgBytes) continue; // already logged as error
+        const fallbackPdfBytes = directPdfByShipment.get(sid);
+        if (!imgBytes && !fallbackPdfBytes) continue; // already logged as error
 
         try {
-          const pngImage = await resultPdf.embedPng(imgBytes);
+          // ── Direct PDF fallback path: copy pages from ML PDF ──
+          if (!imgBytes && fallbackPdfBytes) {
+            try {
+              const srcPdf = await PDFDocument.load(fallbackPdfBytes);
+              const srcPageCount = srcPdf.getPageCount();
+              // Copy first page (the label itself)
+              const indices = Array.from({ length: srcPageCount }, (_, i) => i);
+              const copiedPages = await resultPdf.copyPages(srcPdf, indices);
+              for (const cp of copiedPages) {
+                resultPdf.addPage(cp);
+                totalPages++;
+              }
+              totalSuccess++;
+              perShipmentLog.push({ shipment_id: sid, status: 'ok', source: 'ml_pdf_direct', pages: srcPageCount, output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm });
+              console.log(`[labeltest] Direct PDF embedded for ${sid}: ${srcPageCount} pages`);
+            } catch (pdfErr: any) {
+              console.error(`[labeltest] Direct PDF embed error for ${sid}:`, pdfErr);
+              perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir PDF direto: ${pdfErr.message}` });
+              perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Direct PDF embed failed: ' + pdfErr.message });
+            }
+            continue;
+          }
+
+          // ── Standard path: Labelary PNG → embed ──
+          const pngImage = await resultPdf.embedPng(imgBytes!);
 
           if (layoutInfo.includeHeader) {
             const page = resultPdf.addPage([targetWPt, targetHPt]);
