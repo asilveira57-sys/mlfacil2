@@ -204,19 +204,38 @@ serve(async (req) => {
       .eq('user_id', user.id).eq('ml_user_id', seller_id).eq('is_active', true).maybeSingle();
     if (!mlAccount) return respond(false, { error: 'ML account not found' });
 
-    // Validate shipments
-    const validationErrors: { shipment_id: string; reason: string }[] = [];
+    // Validate shipments — reprint-aware eligibility (mirrors labeltestEligibility.ts)
+    const REPRINT_SUBSTATUSES = new Set([
+      'ready_to_print', 'printed', 'ready_for_pickup', 'in_packing_list',
+      'invoice_issued', 'invoice_validated', 'not_required',
+    ]);
+
+    const validationErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const validIds: string[] = [];
     const { data: shipments } = await supabaseAdmin
-      .from('meli_shipments_cache').select('shipment_id, order_id, label_available, logistic_type')
+      .from('meli_shipments_cache').select('shipment_id, order_id, label_available, logistic_type, shipment_substatus, shipment_status')
       .eq('seller_id', seller_id).in('shipment_id', shipment_ids);
     const shipMap = new Map((shipments || []).map((s: any) => [s.shipment_id, s]));
 
     for (const sid of shipment_ids) {
       const s = shipMap.get(sid);
-      if (!s) { validationErrors.push({ shipment_id: sid, reason: 'Shipment não encontrado' }); continue; }
-      if (!s.label_available) { validationErrors.push({ shipment_id: sid, reason: 'Etiqueta não disponível' }); continue; }
-      if (s.logistic_type === 'fulfillment') { validationErrors.push({ shipment_id: sid, reason: 'Pedido Full (ML envia)' }); continue; }
+      if (!s) {
+        validationErrors.push({ shipment_id: sid, reason_code: 'shipment_nao_encontrado', reason_message: 'Envio não encontrado no cache' });
+        continue;
+      }
+      if (s.logistic_type === 'fulfillment') {
+        validationErrors.push({ shipment_id: sid, reason_code: 'full', reason_message: 'Pedido Full (ML envia)' });
+        continue;
+      }
+      if (!s.label_available) {
+        // Reprint-eligible substatuses override label_available flag
+        const sub = s.shipment_substatus || '';
+        if (!REPRINT_SUBSTATUSES.has(sub)) {
+          validationErrors.push({ shipment_id: sid, reason_code: 'sem_label_available', reason_message: `Etiqueta não disponível (substatus: ${sub || 'vazio'})` });
+          continue;
+        }
+        console.log(`[labeltest] ${sid}: label_available=false but substatus=${sub} → allowing reprint`);
+      }
       validIds.push(sid);
     }
 
