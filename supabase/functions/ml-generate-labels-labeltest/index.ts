@@ -359,20 +359,47 @@ serve(async (req) => {
     // ─── STEP 1: Fetch ZPL for ALL shipments from ML API ──────────
     console.log(`[labeltest] Step 1: Fetching ZPL for ${validIds.length} shipments`);
     const zplByShipment = new Map<string, string>();
+    const directPdfByShipment = new Map<string, Uint8Array>(); // fallback for invalid ZPL
 
     for (const sid of validIds) {
       const result = await fetchZplFromMl(sid, mlAccount.access_token);
       if (!result.zpl) {
-        perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
-        perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
+        // If ZPL fetch failed entirely and format is pdf, try direct PDF fallback
+        if (format === 'pdf') {
+          console.log(`[labeltest] ZPL fetch failed for ${sid}, trying direct PDF fallback`);
+          const pdfResult = await fetchLabelPdfDirect(sid, mlAccount.access_token);
+          if (pdfResult.pdfBytes) {
+            directPdfByShipment.set(sid, pdfResult.pdfBytes);
+            console.log(`[labeltest] Direct PDF fallback OK for ${sid}`);
+          } else {
+            perShipmentErrors.push({ shipment_id: sid, reason_code: pdfResult.reason_code || 'ML_FETCH_FAILED', reason_message: pdfResult.reason_message || 'Falha ao baixar etiqueta' });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', error: pdfResult.reason_message });
+          }
+        } else {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
+        }
         continue;
       }
       // Validate ZPL content
       const validation = validateZpl(result.zpl);
       if (!validation.valid) {
-        perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
-        perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
-        console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
+        // ZPL invalid — for PDF format, fallback to direct PDF from ML
+        if (format === 'pdf') {
+          console.log(`[labeltest] ZPL invalid for ${sid} (${validation.reason_code}), trying direct PDF fallback`);
+          const pdfResult = await fetchLabelPdfDirect(sid, mlAccount.access_token);
+          if (pdfResult.pdfBytes) {
+            directPdfByShipment.set(sid, pdfResult.pdfBytes);
+            console.log(`[labeltest] Direct PDF fallback OK for ${sid}`);
+          } else {
+            perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: `${validation.reason_message!} (fallback PDF também falhou)` });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
+          }
+        } else {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
+          console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
+        }
         continue;
       }
       zplByShipment.set(sid, validation.cleaned);
