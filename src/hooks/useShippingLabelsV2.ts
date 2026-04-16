@@ -287,35 +287,37 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   }
 
   function handleGenerationComplete(data: any, format: string) {
-    logRecovery('complete', `labels=${data.total_labels}, errors=${data.error_batches || 0}`);
+    const labelCount = data.total_success || data.total_labels || 0;
+    const errorCount = data.error_batches || (data.validation_errors?.length) || 0;
+    logRecovery('complete', `labels=${labelCount}, errors=${errorCount}`);
 
     setActiveJobState(null);
     clearActiveJob();
 
-    const status = data.error_batches > 0 ? 'partial' : 'completed';
+    const status = errorCount > 0 ? 'partial' : 'completed';
     setGenerationProgress({
       status,
-      total_labels: data.total_labels || 0,
-      processed_labels: data.total_labels || 0,
+      total_labels: labelCount,
+      processed_labels: labelCount,
       total_batches: 1,
       completed_batches: 1,
-      error_batches: data.error_batches || 0,
+      error_batches: errorCount,
     });
 
     // Download file if available
     if (format === 'pdf' && data.pdf_base64) {
       downloadPdf(data.pdf_base64, data.download_filename);
-      toast({ title: 'PDF gerado (V2)', description: `${data.total_labels} etiqueta(s) — ${data.page_width_mm || 100}x${data.page_height_mm || 150}mm` });
+      toast({ title: 'PDF gerado (V2)', description: `${labelCount} etiqueta(s) — ${data.page_width_mm || 100}x${data.page_height_mm || 150}mm` });
     } else if (format === 'zpl' && data.zpl_content) {
       downloadZpl(data.zpl_content, data.download_filename);
-      toast({ title: 'ZPL gerado (V2)', description: `${data.total_labels} etiqueta(s)` });
+      toast({ title: 'ZPL gerado (V2)', description: `${labelCount} etiqueta(s)` });
     } else if (data.file_url) {
       window.open(data.file_url, '_blank');
-      toast({ title: 'Etiqueta gerada (V2)', description: `${data.total_labels} etiqueta(s)` });
+      toast({ title: 'Etiqueta gerada (V2)', description: `${labelCount} etiqueta(s)` });
     }
 
-    if (data.error_batches > 0) {
-      toast({ title: 'Atenção', description: `${data.error_batches} envio(s) falharam`, variant: 'destructive' });
+    if (errorCount > 0) {
+      toast({ title: 'Atenção', description: `${errorCount} envio(s) falharam`, variant: 'destructive' });
     }
 
     queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
