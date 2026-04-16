@@ -10,7 +10,6 @@ import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
 import { ShippingPagination } from '@/components/shipping/ShippingPagination';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
-import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { PrintHistoryV2 } from '@/components/shipping-v2/PrintHistoryV2';
 import { PrintInstructionsV2 } from '@/components/shipping-v2/PrintInstructionsV2';
 import { useToast } from '@/hooks/use-toast';
