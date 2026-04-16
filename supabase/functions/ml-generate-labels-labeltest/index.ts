@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
+import JSZip from "npm:jszip@3.10.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -118,6 +119,39 @@ function validateZpl(raw: string): { valid: boolean; cleaned: string; reason_cod
 // e quebrar determinismo visual com o engine legado.
 
 // ─── ZPL fetch from ML API ──────────────────────────────────────────
+// ML retorna ZIP (PK..) quando response_type=zpl2. Caso seja texto puro (^XA), aceita direto.
+async function extractZplFromBytes(bytes: Uint8Array, shipmentId: string): Promise<string | null> {
+  // Heurística: começa com texto ZPL?
+  const head = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 64))).trim();
+  if (head.startsWith('^XA')) {
+    return new TextDecoder().decode(bytes);
+  }
+  // ZIP magic bytes: 0x50 0x4B (PK)
+  if (bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4B) {
+    try {
+      const zip = await JSZip.loadAsync(bytes);
+      const parts: string[] = [];
+      for (const name of Object.keys(zip.files)) {
+        const f = zip.files[name];
+        if (f.dir) continue;
+        const txt = await f.async('string');
+        if (txt.includes('^XA')) parts.push(txt);
+      }
+      if (parts.length > 0) {
+        console.log(`[labeltest] ZIP extracted ${shipmentId}: ${parts.length} ZPL file(s)`);
+        return parts.join('\n');
+      }
+      console.error(`[labeltest] ZIP ${shipmentId}: no ZPL files found inside`);
+    } catch (e: any) {
+      console.error(`[labeltest] ZIP extract error ${shipmentId}: ${e.message}`);
+    }
+    return null;
+  }
+  // fallback: tenta como texto
+  const asText = new TextDecoder().decode(bytes);
+  return asText.includes('^XA') ? asText : null;
+}
+
 async function fetchZplFromMl(shipmentId: string, token: string): Promise<{ zpl: string | null; reason_code?: string; reason_message?: string }> {
   for (let a = 1; a <= 3; a++) {
     const t0 = Date.now();
@@ -136,9 +170,15 @@ async function fetchZplFromMl(shipmentId: string, token: string): Promise<{ zpl:
         console.error(`[labeltest] ML ZPL error ${shipmentId}: status=${r.status} latency=${latency}ms`);
         return { zpl: null, reason_code: 'ML_ZPL_FETCH_FAILED', reason_message: `API ML retornou status ${r.status}` };
       }
-      const text = await r.text();
-      console.log(`[labeltest] ML ZPL fetched: ${shipmentId} ${text.length} chars ${latency}ms`);
-      return { zpl: text };
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      const ct = r.headers.get('content-type') || '';
+      const zpl = await extractZplFromBytes(bytes, shipmentId);
+      if (!zpl) {
+        console.error(`[labeltest] ML ZPL ${shipmentId}: could not extract ZPL (content-type=${ct}, ${bytes.length} bytes)`);
+        return { zpl: null, reason_code: 'ML_ZPL_PARSE_FAILED', reason_message: 'Resposta da ML não contém ZPL extraível' };
+      }
+      console.log(`[labeltest] ML ZPL fetched: ${shipmentId} ${zpl.length} chars ${latency}ms (raw ${bytes.length}b, ct=${ct})`);
+      return { zpl };
     } catch (e: any) {
       const latency = Date.now() - t0;
       console.error(`[labeltest] ZPL fetch error ${shipmentId} attempt ${a}: ${e.message} ${latency}ms`);
