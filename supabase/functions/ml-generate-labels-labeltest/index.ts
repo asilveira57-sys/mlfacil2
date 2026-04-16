@@ -503,11 +503,15 @@ serve(async (req) => {
           }
 
           totalSuccess++;
-          perShipmentLog.push({ shipment_id: sid, status: 'ok', source: 'zpl_labelary', output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm });
+          perShipmentLog.push({
+            shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'zpl_labelary',
+            output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
+            include_header: layoutInfo.includeHeader, include_danfe: layoutInfo.includeDanfe,
+          });
         } catch (embedErr: any) {
           console.error(`[labeltest] Embed error for ${sid}:`, embedErr);
           perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir imagem: ${embedErr.message}` });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'PDF embed failed: ' + embedErr.message });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'pdf_embed', error: 'PDF embed failed: ' + embedErr.message });
         }
       }
 
