@@ -379,9 +379,9 @@ serve(async (req) => {
         if (result.image) {
           imageByShipment.set(sid, result.image);
         } else {
-          // FALLBACK: mark this shipment as error, continue others
+          // Conversão Labelary falhou para este shipment — marca erro e segue (parcial)
           perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'LABELARY_CONVERSION_FAILED', reason_message: result.reason_message || 'Conversão Labelary falhou' });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', error: result.reason_message });
           console.error(`[labeltest] Labelary failed for ${sid}: ${result.reason_code} — continuing with remaining`);
         }
         await sleep(200);
