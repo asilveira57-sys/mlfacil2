@@ -287,8 +287,9 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   }
 
   function handleGenerationComplete(data: any, format: string) {
-    const labelCount = data.total_success || data.total_labels || 0;
-    const errorCount = data.error_batches || (data.validation_errors?.length) || 0;
+    const labelCount = data.success_count ?? data.total_success ?? data.total_labels ?? 0;
+    const errorCount = data.error_count ?? data.error_batches ?? 0;
+    const errors: Array<{ shipment_id: string; reason_code: string; reason_message: string }> = data.errors || data.validation_errors || [];
     logRecovery('complete', `labels=${labelCount}, errors=${errorCount}`);
 
     setActiveJobState(null);
@@ -297,7 +298,13 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     // CRITICAL: Block download if 0 labels — never download empty PDF
     if (labelCount <= 0) {
       setGenerationProgress({ status: 'error', total_labels: 0, processed_labels: 0, total_batches: 1, completed_batches: 1, error_batches: 1 });
-      sonnerToast.error('Nenhuma etiqueta válida foi gerada. Verifique seleção, status e nota fiscal dos envios.', { duration: 8000 });
+      // Show detailed reasons if available
+      if (errors.length > 0) {
+        const reasons = [...new Set(errors.map(e => e.reason_message || e.reason_code))];
+        sonnerToast.error(`Nenhuma etiqueta gerada. Motivos: ${reasons.join('; ')}`, { duration: 10000 });
+      } else {
+        sonnerToast.error('Nenhuma etiqueta válida foi gerada. Verifique seleção, status e nota fiscal dos envios.', { duration: 8000 });
+      }
       queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
       setTimeout(() => setGenerationProgress(INITIAL_PROGRESS), 5000);
       return;
@@ -306,7 +313,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     const status = errorCount > 0 ? 'partial' : 'completed';
     setGenerationProgress({
       status,
-      total_labels: labelCount,
+      total_labels: labelCount + errorCount,
       processed_labels: labelCount,
       total_batches: 1,
       completed_batches: 1,
@@ -327,11 +334,18 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       window.open(data.file_url, '_blank');
       toast({ title: 'Etiqueta gerada (V2)', description: `${labelCount} etiqueta(s)` });
     } else {
-      // Labels counted but no downloadable content — treat as error
       sonnerToast.error('Etiquetas processadas mas arquivo final não foi gerado. Tente novamente.', { duration: 6000 });
     }
 
-    if (errorCount > 0) {
+    // Show partial failure details
+    if (errorCount > 0 && errors.length > 0) {
+      const failedIds = errors.map(e => e.shipment_id).filter(Boolean);
+      const reasons = [...new Set(errors.map(e => e.reason_message || e.reason_code))];
+      sonnerToast.warning(
+        `${labelCount} gerada(s), ${errorCount} falharam: ${reasons.join('; ')}${failedIds.length > 0 ? ` — Envios: ${failedIds.slice(0, 5).join(', ')}${failedIds.length > 5 ? '...' : ''}` : ''}`,
+        { duration: 10000 },
+      );
+    } else if (errorCount > 0) {
       toast({ title: 'Atenção', description: `${errorCount} envio(s) falharam`, variant: 'destructive' });
     }
 
