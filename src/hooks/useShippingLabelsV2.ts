@@ -294,6 +294,15 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     setActiveJobState(null);
     clearActiveJob();
 
+    // CRITICAL: Block download if 0 labels — never download empty PDF
+    if (labelCount <= 0) {
+      setGenerationProgress({ status: 'error', total_labels: 0, processed_labels: 0, total_batches: 1, completed_batches: 1, error_batches: 1 });
+      sonnerToast.error('Nenhuma etiqueta válida foi gerada. Verifique seleção, status e nota fiscal dos envios.', { duration: 8000 });
+      queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
+      setTimeout(() => setGenerationProgress(INITIAL_PROGRESS), 5000);
+      return;
+    }
+
     const status = errorCount > 0 ? 'partial' : 'completed';
     setGenerationProgress({
       status,
@@ -304,16 +313,22 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       error_batches: errorCount,
     });
 
-    // Download file if available
-    if (format === 'pdf' && data.pdf_base64) {
+    // Download file — validate content before triggering
+    const hasPdf = format === 'pdf' && typeof data.pdf_base64 === 'string' && data.pdf_base64.length > 100;
+    const hasZpl = format === 'zpl' && typeof data.zpl_content === 'string' && data.zpl_content.length > 10;
+
+    if (hasPdf) {
       downloadPdf(data.pdf_base64, data.download_filename);
       toast({ title: 'PDF gerado (V2)', description: `${labelCount} etiqueta(s) — ${data.page_width_mm || 100}x${data.page_height_mm || 150}mm` });
-    } else if (format === 'zpl' && data.zpl_content) {
+    } else if (hasZpl) {
       downloadZpl(data.zpl_content, data.download_filename);
       toast({ title: 'ZPL gerado (V2)', description: `${labelCount} etiqueta(s)` });
     } else if (data.file_url) {
       window.open(data.file_url, '_blank');
       toast({ title: 'Etiqueta gerada (V2)', description: `${labelCount} etiqueta(s)` });
+    } else {
+      // Labels counted but no downloadable content — treat as error
+      sonnerToast.error('Etiquetas processadas mas arquivo final não foi gerado. Tente novamente.', { duration: 6000 });
     }
 
     if (errorCount > 0) {
