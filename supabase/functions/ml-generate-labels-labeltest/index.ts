@@ -8,19 +8,30 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-function respond(ok: boolean, payload: Record<string, unknown>, status = 200) {
+function respond(ok: boolean, payload: Record<string, unknown>) {
   return new Response(JSON.stringify({ ok, ...payload }), {
-    status,
+    status: 200,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
 
+// ─── Layout sizes (mm) ──────────────────────────────────────────────
 const MM_TO_PT = 2.83465;
-const SIZES: Record<string, { widthMm: number; heightMm: number; widthPt: number; heightPt: number }> = {
-  'meli_100x150': { widthMm: 100, heightMm: 150, widthPt: 100 * MM_TO_PT, heightPt: 150 * MM_TO_PT },
-  'meli_100x150_no_nf': { widthMm: 100, heightMm: 150, widthPt: 100 * MM_TO_PT, heightPt: 150 * MM_TO_PT },
-  'mlfacil_100x175_header': { widthMm: 100, heightMm: 175, widthPt: 100 * MM_TO_PT, heightPt: 175 * MM_TO_PT },
+const LABEL_W_MM = 100;
+const LABEL_H_MM = 150;
+const HEADER_H_MM = 25;
+
+const LAYOUTS: Record<string, { widthMm: number; heightMm: number; includeHeader: boolean; includeDanfe: boolean }> = {
+  'meli_100x150':               { widthMm: 100, heightMm: 150, includeHeader: false, includeDanfe: true },
+  'meli_100x150_no_nf':         { widthMm: 100, heightMm: 150, includeHeader: false, includeDanfe: false },
+  'mlfacil_100x175_header':     { widthMm: 100, heightMm: 175, includeHeader: true,  includeDanfe: true },
 };
+
+// Labelary ZPL→PNG config (legacy-faithful)
+const LABELARY_DPI = 8;        // 8 dpmm = 203 DPI (thermal standard)
+const LABELARY_W_INCH = 4;     // ~101.6mm
+const LABELARY_H_INCH = 6;     // ~152.4mm
+const LABELARY_URL = `http://api.labelary.com/v1/printers/${LABELARY_DPI}dpmm/labels/${LABELARY_W_INCH}x${LABELARY_H_INCH}/0/`;
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const getBackoff = (attempt: number) => Math.pow(2, attempt - 1) * 1000;
@@ -71,8 +82,6 @@ function buildHeaderLines(prefs: typeof DEFAULT_HEADER_PREFS, order: any, items:
   return lines;
 }
 
-function ptToMm(pt: number): number { return pt / MM_TO_PT; }
-
 function hashCode(s: string): string {
   let h = 0;
   for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
@@ -85,50 +94,72 @@ function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(b);
 }
 
-async function fetchSinglePdf(shipmentId: string, token: string): Promise<Uint8Array | null> {
+// ─── ZPL fetch from ML API ──────────────────────────────────────────
+async function fetchZplFromMl(shipmentId: string, token: string): Promise<string | null> {
   for (let a = 1; a <= 3; a++) {
     try {
-      const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`, { headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(
+        `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=zpl2`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
       if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a)); continue; }
       if (!r.ok) {
-        console.error(`[labeltest] ML API error for ${shipmentId}: ${r.status} ${r.statusText}`);
+        console.error(`[labeltest] ML ZPL error for ${shipmentId}: ${r.status}`);
         return null;
       }
-      return new Uint8Array(await r.arrayBuffer());
+      return await r.text();
     } catch (e) {
-      console.error(`[labeltest] fetch error for ${shipmentId} attempt ${a}:`, e);
+      console.error(`[labeltest] ZPL fetch error ${shipmentId} attempt ${a}:`, e);
       if (a < 3) await sleep(getBackoff(a));
     }
   }
   return null;
 }
 
-async function normalizePageToPdf(
-  resultPdf: any, srcDoc: any, pageIndex: number,
-  targetWidthPt: number, targetHeightPt: number, shipmentId: string,
-): Promise<{ source_w_mm: number; source_h_mm: number; output_w_mm: number; output_h_mm: number }> {
-  const srcPage = srcDoc.getPage(pageIndex);
-  const { width: srcW, height: srcH } = srcPage.getSize();
-  const srcWmm = ptToMm(srcW); const srcHmm = ptToMm(srcH);
-  const outWmm = ptToMm(targetWidthPt); const outHmm = ptToMm(targetHeightPt);
-  console.log(`[labeltest] shipment=${shipmentId} page=${pageIndex} source=${srcWmm.toFixed(1)}x${srcHmm.toFixed(1)}mm target=${outWmm.toFixed(1)}x${outHmm.toFixed(1)}mm`);
-
-  const isCorrectSize = Math.abs(srcW - targetWidthPt) < 2 && Math.abs(srcH - targetHeightPt) < 2;
-  if (isCorrectSize) {
-    const [copied] = await resultPdf.copyPages(srcDoc, [pageIndex]);
-    resultPdf.addPage(copied);
-  } else {
-    const embedded = await resultPdf.embedPage(srcPage);
-    const np = resultPdf.addPage([targetWidthPt, targetHeightPt]);
-    const scale = Math.min(targetWidthPt / srcW, targetHeightPt / srcH);
-    const drawW = srcW * scale; const drawH = srcH * scale;
-    np.drawPage(embedded, { x: (targetWidthPt - drawW) / 2, y: (targetHeightPt - drawH) / 2, width: drawW, height: drawH });
+// ─── ZPL → PNG via Labelary (legacy-faithful) ───────────────────────
+async function zplToImage(zplContent: string, shipmentId: string): Promise<Uint8Array | null> {
+  for (let a = 1; a <= 3; a++) {
+    try {
+      const r = await fetch(LABELARY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'image/png' },
+        body: zplContent,
+      });
+      if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a) + 200); continue; }
+      if (!r.ok) {
+        console.error(`[labeltest] Labelary error for ${shipmentId}: ${r.status}`);
+        return null;
+      }
+      return new Uint8Array(await r.arrayBuffer());
+    } catch (e) {
+      console.error(`[labeltest] Labelary error ${shipmentId} attempt ${a}:`, e);
+      if (a < 3) await sleep(getBackoff(a));
+    }
   }
-  return { source_w_mm: srcWmm, source_h_mm: srcHmm, output_w_mm: outWmm, output_h_mm: outHmm };
+  return null;
 }
 
-const HEADER_HEIGHT_PT = 25 * MM_TO_PT;
-const LABEL_150_PT = 150 * MM_TO_PT;
+// ─── Fetch DANFE PDF from ML (for layouts that need it) ─────────────
+async function fetchDanfePdf(shipmentId: string, token: string): Promise<Uint8Array | null> {
+  for (let a = 1; a <= 3; a++) {
+    try {
+      const r = await fetch(
+        `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a)); continue; }
+      if (!r.ok) return null;
+      return new Uint8Array(await r.arrayBuffer());
+    } catch (e) {
+      if (a < 3) await sleep(getBackoff(a));
+    }
+  }
+  return null;
+}
+
+const HEADER_HEIGHT_PT = HEADER_H_MM * MM_TO_PT;
+const LABEL_W_PT = LABEL_W_MM * MM_TO_PT;
+const LABEL_H_PT = LABEL_H_MM * MM_TO_PT;
 const HEADER_PADDING_TOP = 8;
 const HEADER_LINE_HEIGHT_FACTOR = 1.3;
 
@@ -159,11 +190,15 @@ serve(async (req) => {
     const { seller_id, shipment_ids, format, layout = 'meli_100x150' } = body;
     if (!seller_id || !shipment_ids?.length) return respond(false, { error: 'seller_id and shipment_ids required' });
     if (!['pdf', 'zpl'].includes(format)) return respond(false, { error: 'format must be pdf or zpl' });
-    if (!SIZES[layout]) return respond(false, { error: 'Invalid layout' });
+    if (!LAYOUTS[layout]) return respond(false, { error: 'Invalid layout' });
 
-    const sizeInfo = SIZES[layout];
-    console.log(`[labeltest] Starting job: seller=${seller_id} format=${format} layout=${layout} shipments=${shipment_ids.length}`);
+    const layoutInfo = LAYOUTS[layout];
+    const targetWPt = layoutInfo.widthMm * MM_TO_PT;
+    const targetHPt = layoutInfo.heightMm * MM_TO_PT;
 
+    console.log(`[labeltest] Starting: seller=${seller_id} format=${format} layout=${layout} size=${layoutInfo.widthMm}x${layoutInfo.heightMm}mm shipments=${shipment_ids.length}`);
+
+    // Get ML account
     const { data: mlAccount } = await supabaseAdmin
       .from('ml_accounts').select('access_token, ml_user_id')
       .eq('user_id', user.id).eq('ml_user_id', seller_id).eq('is_active', true).maybeSingle();
@@ -186,44 +221,99 @@ serve(async (req) => {
     }
 
     if (validIds.length === 0) {
-      return respond(false, { error: 'Nenhum envio válido', validationErrors });
+      return respond(false, { error: 'Nenhum envio válido', validation_errors: validationErrors });
     }
 
     const fileHash = hashCode(`${seller_id}_${validIds.join(',')}_${Date.now()}`);
     const ext = format === 'pdf' ? 'pdf' : 'zpl';
     const downloadFilename = `etiquetas_labeltest_${layout}_${validIds.length}un_${fileHash}.${ext}`;
 
+    // Create job record
     const { data: job } = await supabaseAdmin.from('meli_print_queue_v2').insert({
       user_id: user.id, seller_id, format, layout, shipment_ids: validIds,
       total_labels: validIds.length, status: 'processando',
-      page_width_mm: sizeInfo.widthMm, page_height_mm: sizeInfo.heightMm,
+      page_width_mm: layoutInfo.widthMm, page_height_mm: layoutInfo.heightMm,
       download_filename: downloadFilename,
       job_started_at: new Date().toISOString(),
       module: 'labeltest',
-    }).select('id').single();
+    } as any).select('id').single();
     const jobId = job?.id;
 
     let finalPdfBase64: string | null = null;
+    let finalZplContent: string | null = null;
     let totalSuccess = 0;
     let totalPages = 0;
     const perShipmentLog: any[] = [];
 
-    if (format === 'pdf') {
-      const isHeader = layout === 'mlfacil_100x175_header';
+    // ─────────────────────────────────────────────────────────────────
+    // STEP 1: Fetch ZPL for ALL shipments from ML API
+    // ─────────────────────────────────────────────────────────────────
+    console.log(`[labeltest] Step 1: Fetching ZPL for ${validIds.length} shipments`);
+    const zplByShipment = new Map<string, string>();
+
+    for (const sid of validIds) {
+      const zpl = await fetchZplFromMl(sid, mlAccount.access_token);
+      if (zpl) {
+        zplByShipment.set(sid, zpl);
+        console.log(`[labeltest] ZPL fetched: ${sid} (${zpl.length} chars)`);
+      } else {
+        perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'ZPL download failed from ML' });
+        console.error(`[labeltest] ZPL failed: ${sid}`);
+      }
+      // Rate limit between ML calls
+      if (validIds.indexOf(sid) < validIds.length - 1) await sleep(150);
+    }
+
+    if (format === 'zpl') {
+      // ─── ZPL format: just concatenate and return ────────────────
+      const zplParts: string[] = [];
+      for (const sid of validIds) {
+        const zpl = zplByShipment.get(sid);
+        if (zpl) {
+          zplParts.push(zpl);
+          totalSuccess++;
+          totalPages++;
+          perShipmentLog.push({ shipment_id: sid, status: 'ok' });
+        }
+      }
+      finalZplContent = zplParts.join('\n');
+    } else {
+      // ─── PDF format: ZPL → Labelary PNG → pdf-lib PDF ──────────
+      // STEP 2: Convert ZPL to PNG via Labelary
+      console.log(`[labeltest] Step 2: Converting ${zplByShipment.size} ZPLs to PNG via Labelary`);
+      const imageByShipment = new Map<string, Uint8Array>();
+
+      for (const [sid, zpl] of zplByShipment) {
+        const png = await zplToImage(zpl, sid);
+        if (png) {
+          imageByShipment.set(sid, png);
+          console.log(`[labeltest] Labelary OK: ${sid} (${(png.length / 1024).toFixed(0)}KB)`);
+        } else {
+          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Labelary conversion failed' });
+          console.error(`[labeltest] Labelary failed: ${sid}`);
+        }
+        // Rate limit between Labelary calls
+        await sleep(200);
+      }
+
+      // STEP 3: Build PDF with fixed dimensions (legacy-faithful)
+      console.log(`[labeltest] Step 3: Building PDF, layout=${layout}`);
       const resultPdf = await PDFDocument.create();
+
+      // Load fonts for header layout
       let font: any = null;
       let fontBold: any = null;
-      if (isHeader) {
+      if (layoutInfo.includeHeader) {
         font = await resultPdf.embedFont(StandardFonts.Helvetica);
         fontBold = await resultPdf.embedFont(StandardFonts.HelveticaBold);
       }
 
-      // Load header prefs + order data for header layout
+      // Load header prefs + order data
       let headerPrefs = { ...DEFAULT_HEADER_PREFS };
-      let orderItemsMap = new Map<string, any[]>();
-      let ordersMap = new Map<string, any>();
+      const orderItemsMap = new Map<string, any[]>();
+      const ordersMap = new Map<string, any>();
 
-      if (isHeader) {
+      if (layoutInfo.includeHeader) {
         const { data: hp } = await supabaseAdmin
           .from('shipping_label_header_prefs').select('*')
           .eq('user_id', user.id).eq('seller_id', seller_id).maybeSingle();
@@ -247,108 +337,129 @@ serve(async (req) => {
         }
       }
 
+      // STEP 4: For each shipment, embed label image into PDF page
       for (const sid of validIds) {
-        let pagesAdded = 0;
-        const pdfBytes = await fetchSinglePdf(sid, mlAccount.access_token);
-        if (!pdfBytes) {
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Download failed' });
-          continue;
-        }
+        const imgBytes = imageByShipment.get(sid);
+        if (!imgBytes) continue; // already logged as error
 
-        let src: any;
-        try { src = await PDFDocument.load(pdfBytes); } catch (e: any) {
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Invalid PDF: ' + e.message });
-          continue;
-        }
+        try {
+          const pngImage = await resultPdf.embedPng(imgBytes);
 
-        const pc = src.getPageCount();
-        console.log(`[labeltest] shipment=${sid} pages_in_source=${pc}`);
+          if (layoutInfo.includeHeader) {
+            // ─── Header layout: 100x175mm ─────────────────────────
+            // Top 25mm = header text, bottom 150mm = label image
+            const page = resultPdf.addPage([targetWPt, targetHPt]);
 
-        if (isHeader) {
-          // Header layout: label page normalized to 100x150, then add 25mm header on top = 100x175
-          const labelPageIdx = 0;
-          const fullPageH = sizeInfo.heightPt; // 175mm
-          const labelH = LABEL_150_PT; // 150mm
+            // Draw label image in bottom 150mm area (full width)
+            const labelAreaY = 0;
+            const labelAreaH = LABEL_H_PT;
+            const imgAspect = pngImage.width / pngImage.height;
+            const targetAspect = LABEL_W_PT / labelAreaH;
 
-          const dims = await normalizePageToPdf(resultPdf, src, labelPageIdx, sizeInfo.widthPt, fullPageH, sid);
-          // Now overlay the header text in the top 25mm area
-          const lastPageIdx = resultPdf.getPageCount() - 1;
-          const page = resultPdf.getPage(lastPageIdx);
+            let drawW: number, drawH: number, drawX: number, drawY: number;
+            if (imgAspect > targetAspect) {
+              // Image wider: fit to width
+              drawW = LABEL_W_PT;
+              drawH = LABEL_W_PT / imgAspect;
+              drawX = 0;
+              drawY = labelAreaY + (labelAreaH - drawH) / 2;
+            } else {
+              // Image taller: fit to height
+              drawH = labelAreaH;
+              drawW = labelAreaH * imgAspect;
+              drawX = (LABEL_W_PT - drawW) / 2;
+              drawY = labelAreaY;
+            }
+            page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
 
-          const orderId = shipMap.get(sid)?.order_id;
-          const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
-          const orderItems = orderItemsMap.get(orderId) || [];
-          const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, orderItems);
+            // Draw header text in top 25mm
+            const orderId = shipMap.get(sid)?.order_id;
+            const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
+            const orderItems = orderItemsMap.get(orderId) || [];
+            const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, orderItems);
 
-          const fontSize = headerPrefs.font_size || 9;
-          const lineH = fontSize * HEADER_LINE_HEIGHT_FACTOR;
-          let yPos = fullPageH - HEADER_PADDING_TOP;
+            const fontSize = headerPrefs.font_size || 9;
+            const lineH = fontSize * HEADER_LINE_HEIGHT_FACTOR;
+            let yPos = targetHPt - HEADER_PADDING_TOP;
 
-          for (const line of lines) {
-            const f = line.bold ? fontBold : font;
-            page.drawText(line.text, { x: 8, y: yPos, size: fontSize, font: f, color: rgb(0, 0, 0) });
-            yPos -= lineH;
+            for (const line of lines) {
+              const f = line.bold ? fontBold : font;
+              page.drawText(line.text, { x: 8, y: yPos, size: fontSize, font: f, color: rgb(0, 0, 0) });
+              yPos -= lineH;
+            }
+
+            // Separator line between header and label
+            const sepY = LABEL_H_PT;
+            page.drawLine({
+              start: { x: 4, y: sepY },
+              end: { x: LABEL_W_PT - 4, y: sepY },
+              thickness: 0.5, color: rgb(0.5, 0.5, 0.5),
+            });
+
+            totalPages++;
+          } else {
+            // ─── Standard/no-NF layout: 100x150mm ────────────────
+            const page = resultPdf.addPage([targetWPt, targetHPt]);
+
+            // Fit image to full page (0 margins, like legacy)
+            const imgAspect = pngImage.width / pngImage.height;
+            const pageAspect = targetWPt / targetHPt;
+
+            let drawW: number, drawH: number, drawX: number, drawY: number;
+            if (imgAspect > pageAspect) {
+              drawW = targetWPt;
+              drawH = targetWPt / imgAspect;
+              drawX = 0;
+              drawY = (targetHPt - drawH) / 2;
+            } else {
+              drawH = targetHPt;
+              drawW = targetHPt * imgAspect;
+              drawX = (targetWPt - drawW) / 2;
+              drawY = 0;
+            }
+            page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
+            totalPages++;
           }
 
-          // Separator line
-          page.drawLine({
-            start: { x: 4, y: fullPageH - HEADER_HEIGHT_PT + 2 },
-            end: { x: sizeInfo.widthPt - 4, y: fullPageH - HEADER_HEIGHT_PT + 2 },
-            thickness: 0.5, color: rgb(0.5, 0.5, 0.5),
+          // If DANFE is needed and layout includes it, fetch PDF and embed DANFE page
+          if (layoutInfo.includeDanfe && layout !== 'meli_100x150_no_nf') {
+            const danfeBytes = await fetchDanfePdf(sid, mlAccount.access_token);
+            if (danfeBytes) {
+              try {
+                const danfePdf = await PDFDocument.load(danfeBytes);
+                const pageCount = danfePdf.getPageCount();
+                // DANFE is typically the 2nd page in ML's PDF
+                if (pageCount > 1) {
+                  const [danfePage] = await resultPdf.copyPages(danfePdf, [1]);
+                  resultPdf.addPage(danfePage);
+                  totalPages++;
+                  console.log(`[labeltest] DANFE added for ${sid}`);
+                }
+              } catch (de) {
+                console.warn(`[labeltest] DANFE parse error for ${sid}:`, de);
+              }
+            }
+          }
+
+          totalSuccess++;
+          perShipmentLog.push({
+            shipment_id: sid, status: 'ok',
+            source: 'zpl_labelary',
+            output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
           });
-
-          pagesAdded = 1;
-
-          // Add DANFE if exists (page 2+)
-          if (pc > 1) {
-            await normalizePageToPdf(resultPdf, src, 1, sizeInfo.widthPt, LABEL_150_PT, sid);
-            pagesAdded++;
-          }
-        } else if (layout === 'meli_100x150_no_nf') {
-          // Only first page (label), skip DANFE
-          await normalizePageToPdf(resultPdf, src, 0, sizeInfo.widthPt, sizeInfo.heightPt, sid);
-          pagesAdded = 1;
-        } else {
-          // Standard: all pages normalized
-          for (let pi = 0; pi < pc; pi++) {
-            const targetH = pi === 0 ? sizeInfo.heightPt : LABEL_150_PT;
-            await normalizePageToPdf(resultPdf, src, pi, sizeInfo.widthPt, targetH, sid);
-            pagesAdded++;
-          }
+        } catch (embedErr: any) {
+          console.error(`[labeltest] Embed error for ${sid}:`, embedErr);
+          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'PDF embed failed: ' + embedErr.message });
         }
-
-        totalSuccess++;
-        totalPages += pagesAdded;
-        perShipmentLog.push({ shipment_id: sid, status: 'ok', pages: pagesAdded });
       }
 
+      // Save final PDF
       const pdfBytes = await resultPdf.save();
       finalPdfBase64 = uint8ToBase64(pdfBytes);
       console.log(`[labeltest] PDF built: ${totalSuccess}/${validIds.length} shipments, ${totalPages} pages, ${(pdfBytes.length / 1024).toFixed(0)}KB`);
-    } else {
-      // ZPL format - fetch each shipment as ZPL
-      const zplParts: string[] = [];
-      for (const sid of validIds) {
-        for (let a = 1; a <= 3; a++) {
-          try {
-            const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${sid}&response_type=zpl2`, {
-              headers: { Authorization: `Bearer ${mlAccount.access_token}` },
-            });
-            if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a)); continue; }
-            if (!r.ok) { perShipmentLog.push({ shipment_id: sid, status: 'error', error: `ML ${r.status}` }); break; }
-            const txt = await r.text();
-            zplParts.push(txt);
-            totalSuccess++;
-            totalPages++;
-            perShipmentLog.push({ shipment_id: sid, status: 'ok' });
-            break;
-          } catch (e) { if (a >= 3) perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Network error' }); else await sleep(getBackoff(a)); }
-        }
-      }
-      // ZPL doesn't need base64, return as text
-      finalPdfBase64 = null;
     }
 
+    // Update job record
     const elapsed = Date.now() - t0;
     const finalStatus = totalSuccess === validIds.length ? 'concluido' : totalSuccess > 0 ? 'parcial' : 'erro';
 
@@ -358,7 +469,7 @@ serve(async (req) => {
         processed_labels: totalSuccess,
         total_pages: totalPages,
         job_completed_at: new Date().toISOString(),
-      }).eq('id', jobId);
+      } as any).eq('id', jobId);
     }
 
     console.log(`[labeltest] Job complete: status=${finalStatus} ${totalSuccess}/${validIds.length} in ${elapsed}ms`);
@@ -367,13 +478,14 @@ serve(async (req) => {
       data: {
         job_id: jobId,
         pdf_base64: finalPdfBase64,
+        zpl_content: finalZplContent,
         total_success: totalSuccess,
         total_pages: totalPages,
         validation_errors: validationErrors,
         per_shipment: perShipmentLog,
         layout,
-        page_width_mm: sizeInfo.widthMm,
-        page_height_mm: sizeInfo.heightMm,
+        page_width_mm: layoutInfo.widthMm,
+        page_height_mm: layoutInfo.heightMm,
         processing_time_ms: elapsed,
         download_filename: downloadFilename,
       },
