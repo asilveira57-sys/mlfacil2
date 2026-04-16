@@ -365,7 +365,7 @@ serve(async (req) => {
           zplParts.push(zpl);
           totalSuccess++;
           totalPages++;
-          perShipmentLog.push({ shipment_id: sid, status: 'ok' });
+          perShipmentLog.push({ shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'ml_zpl_raw' });
         }
       }
       finalZplContent = zplParts.join('\n');
