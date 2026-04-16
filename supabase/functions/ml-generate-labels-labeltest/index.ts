@@ -456,7 +456,7 @@ serve(async (req) => {
 
       if (layoutInfo.includeHeader) {
         const { data: hp } = await supabaseAdmin
-          .from('shipping_label_header_prefs').select('*')
+          .from('meli_label_header_preferences').select('*')
           .eq('user_id', user.id).eq('seller_id', seller_id).maybeSingle();
         if (hp) headerPrefs = { ...DEFAULT_HEADER_PREFS, ...hp };
 
@@ -490,16 +490,63 @@ serve(async (req) => {
             try {
               const srcPdf = await PDFDocument.load(fallbackPdfBytes);
               const srcPageCount = srcPdf.getPageCount();
-              // Copy first page (the label itself)
-              const indices = Array.from({ length: srcPageCount }, (_, i) => i);
-              const copiedPages = await resultPdf.copyPages(srcPdf, indices);
-              for (const cp of copiedPages) {
-                resultPdf.addPage(cp);
+
+              if (layoutInfo.includeHeader) {
+                // Embed label page into bottom 150mm, draw header in top 25mm
+                const embeddedPage = await resultPdf.embedPage(srcPdf.getPage(0));
+                const page = resultPdf.addPage([targetWPt, targetHPt]);
+
+                // Draw label in bottom area (0 to LABEL_H_PT)
+                const epAspect = embeddedPage.width / embeddedPage.height;
+                const targetAspect = LABEL_W_PT / LABEL_H_PT;
+                let drawW: number, drawH: number, drawX: number, drawY: number;
+                if (epAspect > targetAspect) {
+                  drawW = LABEL_W_PT; drawH = LABEL_W_PT / epAspect; drawX = 0; drawY = (LABEL_H_PT - drawH) / 2;
+                } else {
+                  drawH = LABEL_H_PT; drawW = LABEL_H_PT * epAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = 0;
+                }
+                page.drawPage(embeddedPage, { x: drawX, y: drawY, width: drawW, height: drawH });
+
+                // Draw header text
+                const orderId = shipMap.get(sid)?.order_id;
+                const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
+                const orderItems = orderItemsMap.get(orderId) || [];
+                const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, orderItems);
+
+                const fontSize = headerPrefs.font_size || 9;
+                const lineH = fontSize * HEADER_LINE_HEIGHT_FACTOR;
+                let yPos = targetHPt - HEADER_PADDING_TOP;
+                for (const line of lines) {
+                  const f = line.bold ? fontBold : font;
+                  page.drawText(line.text, { x: 8, y: yPos, size: fontSize, font: f, color: rgb(0, 0, 0) });
+                  yPos -= lineH;
+                }
+
+                // Separator line
+                const sepY = LABEL_H_PT;
+                page.drawLine({ start: { x: 4, y: sepY }, end: { x: LABEL_W_PT - 4, y: sepY }, thickness: 0.5, color: rgb(0.5, 0.5, 0.5) });
                 totalPages++;
+
+                // DANFE from direct PDF (page index 1+)
+                if (layoutInfo.includeDanfe && srcPageCount > 1) {
+                  const [danfePage] = await resultPdf.copyPages(srcPdf, [1]);
+                  resultPdf.addPage(danfePage);
+                  totalPages++;
+                  console.log(`[labeltest] DANFE from direct PDF for ${sid}`);
+                }
+              } else {
+                // No header: copy all pages as-is
+                const indices = Array.from({ length: srcPageCount }, (_, i) => i);
+                const copiedPages = await resultPdf.copyPages(srcPdf, indices);
+                for (const cp of copiedPages) {
+                  resultPdf.addPage(cp);
+                  totalPages++;
+                }
               }
+
               totalSuccess++;
               perShipmentLog.push({ shipment_id: sid, status: 'ok', source: 'ml_pdf_direct', pages: srcPageCount, output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm });
-              console.log(`[labeltest] Direct PDF embedded for ${sid}: ${srcPageCount} pages`);
+              console.log(`[labeltest] Direct PDF embedded for ${sid}: ${srcPageCount} pages, header=${layoutInfo.includeHeader}`);
             } catch (pdfErr: any) {
               console.error(`[labeltest] Direct PDF embed error for ${sid}:`, pdfErr);
               perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir PDF direto: ${pdfErr.message}` });
