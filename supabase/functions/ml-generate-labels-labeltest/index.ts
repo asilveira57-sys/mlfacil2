@@ -453,15 +453,34 @@ serve(async (req) => {
         }
       }
 
-      // Save final PDF
-      const pdfBytes = await resultPdf.save();
-      finalPdfBase64 = uint8ToBase64(pdfBytes);
-      console.log(`[labeltest] PDF built: ${totalSuccess}/${validIds.length} shipments, ${totalPages} pages, ${(pdfBytes.length / 1024).toFixed(0)}KB`);
+      // Save final PDF only if we have pages
+      if (totalPages > 0) {
+        const pdfBytes = await resultPdf.save();
+        finalPdfBase64 = uint8ToBase64(pdfBytes);
+        console.log(`[labeltest] PDF built: ${totalSuccess}/${validIds.length} shipments, ${totalPages} pages, ${(pdfBytes.length / 1024).toFixed(0)}KB`);
+      } else {
+        console.warn(`[labeltest] PDF has 0 pages — will NOT generate file`);
+      }
     }
 
     // Update job record
     const elapsed = Date.now() - t0;
     const finalStatus = totalSuccess === validIds.length ? 'concluido' : totalSuccess > 0 ? 'parcial' : 'erro';
+
+    // Structured log summary
+    console.log(`[labeltest] === GENERATION SUMMARY ===`);
+    console.log(JSON.stringify({
+      requested_shipments: shipment_ids.length,
+      valid_shipments: validIds.length,
+      processed_labels: totalSuccess,
+      total_pages: totalPages,
+      pdf_size_bytes: finalPdfBase64 ? Math.round(finalPdfBase64.length * 0.75) : 0,
+      zpl_size_bytes: finalZplContent?.length || 0,
+      validation_errors_count: validationErrors.length,
+      per_shipment_errors: perShipmentLog.filter(p => p.status === 'error').length,
+      status: finalStatus,
+      elapsed_ms: elapsed,
+    }));
 
     if (jobId) {
       await supabaseAdmin.from('meli_print_queue_v2').update({
@@ -472,7 +491,22 @@ serve(async (req) => {
       } as any).eq('id', jobId);
     }
 
-    console.log(`[labeltest] Job complete: status=${finalStatus} ${totalSuccess}/${validIds.length} in ${elapsed}ms`);
+    // CRITICAL: If 0 labels succeeded, return failure — never allow empty PDF download
+    if (totalSuccess <= 0) {
+      console.error(`[labeltest] ZERO labels generated — returning error`);
+      return respond(false, {
+        error: 'Nenhuma etiqueta válida foi gerada. Verifique seleção, status e nota fiscal dos envios.',
+        data: {
+          job_id: jobId,
+          total_success: 0,
+          total_pages: 0,
+          processed_labels: 0,
+          validation_errors: validationErrors,
+          per_shipment: perShipmentLog,
+          processing_time_ms: elapsed,
+        },
+      });
+    }
 
     return respond(true, {
       data: {
