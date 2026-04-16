@@ -490,22 +490,56 @@ serve(async (req) => {
             try {
               const srcPdf = await PDFDocument.load(fallbackPdfBytes);
               const srcPageCount = srcPdf.getPageCount();
+              const srcPage0 = srcPdf.getPage(0);
+              const srcWPt = srcPage0.getWidth();
+              const srcHPt = srcPage0.getHeight();
+              const sourcePageWidthMm = +(srcWPt / MM_TO_PT).toFixed(2);
+              const sourcePageHeightMm = +(srcHPt / MM_TO_PT).toFixed(2);
+              const srcAspect = srcWPt / srcHPt;
+              const labelAspect = LABEL_W_MM / LABEL_H_MM; // ~0.667
+              // A4-like (210x297mm portrait => aspect ~0.707) or any landscape page is incompatible
+              // Accept only sources that look like a thermal label (aspect close to 0.6-0.75 AND height >= width)
+              const isThermalLike = srcAspect >= 0.55 && srcAspect <= 0.85 && srcHPt > srcWPt && sourcePageHeightMm <= 220;
+
+              console.log(`[labeltest] PDF fallback source dims for ${sid}: ${sourcePageWidthMm}x${sourcePageHeightMm}mm, aspect=${srcAspect.toFixed(3)}, thermal_like=${isThermalLike}`);
+
+              if (layoutInfo.includeHeader && !isThermalLike) {
+                // Incompatible source (likely A4 with label in corner) — controlled error
+                console.error(`[labeltest] INCOMPATIBLE_FALLBACK_PAGE for ${sid}: ${sourcePageWidthMm}x${sourcePageHeightMm}mm aspect=${srcAspect.toFixed(3)}`);
+                perShipmentErrors.push({
+                  shipment_id: sid,
+                  reason_code: 'INCOMPATIBLE_FALLBACK_PAGE',
+                  reason_message: `PDF de origem em formato incompatível (${sourcePageWidthMm}x${sourcePageHeightMm}mm). Não é possível compor cabeçalho com layout de página completa A4.`,
+                });
+                perShipmentLog.push({
+                  shipment_id: sid, status: 'error',
+                  source_page_width_mm: sourcePageWidthMm, source_page_height_mm: sourcePageHeightMm,
+                  fallback_used: true, error: 'INCOMPATIBLE_FALLBACK_PAGE',
+                });
+                continue;
+              }
 
               if (layoutInfo.includeHeader) {
-                // Embed label page into bottom 150mm, draw header in top 25mm
-                const embeddedPage = await resultPdf.embedPage(srcPdf.getPage(0));
+                // Embed label page; center inside the 150mm useful area (NOT glued to footer)
+                const embeddedPage = await resultPdf.embedPage(srcPage0);
                 const page = resultPdf.addPage([targetWPt, targetHPt]);
 
-                // Draw label in bottom area (0 to LABEL_H_PT)
+                // Fit-contain inside the 100x150mm label area, then center vertically within that area
                 const epAspect = embeddedPage.width / embeddedPage.height;
                 const targetAspect = LABEL_W_PT / LABEL_H_PT;
                 let drawW: number, drawH: number, drawX: number, drawY: number;
                 if (epAspect > targetAspect) {
-                  drawW = LABEL_W_PT; drawH = LABEL_W_PT / epAspect; drawX = 0; drawY = (LABEL_H_PT - drawH) / 2;
+                  drawW = LABEL_W_PT;
+                  drawH = LABEL_W_PT / epAspect;
                 } else {
-                  drawH = LABEL_H_PT; drawW = LABEL_H_PT * epAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = 0;
+                  drawH = LABEL_H_PT;
+                  drawW = LABEL_H_PT * epAspect;
                 }
+                drawX = (LABEL_W_PT - drawW) / 2;
+                drawY = (LABEL_H_PT - drawH) / 2; // center vertically within 150mm area
                 page.drawPage(embeddedPage, { x: drawX, y: drawY, width: drawW, height: drawH });
+
+                console.log(`[labeltest] PDF fallback embed for ${sid}: x=${drawX.toFixed(1)}pt y=${drawY.toFixed(1)}pt w=${drawW.toFixed(1)}pt h=${drawH.toFixed(1)}pt`);
 
                 // Draw header text
                 const orderId = shipMap.get(sid)?.order_id;
@@ -534,6 +568,15 @@ serve(async (req) => {
                   totalPages++;
                   console.log(`[labeltest] DANFE from direct PDF for ${sid}`);
                 }
+
+                perShipmentLog.push({
+                  shipment_id: sid, status: 'ok', source: 'ml_pdf_direct', pages: srcPageCount,
+                  output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
+                  source_page_width_mm: sourcePageWidthMm, source_page_height_mm: sourcePageHeightMm,
+                  fallback_used: true,
+                  embedded_x: +drawX.toFixed(2), embedded_y: +drawY.toFixed(2),
+                  embedded_w: +drawW.toFixed(2), embedded_h: +drawH.toFixed(2),
+                });
               } else {
                 // No header: copy all pages as-is
                 const indices = Array.from({ length: srcPageCount }, (_, i) => i);
@@ -542,15 +585,20 @@ serve(async (req) => {
                   resultPdf.addPage(cp);
                   totalPages++;
                 }
+                perShipmentLog.push({
+                  shipment_id: sid, status: 'ok', source: 'ml_pdf_direct', pages: srcPageCount,
+                  output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
+                  source_page_width_mm: sourcePageWidthMm, source_page_height_mm: sourcePageHeightMm,
+                  fallback_used: true,
+                });
               }
 
               totalSuccess++;
-              perShipmentLog.push({ shipment_id: sid, status: 'ok', source: 'ml_pdf_direct', pages: srcPageCount, output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm });
               console.log(`[labeltest] Direct PDF embedded for ${sid}: ${srcPageCount} pages, header=${layoutInfo.includeHeader}`);
             } catch (pdfErr: any) {
               console.error(`[labeltest] Direct PDF embed error for ${sid}:`, pdfErr);
               perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir PDF direto: ${pdfErr.message}` });
-              perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Direct PDF embed failed: ' + pdfErr.message });
+              perShipmentLog.push({ shipment_id: sid, status: 'error', fallback_used: true, error: 'Direct PDF embed failed: ' + pdfErr.message });
             }
             continue;
           }
