@@ -112,36 +112,10 @@ function validateZpl(raw: string): { valid: boolean; cleaned: string; reason_cod
   return { valid: true, cleaned };
 }
 
-// ─── Fallback: fetch label as PDF directly from ML API ──────────────
-async function fetchLabelPdfDirect(shipmentId: string, token: string): Promise<{ pdfBytes: Uint8Array | null; reason_code?: string; reason_message?: string }> {
-  for (let a = 1; a <= 3; a++) {
-    const t0 = Date.now();
-    try {
-      const r = await fetch(
-        `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      const latency = Date.now() - t0;
-      if ((r.status === 429 || r.status >= 500) && a < 3) {
-        console.warn(`[labeltest] ML PDF direct ${shipmentId} attempt ${a}: status=${r.status} latency=${latency}ms — retrying`);
-        await sleep(getBackoff(a));
-        continue;
-      }
-      if (!r.ok) {
-        console.error(`[labeltest] ML PDF direct error ${shipmentId}: status=${r.status} latency=${latency}ms`);
-        return { pdfBytes: null, reason_code: 'ML_PDF_FETCH_FAILED', reason_message: `API ML retornou status ${r.status}` };
-      }
-      const bytes = new Uint8Array(await r.arrayBuffer());
-      console.log(`[labeltest] ML PDF direct fetched: ${shipmentId} ${(bytes.length / 1024).toFixed(0)}KB ${latency}ms`);
-      return { pdfBytes: bytes };
-    } catch (e: any) {
-      const latency = Date.now() - t0;
-      console.error(`[labeltest] PDF direct fetch error ${shipmentId} attempt ${a}: ${e.message} ${latency}ms`);
-      if (a < 3) await sleep(getBackoff(a));
-    }
-  }
-  return { pdfBytes: null, reason_code: 'ML_PDF_FETCH_TIMEOUT', reason_message: 'Falha ao buscar PDF direto após 3 tentativas' };
-}
+// ─── PDF-first PROIBIDO no labelTest ────────────────────────────────
+// Pipeline único = ZPL-first (shipment_labels?response_type=zpl2 → Labelary → PDF).
+// Direct PDF fetch da ML foi removido por gerar páginas A4 deformadas
+// e quebrar determinismo visual com o engine legado.
 
 // ─── ZPL fetch from ML API ──────────────────────────────────────────
 async function fetchZplFromMl(shipmentId: string, token: string): Promise<{ zpl: string | null; reason_code?: string; reason_message?: string }> {
@@ -356,50 +330,24 @@ serve(async (req) => {
     const perShipmentErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const perShipmentLog: any[] = [];
 
-    // ─── STEP 1: Fetch ZPL for ALL shipments from ML API ──────────
-    console.log(`[labeltest] Step 1: Fetching ZPL for ${validIds.length} shipments`);
+    // ─── STEP 1: Fetch ZPL for ALL shipments from ML API (ZPL-first ÚNICO) ──
+    console.log(`[labeltest] pipeline=zpl_first Step 1: Fetching ZPL for ${validIds.length} shipments`);
     const zplByShipment = new Map<string, string>();
-    const directPdfByShipment = new Map<string, Uint8Array>(); // fallback for invalid ZPL
 
     for (const sid of validIds) {
       const result = await fetchZplFromMl(sid, mlAccount.access_token);
       if (!result.zpl) {
-        // If ZPL fetch failed entirely and format is pdf, try direct PDF fallback
-        if (format === 'pdf') {
-          console.log(`[labeltest] ZPL fetch failed for ${sid}, trying direct PDF fallback`);
-          const pdfResult = await fetchLabelPdfDirect(sid, mlAccount.access_token);
-          if (pdfResult.pdfBytes) {
-            directPdfByShipment.set(sid, pdfResult.pdfBytes);
-            console.log(`[labeltest] Direct PDF fallback OK for ${sid}`);
-          } else {
-            perShipmentErrors.push({ shipment_id: sid, reason_code: pdfResult.reason_code || 'ML_FETCH_FAILED', reason_message: pdfResult.reason_message || 'Falha ao baixar etiqueta' });
-            perShipmentLog.push({ shipment_id: sid, status: 'error', error: pdfResult.reason_message });
-          }
-        } else {
-          perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
-        }
+        // ZPL-first estrito: nada de fallback PDF direto. Marca erro por item.
+        perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'ml_zpl_fetch', error: result.reason_message });
         continue;
       }
-      // Validate ZPL content
+      // Validate ZPL content — sem fallback PDF direto. ZPL inválido = erro por item.
       const validation = validateZpl(result.zpl);
       if (!validation.valid) {
-        // ZPL invalid — for PDF format, fallback to direct PDF from ML
-        if (format === 'pdf') {
-          console.log(`[labeltest] ZPL invalid for ${sid} (${validation.reason_code}), trying direct PDF fallback`);
-          const pdfResult = await fetchLabelPdfDirect(sid, mlAccount.access_token);
-          if (pdfResult.pdfBytes) {
-            directPdfByShipment.set(sid, pdfResult.pdfBytes);
-            console.log(`[labeltest] Direct PDF fallback OK for ${sid}`);
-          } else {
-            perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: `${validation.reason_message!} (fallback PDF também falhou)` });
-            perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
-          }
-        } else {
-          perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: validation.reason_message });
-          console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
-        }
+        perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_validation', error: validation.reason_message });
+        console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
         continue;
       }
       zplByShipment.set(sid, validation.cleaned);
@@ -417,7 +365,7 @@ serve(async (req) => {
           zplParts.push(zpl);
           totalSuccess++;
           totalPages++;
-          perShipmentLog.push({ shipment_id: sid, status: 'ok' });
+          perShipmentLog.push({ shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'ml_zpl_raw' });
         }
       }
       finalZplContent = zplParts.join('\n');
@@ -431,9 +379,9 @@ serve(async (req) => {
         if (result.image) {
           imageByShipment.set(sid, result.image);
         } else {
-          // FALLBACK: mark this shipment as error, continue others
+          // Conversão Labelary falhou para este shipment — marca erro e segue (parcial)
           perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'LABELARY_CONVERSION_FAILED', reason_message: result.reason_message || 'Conversão Labelary falhou' });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', error: result.reason_message });
           console.error(`[labeltest] Labelary failed for ${sid}: ${result.reason_code} — continuing with remaining`);
         }
         await sleep(200);
@@ -478,133 +426,14 @@ serve(async (req) => {
         }
       }
 
-      // STEP 4: Embed each label into PDF (from Labelary PNG or direct PDF fallback)
+      // STEP 4: Embed each label into PDF (Labelary PNG ÚNICO — sem fallback PDF direto)
       for (const sid of validIds) {
         const imgBytes = imageByShipment.get(sid);
-        const fallbackPdfBytes = directPdfByShipment.get(sid);
-        if (!imgBytes && !fallbackPdfBytes) continue; // already logged as error
+        if (!imgBytes) continue; // already logged as error in STEP 2/STEP 1
 
         try {
-          // ── Direct PDF fallback path: copy pages from ML PDF ──
-          if (!imgBytes && fallbackPdfBytes) {
-            try {
-              const srcPdf = await PDFDocument.load(fallbackPdfBytes);
-              const srcPageCount = srcPdf.getPageCount();
-              const srcPage0 = srcPdf.getPage(0);
-              const srcWPt = srcPage0.getWidth();
-              const srcHPt = srcPage0.getHeight();
-              const sourcePageWidthMm = +(srcWPt / MM_TO_PT).toFixed(2);
-              const sourcePageHeightMm = +(srcHPt / MM_TO_PT).toFixed(2);
-              const srcAspect = srcWPt / srcHPt;
-              const labelAspect = LABEL_W_MM / LABEL_H_MM; // ~0.667
-              // A4-like (210x297mm portrait => aspect ~0.707) or any landscape page is incompatible
-              // Accept only sources that look like a thermal label (aspect close to 0.6-0.75 AND height >= width)
-              const isThermalLike = srcAspect >= 0.55 && srcAspect <= 0.85 && srcHPt > srcWPt && sourcePageHeightMm <= 220;
-
-              console.log(`[labeltest] PDF fallback source dims for ${sid}: ${sourcePageWidthMm}x${sourcePageHeightMm}mm, aspect=${srcAspect.toFixed(3)}, thermal_like=${isThermalLike}`);
-
-              if (layoutInfo.includeHeader && !isThermalLike) {
-                // Incompatible source (likely A4 with label in corner) — controlled error
-                console.error(`[labeltest] INCOMPATIBLE_FALLBACK_PAGE for ${sid}: ${sourcePageWidthMm}x${sourcePageHeightMm}mm aspect=${srcAspect.toFixed(3)}`);
-                perShipmentErrors.push({
-                  shipment_id: sid,
-                  reason_code: 'INCOMPATIBLE_FALLBACK_PAGE',
-                  reason_message: `PDF de origem em formato incompatível (${sourcePageWidthMm}x${sourcePageHeightMm}mm). Não é possível compor cabeçalho com layout de página completa A4.`,
-                });
-                perShipmentLog.push({
-                  shipment_id: sid, status: 'error',
-                  source_page_width_mm: sourcePageWidthMm, source_page_height_mm: sourcePageHeightMm,
-                  fallback_used: true, error: 'INCOMPATIBLE_FALLBACK_PAGE',
-                });
-                continue;
-              }
-
-              if (layoutInfo.includeHeader) {
-                // Embed label page; center inside the 150mm useful area (NOT glued to footer)
-                const embeddedPage = await resultPdf.embedPage(srcPage0);
-                const page = resultPdf.addPage([targetWPt, targetHPt]);
-
-                // Fit-contain inside the 100x150mm label area, then center vertically within that area
-                const epAspect = embeddedPage.width / embeddedPage.height;
-                const targetAspect = LABEL_W_PT / LABEL_H_PT;
-                let drawW: number, drawH: number, drawX: number, drawY: number;
-                if (epAspect > targetAspect) {
-                  drawW = LABEL_W_PT;
-                  drawH = LABEL_W_PT / epAspect;
-                } else {
-                  drawH = LABEL_H_PT;
-                  drawW = LABEL_H_PT * epAspect;
-                }
-                drawX = (LABEL_W_PT - drawW) / 2;
-                drawY = (LABEL_H_PT - drawH) / 2; // center vertically within 150mm area
-                page.drawPage(embeddedPage, { x: drawX, y: drawY, width: drawW, height: drawH });
-
-                console.log(`[labeltest] PDF fallback embed for ${sid}: x=${drawX.toFixed(1)}pt y=${drawY.toFixed(1)}pt w=${drawW.toFixed(1)}pt h=${drawH.toFixed(1)}pt`);
-
-                // Draw header text
-                const orderId = shipMap.get(sid)?.order_id;
-                const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
-                const orderItems = orderItemsMap.get(orderId) || [];
-                const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, orderItems);
-
-                const fontSize = headerPrefs.font_size || 9;
-                const lineH = fontSize * HEADER_LINE_HEIGHT_FACTOR;
-                let yPos = targetHPt - HEADER_PADDING_TOP;
-                for (const line of lines) {
-                  const f = line.bold ? fontBold : font;
-                  page.drawText(line.text, { x: 8, y: yPos, size: fontSize, font: f, color: rgb(0, 0, 0) });
-                  yPos -= lineH;
-                }
-
-                // Separator line
-                const sepY = LABEL_H_PT;
-                page.drawLine({ start: { x: 4, y: sepY }, end: { x: LABEL_W_PT - 4, y: sepY }, thickness: 0.5, color: rgb(0.5, 0.5, 0.5) });
-                totalPages++;
-
-                // DANFE from direct PDF (page index 1+)
-                if (layoutInfo.includeDanfe && srcPageCount > 1) {
-                  const [danfePage] = await resultPdf.copyPages(srcPdf, [1]);
-                  resultPdf.addPage(danfePage);
-                  totalPages++;
-                  console.log(`[labeltest] DANFE from direct PDF for ${sid}`);
-                }
-
-                perShipmentLog.push({
-                  shipment_id: sid, status: 'ok', source: 'ml_pdf_direct', pages: srcPageCount,
-                  output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
-                  source_page_width_mm: sourcePageWidthMm, source_page_height_mm: sourcePageHeightMm,
-                  fallback_used: true,
-                  embedded_x: +drawX.toFixed(2), embedded_y: +drawY.toFixed(2),
-                  embedded_w: +drawW.toFixed(2), embedded_h: +drawH.toFixed(2),
-                });
-              } else {
-                // No header: copy all pages as-is
-                const indices = Array.from({ length: srcPageCount }, (_, i) => i);
-                const copiedPages = await resultPdf.copyPages(srcPdf, indices);
-                for (const cp of copiedPages) {
-                  resultPdf.addPage(cp);
-                  totalPages++;
-                }
-                perShipmentLog.push({
-                  shipment_id: sid, status: 'ok', source: 'ml_pdf_direct', pages: srcPageCount,
-                  output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
-                  source_page_width_mm: sourcePageWidthMm, source_page_height_mm: sourcePageHeightMm,
-                  fallback_used: true,
-                });
-              }
-
-              totalSuccess++;
-              console.log(`[labeltest] Direct PDF embedded for ${sid}: ${srcPageCount} pages, header=${layoutInfo.includeHeader}`);
-            } catch (pdfErr: any) {
-              console.error(`[labeltest] Direct PDF embed error for ${sid}:`, pdfErr);
-              perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir PDF direto: ${pdfErr.message}` });
-              perShipmentLog.push({ shipment_id: sid, status: 'error', fallback_used: true, error: 'Direct PDF embed failed: ' + pdfErr.message });
-            }
-            continue;
-          }
-
           // ── Standard path: Labelary PNG → embed ──
-          const pngImage = await resultPdf.embedPng(imgBytes!);
+          const pngImage = await resultPdf.embedPng(imgBytes);
 
           if (layoutInfo.includeHeader) {
             const page = resultPdf.addPage([targetWPt, targetHPt]);
@@ -674,11 +503,15 @@ serve(async (req) => {
           }
 
           totalSuccess++;
-          perShipmentLog.push({ shipment_id: sid, status: 'ok', source: 'zpl_labelary', output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm });
+          perShipmentLog.push({
+            shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'zpl_labelary',
+            output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
+            include_header: layoutInfo.includeHeader, include_danfe: layoutInfo.includeDanfe,
+          });
         } catch (embedErr: any) {
           console.error(`[labeltest] Embed error for ${sid}:`, embedErr);
           perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir imagem: ${embedErr.message}` });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'PDF embed failed: ' + embedErr.message });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'pdf_embed', error: 'PDF embed failed: ' + embedErr.message });
         }
       }
 
