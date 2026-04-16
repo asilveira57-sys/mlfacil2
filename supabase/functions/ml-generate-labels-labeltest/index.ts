@@ -478,10 +478,11 @@ serve(async (req) => {
         }
       }
 
-      // STEP 4: Embed each label image into PDF
+      // STEP 4: Embed each label into PDF (from Labelary PNG or direct PDF fallback)
       for (const sid of validIds) {
         const imgBytes = imageByShipment.get(sid);
-        if (!imgBytes) continue; // already logged as error
+        const fallbackPdfBytes = directPdfByShipment.get(sid);
+        if (!imgBytes && !fallbackPdfBytes) continue; // already logged as error
 
         try {
           const pngImage = await resultPdf.embedPng(imgBytes);
