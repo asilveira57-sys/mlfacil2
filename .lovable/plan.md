@@ -1,35 +1,38 @@
 
+## Plan: Fix shipment status sync stuck on "printed"
 
-## Diagnosis
+### Problem
+Shipment `46866434971` shows `ready_to_ship/printed` in cache but was already delivered on ML. The current `shipping-status-sync` only checks shipments with status in `["ready_to_ship", "handling", "pending"]` — once a shipment moves to `shipped` or `delivered` on ML, it's correctly excluded from polling. **But if the cache update from `ready_to_ship → shipped` is missed (e.g., webhook failure, sync interruption), the shipment stays "stuck" in `ready_to_ship` forever** because:
 
-Two bugs prevent headers from appearing on labels in the labelTest module:
+1. Webhooks may fail or be dropped silently.
+2. The sync hits the 150-shipment limit per account ordered by `last_sync_at ASC`, so high-volume accounts can have stale entries pushed back.
+3. There's no detection of "logically impossible" stuck states (e.g., `ready_to_ship/printed` for >5 days when ML usually delivers in 2-3 days).
 
-1. **Wrong table name** (line 459 of `index.ts`): The edge function queries `shipping_label_header_prefs` but the actual database table is `meli_label_header_preferences`. This causes the preferences query to silently return null.
+### Fix
 
-2. **Direct PDF fallback skips header rendering** (lines 489-508): When ZPL is invalid and the system falls back to ML's direct PDF, it copies pages verbatim via `copyPages()` — no header area is created, no text is drawn. The 100x175 layout is effectively ignored.
+**File: `supabase/functions/shipping-status-sync/index.ts`**
 
-## Fix Plan
+1. **Add a "stale stuck shipments" pass** — at the start of each account loop, additionally fetch shipments where:
+   - `shipment_status = 'ready_to_ship'`
+   - `shipment_substatus IN ('printed', 'ready_for_pickup')`
+   - `last_sync_at < now() - interval '24 hours'` OR `date_created < now() - interval '5 days'`
+   
+   These get priority revalidation (separate batch of up to 50 per account, before the regular pass).
 
-### File: `supabase/functions/ml-generate-labels-labeltest/index.ts`
+2. **Increase per-account limit** from 150 → 250 to reduce backlog risk.
 
-**Fix 1 — Table name** (line 459):
-- Change `shipping_label_header_prefs` → `meli_label_header_preferences`
+3. **Add terminal-state safety net** — also revalidate shipments stuck in `shipped` (not yet `delivered`) for >7 days, limited to 30 per account.
 
-**Fix 2 — Add header to direct PDF fallback path** (lines 489-508):
-- When `layoutInfo.includeHeader` is true and the fallback PDF path is used:
-  - Create a new 100x175mm page
-  - Load the fallback PDF, extract page 0 (label)
-  - Embed it as a sub-page in the bottom 150mm area (same as the Labelary path)
-  - Draw the header text in the top 25mm area using the same `buildHeaderLines` logic
-  - Draw the separator line
-- When header is NOT needed, keep current behavior (copy pages directly)
+4. **Better logging** — log when a shipment transitions to a terminal state (`delivered`, `not_delivered`, `cancelled`) so we can track resolution.
 
-**Fix 3 — DANFE extraction from direct PDF fallback**:
-- If the direct PDF has >1 page and `includeDanfe` is true, also copy page index 1 (DANFE) as a separate page — same logic as the ZPL path already does via `fetchDanfePdf`.
+5. **One-shot manual recovery** — add a `?shipment_id=X` query param support so admins can force-revalidate a single shipment without waiting for the cron.
 
-### No other files changed. No shipping-labels module changes.
+### Verification
 
-## Technical Detail
+After deploy:
+- Manually invoke with `?shipment_id=46866434971` to fix the reported case immediately.
+- Confirm cache now shows `delivered` status.
+- Monitor next scheduled run logs for "transitioned to terminal" entries.
 
-The direct PDF fallback will convert the copied PDF page into an embedded object using `pdf-lib`'s `embedPage()` method, which allows placing it at a specific position within a new page — preserving the header+label layout structure.
-
+### Scope
+Single file change. No frontend, no DB schema, no impact on `shipping-labels` or `labelTest`.
