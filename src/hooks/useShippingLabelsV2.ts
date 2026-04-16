@@ -599,8 +599,19 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       const resData = response.data;
       // Handle { ok: true/false, data: {...}, error: "..." } format
       if (resData?.ok === false) {
-        const ve = resData?.data?.validation_errors as Array<{ shipment_id: string; reason: string }> | undefined;
-        if (ve && ve.length > 0) { const reasons = [...new Set(ve.map(e => e.reason))]; throw new Error(`${ve.length} envio(s) inválido(s): ${reasons.join('; ')}`); }
+        const ve = resData?.data?.validation_errors as Array<{ shipment_id: string; reason_code: string; reason_message: string }> | undefined;
+        const perShipment = resData?.data?.per_shipment as Array<{ shipment_id: string; status: string; error?: string }> | undefined;
+        if (ve && ve.length > 0) {
+          const reasons = [...new Set(ve.map(e => e.reason_message || e.reason_code))];
+          throw new Error(`${ve.length} envio(s) inválido(s): ${reasons.join('; ')}`);
+        }
+        if (perShipment) {
+          const failed = perShipment.filter(p => p.status === 'error');
+          if (failed.length > 0) {
+            const reasons = [...new Set(failed.map(f => f.error || 'erro desconhecido'))];
+            throw new Error(`${failed.length} envio(s) falharam: ${reasons.join('; ')}`);
+          }
+        }
         throw new Error(resData?.error || 'Erro ao gerar etiquetas');
       }
       // Also handle legacy { success: false } format
