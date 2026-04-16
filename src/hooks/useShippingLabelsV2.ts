@@ -578,22 +578,31 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         headers,
         body: { seller_id: sellerId, shipment_ids: shipmentIds, format, layout },
       });
-      if (response.error) throw new Error(response.error.message);
-      if (!response.data.success) {
-        const ve = response.data.validationErrors as Array<{ shipment_id: string; reason: string }> | undefined;
+      if (response.error) throw new Error(response.error.message || 'Edge Function returned a non-2xx status code');
+      const resData = response.data;
+      // Handle { ok: true/false, data: {...}, error: "..." } format
+      if (resData?.ok === false) {
+        const ve = resData?.data?.validation_errors as Array<{ shipment_id: string; reason: string }> | undefined;
         if (ve && ve.length > 0) { const reasons = [...new Set(ve.map(e => e.reason))]; throw new Error(`${ve.length} envio(s) inválido(s): ${reasons.join('; ')}`); }
-        throw new Error(response.data.message || 'Erro ao gerar etiquetas');
+        throw new Error(resData?.error || 'Erro ao gerar etiquetas');
       }
+      // Also handle legacy { success: false } format
+      if (resData?.success === false && !resData?.ok) {
+        throw new Error(resData?.error || resData?.message || 'Erro ao gerar etiquetas');
+      }
+
+      // Extract inner data (new format nests under .data)
+      const resultData = resData?.data || resData;
 
       // Update persisted job with real job_id and completed data
-      if (response.data.job_id) {
-        jobEntry.jobId = response.data.job_id;
-        dbg('[generate] real jobId=', response.data.job_id);
+      if (resultData.job_id) {
+        jobEntry.jobId = resultData.job_id;
+        dbg('[generate] real jobId=', resultData.job_id);
       }
-      jobEntry.completedData = response.data;
+      jobEntry.completedData = resultData;
       saveActiveJob(jobEntry);
 
-      return response.data;
+      return resultData;
     },
     onSuccess: (data, variables) => {
       if (!variables.shipmentId) setSelectedIds(new Set());
