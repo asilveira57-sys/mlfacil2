@@ -330,29 +330,16 @@ serve(async (req) => {
     const perShipmentErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const perShipmentLog: any[] = [];
 
-    // ─── STEP 1: Fetch ZPL for ALL shipments from ML API ──────────
-    console.log(`[labeltest] Step 1: Fetching ZPL for ${validIds.length} shipments`);
+    // ─── STEP 1: Fetch ZPL for ALL shipments from ML API (ZPL-first ÚNICO) ──
+    console.log(`[labeltest] pipeline=zpl_first Step 1: Fetching ZPL for ${validIds.length} shipments`);
     const zplByShipment = new Map<string, string>();
-    const directPdfByShipment = new Map<string, Uint8Array>(); // fallback for invalid ZPL
 
     for (const sid of validIds) {
       const result = await fetchZplFromMl(sid, mlAccount.access_token);
       if (!result.zpl) {
-        // If ZPL fetch failed entirely and format is pdf, try direct PDF fallback
-        if (format === 'pdf') {
-          console.log(`[labeltest] ZPL fetch failed for ${sid}, trying direct PDF fallback`);
-          const pdfResult = await fetchLabelPdfDirect(sid, mlAccount.access_token);
-          if (pdfResult.pdfBytes) {
-            directPdfByShipment.set(sid, pdfResult.pdfBytes);
-            console.log(`[labeltest] Direct PDF fallback OK for ${sid}`);
-          } else {
-            perShipmentErrors.push({ shipment_id: sid, reason_code: pdfResult.reason_code || 'ML_FETCH_FAILED', reason_message: pdfResult.reason_message || 'Falha ao baixar etiqueta' });
-            perShipmentLog.push({ shipment_id: sid, status: 'error', error: pdfResult.reason_message });
-          }
-        } else {
-          perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: result.reason_message });
-        }
+        // ZPL-first estrito: nada de fallback PDF direto. Marca erro por item.
+        perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'ml_zpl_fetch', error: result.reason_message });
         continue;
       }
       // Validate ZPL content
