@@ -289,41 +289,8 @@ async function zplToImage(
   return { image: null, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: `Conversão Labelary falhou após ${MAX_ATTEMPTS} tentativas` };
 }
 
-// ─── Fetch DANFE PDF from ML (for layouts that need it) ─────────────
-async function fetchDanfePdf(shipmentId: string, token: string): Promise<Uint8Array | null> {
-  for (let a = 1; a <= 3; a++) {
-    try {
-      const r = await fetch(
-        `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a)); continue; }
-      if (!r.ok) return null;
-      return new Uint8Array(await r.arrayBuffer());
-    } catch (e) {
-      if (a < 3) await sleep(getBackoff(a));
-    }
-  }
-  return null;
-}
-
-/**
- * Heurística DANFE: ML retorna PDF com [label, DANFE?, separação?].
- * DANFE = A4 retrato (~595×842 pt, aspect ~0.707). Separação geralmente A4 paisagem
- * ou proporção distinta. Nunca anexar separação no PDF final.
- * Retorna -1 quando nenhuma candidata existe.
- */
-function pickDanfePageIndex(pdf: PDFDocument): { index: number; w: number; h: number; total: number } {
-  const total = pdf.getPageCount();
-  for (let i = 1; i < total; i++) {
-    const p = pdf.getPage(i);
-    const { width: w, height: h } = p.getSize();
-    const aspect = w / h;
-    const isA4Portrait = h > 700 && Math.abs(aspect - 0.707) < 0.06;
-    if (isA4Portrait) return { index: i, w, h, total };
-  }
-  return { index: -1, w: 0, h: 0, total };
-}
+// DANFE pipeline = mesmo bloco ZPL adicional retornado pela ML.
+// Não buscamos mais PDF A4 da ML (era a porta de entrada da lista de separação).
 
 const HEADER_HEIGHT_PT = HEADER_H_MM * MM_TO_PT;
 const LABEL_W_PT = LABEL_W_MM * MM_TO_PT;
