@@ -1,38 +1,49 @@
 
-## Plan: Fix shipment status sync stuck on "printed"
+## Plano: 3 alterações no labelTest (sem tocar shipping-labels)
 
-### Problem
-Shipment `46866434971` shows `ready_to_ship/printed` in cache but was already delivered on ML. The current `shipping-status-sync` only checks shipments with status in `["ready_to_ship", "handling", "pending"]` — once a shipment moves to `shipped` or `delivered` on ML, it's correctly excluded from polling. **But if the cache update from `ready_to_ship → shipped` is missed (e.g., webhook failure, sync interruption), the shipment stays "stuck" in `ready_to_ship` forever** because:
+### Alteração 1 — Garantir Etiqueta + DANFE, eliminar página de separação
 
-1. Webhooks may fail or be dropped silently.
-2. The sync hits the 150-shipment limit per account ordered by `last_sync_at ASC`, so high-volume accounts can have stale entries pushed back.
-3. There's no detection of "logically impossible" stuck states (e.g., `ready_to_ship/printed` for >5 days when ML usually delivers in 2-3 days).
+**Causa raiz:** A ML retorna por shipment um PDF com N páginas — geralmente `[label, DANFE, separação]`. O código atual (linha 538) faz `copyPages(sourcePdf, [1])` cego, assumindo que índice 1 é sempre DANFE. Em algumas contas/coletas, a ML retorna apenas `[label, separação]` (DANFE ainda não emitida no momento da coleta), e o código embute a separação achando que é a NF.
 
-### Fix
+**Fix em `fetchDanfePdf` + bloco DANFE:**
+- Buscar o PDF completo da ML (`response_type=pdf`) por shipment.
+- Detectar a página DANFE por **heurística de tamanho/aspecto**: DANFE é A4 retrato (~595×842 pt, aspecto ~0.71). Separação ML também costuma ser A4 mas em paisagem ou com proporção distinta. Se houver mais de uma candidata A4-retrato, escolher a primeira.
+- Se nenhuma página for compatível com DANFE (PDF tem só label + separação), **logar `DANFE_NOT_AVAILABLE` e seguir SEM anexar separação** (nunca anexar página de separação).
+- Quando houver DANFE válida, **sempre anexar** (inclusive em coleta). Remove qualquer condicional que pule DANFE em coleta.
+- Log por shipment: `danfe_source_pages`, `danfe_picked_index`, `danfe_w_pt`, `danfe_h_pt`.
 
-**File: `supabase/functions/shipping-status-sync/index.ts`**
+### Alteração 2 — Variação no cabeçalho
 
-1. **Add a "stale stuck shipments" pass** — at the start of each account loop, additionally fetch shipments where:
-   - `shipment_status = 'ready_to_ship'`
-   - `shipment_substatus IN ('printed', 'ready_for_pickup')`
-   - `last_sync_at < now() - interval '24 hours'` OR `date_created < now() - interval '5 days'`
-   
-   These get priority revalidation (separate batch of up to 50 per account, before the regular pass).
+**Causa raiz:** A query `meli_order_items_cache` (linha 459) busca por `order_id` mas **não filtra por `seller_id`** e não confirma que `variation_attributes` veio populado. Em workspaces multi-conta o item correto pode não estar sendo retornado, e o cache pode ter `variation_attributes = null` mesmo havendo variação.
 
-2. **Increase per-account limit** from 150 → 250 to reduce backlog risk.
+**Fix:**
+- Adicionar `.eq('seller_id', seller_id)` na query de items.
+- No `buildProductLines`, se `variation_attributes` estiver vazio/null, fazer fallback para extrair a variação do `title` quando contiver padrão " - Cor: X / Tamanho: Y" (já vem assim em alguns retornos da ML).
+- Forçar `show_variation_attrs = true` por padrão no labelTest (não depender de preferência do usuário) — alinhado com o engine legado que sempre mostra variação.
 
-3. **Add terminal-state safety net** — also revalidate shipments stuck in `shipped` (not yet `delivered`) for >7 days, limited to 30 per account.
+### Alteração 3 — Lotes de 10 etiquetas+DANFE, merge final
 
-4. **Better logging** — log when a shipment transitions to a terminal state (`delivered`, `not_delivered`, `cancelled`) so we can track resolution.
+**Objetivo:** Permitir 30+ etiquetas por requisição respeitando limites do Labelary (~2MB) e CPU do edge runtime.
 
-5. **One-shot manual recovery** — add a `?shipment_id=X` query param support so admins can force-revalidate a single shipment without waiting for the cron.
+**Implementação:**
+- Após validação dos shipments, dividir `validIds` em **chunks de 10**.
+- Para cada chunk, executar o pipeline atual (ZPL → Labelary PNG → pdf-lib + DANFE) e gerar **um `PDFDocument` parcial**.
+- Manter um array `chunkPdfs: Uint8Array[]` com o `.save()` de cada bloco.
+- Entre chunks: `await new Promise(r => setTimeout(r, 0))` (yield CPU) + `await sleep(300)` (folga rate-limit Labelary).
+- Erros num chunk não derrubam os demais — registrar `chunk_index` no `perShipmentLog`.
+- **Merge final:** criar `finalPdf = PDFDocument.create()`, `copyPages` de cada chunkPdf na ordem, salvar uma vez só.
+- Cada chunkPdf é descartado após o merge (libera memória).
+- Telemetria nova: `chunks_total`, `chunks_ok`, `bytes_per_chunk[]`.
 
-### Verification
+**Capacidade alvo:** 30–35 etiquetas (60–70 páginas com DANFE) por requisição, sem CPU timeout.
 
-After deploy:
-- Manually invoke with `?shipment_id=46866434971` to fix the reported case immediately.
-- Confirm cache now shows `delivered` status.
-- Monitor next scheduled run logs for "transitioned to terminal" entries.
+### Critérios de aceite
+- Coleta com NF emitida → sai etiqueta + DANFE em todos shipments, **zero** página de separação.
+- Coleta sem NF emitida → sai apenas etiqueta, log `DANFE_NOT_AVAILABLE` por shipment.
+- Cabeçalho mostra "Cor: Azul" / "Tamanho: M" quando o item tem variação.
+- Lote de 30 etiquetas conclui sem CPU exceeded.
+- `shipping-labels` permanece intocado.
 
-### Scope
-Single file change. No frontend, no DB schema, no impact on `shipping-labels` or `labelTest`.
+### Escopo
+- 1 arquivo: `supabase/functions/ml-generate-labels-labeltest/index.ts`.
+- Sem mudanças de schema, frontend ou no módulo legado.
