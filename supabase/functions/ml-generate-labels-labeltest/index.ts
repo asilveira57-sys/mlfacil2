@@ -152,6 +152,22 @@ function validateZpl(raw: string): { valid: boolean; cleaned: string; reason_cod
 // Direct PDF fetch da ML foi removido por gerar páginas A4 deformadas
 // e quebrar determinismo visual com o engine legado.
 
+// ─── ZPL block splitter ─────────────────────────────────────────────
+// ML retorna por shipment um payload com N blocos ^XA...^XZ
+// (etiqueta + DANFE; ocasionalmente blocos extras de separação que NÃO vêm em ZPL — vêm em PDF A4 separado).
+// Como pedimos response_type=zpl2, A4 PDF nunca chega aqui. Todo bloco ZPL válido é mantido.
+function splitZplBlocks(zpl: string): string[] {
+  if (!zpl) return [];
+  const regex = /\^XA[\s\S]*?\^XZ/gi;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(zpl)) !== null) {
+    const block = m[0].trim();
+    if (block.length > 0) out.push(block);
+  }
+  return out;
+}
+
 // ─── ZPL fetch from ML API ──────────────────────────────────────────
 // ML retorna ZIP (PK..) quando response_type=zpl2. Caso seja texto puro (^XA), aceita direto.
 async function extractZplFromBytes(bytes: Uint8Array, shipmentId: string): Promise<string | null> {
