@@ -610,30 +610,52 @@ serve(async (req) => {
         const chunk = chunks[chunkIdx];
         console.log(`[labeltest] === Chunk ${chunkIdx + 1}/${chunks.length} (${chunk.length} shipments) ===`);
 
-        // ── Step A: Labelary PNG para CADA bloco ZPL de cada shipment ─────
+        // ── Step A: Labelary PNG para CADA bloco ZPL — PARALELO no chunk ──
         // Estrutura: imagesByShipment[sid] = Uint8Array[] (uma imagem por bloco)
         const imagesByShipment = new Map<string, Uint8Array[]>();
         const renderErrorsByShipment = new Map<string, string>();
 
+        // Monta lista plana de tarefas (sid, blockIndex, zpl) e dispara todas em paralelo.
+        // Paralelismo elimina o tempo de espera serial que estourava CPU do edge.
+        type RenderTask = { sid: string; bi: number; zpl: string };
+        const tasks: RenderTask[] = [];
         for (const sid of chunk) {
           const blocks = zplBlocksByShipment.get(sid)!;
-          const imgs: Uint8Array[] = [];
-          let blockErr: string | null = null;
           for (let bi = 0; bi < blocks.length; bi++) {
-            const result = await zplToImage(blocks[bi], `${sid}#${bi}`, layout);
-            if (result.image) {
-              imgs.push(result.image);
-            } else {
-              blockErr = result.reason_message || 'Conversão Labelary falhou';
-              console.warn(`[labeltest] ${sid} bloco ${bi}: falhou render — ${blockErr}`);
-              break; // se um bloco falha, descarta o shipment inteiro (etiqueta sem DANFE não vai sair)
-            }
-            await sleep(150);
+            tasks.push({ sid, bi, zpl: blocks[bi] });
           }
-          if (blockErr || imgs.length < 2) {
-            const reason = blockErr || `Apenas ${imgs.length} bloco(s) renderizado(s)`;
+        }
+
+        const results = await Promise.all(
+          tasks.map((t) => zplToImage(t.zpl, `${t.sid}#${t.bi}`, layout))
+        );
+
+        // Agrupa resultados por shipment, preservando ordem dos blocos
+        const tmpBySid = new Map<string, { imgs: (Uint8Array | null)[]; err: string | null }>();
+        for (let k = 0; k < tasks.length; k++) {
+          const t = tasks[k];
+          const r = results[k];
+          let entry = tmpBySid.get(t.sid);
+          if (!entry) {
+            const total = zplBlocksByShipment.get(t.sid)!.length;
+            entry = { imgs: new Array(total).fill(null), err: null };
+            tmpBySid.set(t.sid, entry);
+          }
+          if (r.image) {
+            entry.imgs[t.bi] = r.image;
+          } else if (!entry.err) {
+            entry.err = r.reason_message || 'Conversão Labelary falhou';
+          }
+        }
+
+        for (const sid of chunk) {
+          const entry = tmpBySid.get(sid)!;
+          const imgs = entry.imgs.filter((x): x is Uint8Array => x !== null);
+          const blocksTotal = zplBlocksByShipment.get(sid)!.length;
+          if (entry.err || imgs.length < 2 || imgs.length !== blocksTotal) {
+            const reason = entry.err || `Apenas ${imgs.length}/${blocksTotal} bloco(s) renderizado(s)`;
             perShipmentErrors.push({ shipment_id: sid, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: reason });
-            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, zpl_blocks_total: blocks.length, blocks_rendered: imgs.length, error: reason });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, zpl_blocks_total: blocksTotal, blocks_rendered: imgs.length, error: reason });
             renderErrorsByShipment.set(sid, reason);
           } else {
             imagesByShipment.set(sid, imgs);
