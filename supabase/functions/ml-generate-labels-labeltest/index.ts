@@ -405,19 +405,20 @@ serve(async (req) => {
     const perShipmentErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const perShipmentLog: any[] = [];
 
-    // ─── STEP 1: Fetch ZPL for ALL shipments from ML API (ZPL-first ÚNICO) ──
+    // ─── STEP 1: Fetch ZPL for ALL shipments and split into blocks ──
+    // Cada shipment retorna 1+ blocos ^XA...^XZ (etiqueta + DANFE em ZPL).
+    // A lista de separação NUNCA chega aqui pois pedimos response_type=zpl2 (vem só em PDF A4 separado).
     console.log(`[labeltest] pipeline=zpl_first Step 1: Fetching ZPL for ${validIds.length} shipments`);
-    const zplByShipment = new Map<string, string>();
+    const zplBlocksByShipment = new Map<string, string[]>();
+    const rawZplByShipment = new Map<string, string>();
 
     for (const sid of validIds) {
       const result = await fetchZplFromMl(sid, mlAccount.access_token);
       if (!result.zpl) {
-        // ZPL-first estrito: nada de fallback PDF direto. Marca erro por item.
         perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
         perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'ml_zpl_fetch', error: result.reason_message });
         continue;
       }
-      // Validate ZPL content — sem fallback PDF direto. ZPL inválido = erro por item.
       const validation = validateZpl(result.zpl);
       if (!validation.valid) {
         perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
@@ -425,22 +426,37 @@ serve(async (req) => {
         console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
         continue;
       }
-      zplByShipment.set(sid, validation.cleaned);
-      console.log(`[labeltest] ZPL validated: ${sid} (${validation.cleaned.length} chars)`);
-      // Rate limit between ML calls
+      const blocks = splitZplBlocks(validation.cleaned);
+      if (blocks.length === 0) {
+        perShipmentErrors.push({ shipment_id: sid, reason_code: 'ZPL_NO_BLOCKS', reason_message: 'ZPL retornado não contém blocos ^XA...^XZ' });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_split', error: 'no blocks' });
+        continue;
+      }
+      // Regra: precisa Etiqueta + DANFE (mínimo 2 blocos). Se vier só 1, marca DANFE_MISSING.
+      if (blocks.length < 2) {
+        perShipmentErrors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — tente novamente em alguns minutos' });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'danfe_missing', zpl_blocks_total: blocks.length, error: 'apenas 1 bloco ZPL recebido' });
+        console.warn(`[labeltest] ${sid}: DANFE_MISSING (apenas ${blocks.length} bloco ZPL)`);
+        continue;
+      }
+      zplBlocksByShipment.set(sid, blocks);
+      rawZplByShipment.set(sid, validation.cleaned);
+      console.log(`[labeltest] ZPL validated: ${sid} → ${blocks.length} blocos (${validation.cleaned.length} chars)`);
       if (validIds.indexOf(sid) < validIds.length - 1) await sleep(150);
     }
 
     if (format === 'zpl') {
-      // ─── ZPL format: concatenate valid and return ─────────────
+      // ─── ZPL format: concatenate raw payloads (todos os blocos válidos) ─────────────
       const zplParts: string[] = [];
       for (const sid of validIds) {
-        const zpl = zplByShipment.get(sid);
-        if (zpl) {
-          zplParts.push(zpl);
+        const raw = rawZplByShipment.get(sid);
+        const blocks = zplBlocksByShipment.get(sid);
+        if (raw && blocks) {
+          // Concatena todos os blocos do shipment (etiqueta + DANFE)
+          zplParts.push(blocks.join('\n'));
           totalSuccess++;
-          totalPages++;
-          perShipmentLog.push({ shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'ml_zpl_raw' });
+          totalPages += blocks.length;
+          perShipmentLog.push({ shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'ml_zpl_raw', zpl_blocks: blocks.length });
         }
       }
       finalZplContent = zplParts.join('\n');
