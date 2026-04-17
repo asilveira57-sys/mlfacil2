@@ -462,9 +462,12 @@ serve(async (req) => {
       finalZplContent = zplParts.join('\n');
     } else {
       // ─── PDF format: ZPL → Labelary PNG → pdf-lib PDF (CHUNKED) ────────
-      // Lotes de 10 etiquetas; cada chunk gera um PDF parcial; merge final.
+      // Para cada shipment processamos TODOS os blocos ZPL retornados:
+      //   bloco 0 = etiqueta (recebe cabeçalho quando layout exige)
+      //   blocos 1..N = páginas adicionais (DANFE, etc.) — sem cabeçalho.
+      // Lista de separação A4 NUNCA chega: pedimos response_type=zpl2.
       const CHUNK_SIZE = 10;
-      const sidsForPdf = validIds.filter(sid => zplByShipment.has(sid));
+      const sidsForPdf = validIds.filter(sid => zplBlocksByShipment.has(sid));
       const chunks: string[][] = [];
       for (let i = 0; i < sidsForPdf.length; i += CHUNK_SIZE) {
         chunks.push(sidsForPdf.slice(i, i + CHUNK_SIZE));
@@ -511,22 +514,38 @@ serve(async (req) => {
         const chunk = chunks[chunkIdx];
         console.log(`[labeltest] === Chunk ${chunkIdx + 1}/${chunks.length} (${chunk.length} shipments) ===`);
 
-        // ── Step A: Labelary PNG para o chunk ─────────────────────
-        const imageByShipment = new Map<string, Uint8Array>();
+        // ── Step A: Labelary PNG para CADA bloco ZPL de cada shipment ─────
+        // Estrutura: imagesByShipment[sid] = Uint8Array[] (uma imagem por bloco)
+        const imagesByShipment = new Map<string, Uint8Array[]>();
+        const renderErrorsByShipment = new Map<string, string>();
+
         for (const sid of chunk) {
-          const zpl = zplByShipment.get(sid)!;
-          const result = await zplToImage(zpl, sid, layout);
-          if (result.image) {
-            imageByShipment.set(sid, result.image);
-          } else {
-            perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'LABELARY_CONVERSION_FAILED', reason_message: result.reason_message || 'Conversão Labelary falhou' });
-            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, error: result.reason_message });
+          const blocks = zplBlocksByShipment.get(sid)!;
+          const imgs: Uint8Array[] = [];
+          let blockErr: string | null = null;
+          for (let bi = 0; bi < blocks.length; bi++) {
+            const result = await zplToImage(blocks[bi], `${sid}#${bi}`, layout);
+            if (result.image) {
+              imgs.push(result.image);
+            } else {
+              blockErr = result.reason_message || 'Conversão Labelary falhou';
+              console.warn(`[labeltest] ${sid} bloco ${bi}: falhou render — ${blockErr}`);
+              break; // se um bloco falha, descarta o shipment inteiro (etiqueta sem DANFE não vai sair)
+            }
+            await sleep(150);
           }
-          await sleep(200);
+          if (blockErr || imgs.length < 2) {
+            const reason = blockErr || `Apenas ${imgs.length} bloco(s) renderizado(s)`;
+            perShipmentErrors.push({ shipment_id: sid, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: reason });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, zpl_blocks_total: blocks.length, blocks_rendered: imgs.length, error: reason });
+            renderErrorsByShipment.set(sid, reason);
+          } else {
+            imagesByShipment.set(sid, imgs);
+          }
         }
 
-        if (imageByShipment.size === 0) {
-          console.warn(`[labeltest] Chunk ${chunkIdx + 1}: nenhuma imagem gerada — pulando merge desse chunk`);
+        if (imagesByShipment.size === 0) {
+          console.warn(`[labeltest] Chunk ${chunkIdx + 1}: nenhum shipment com blocos válidos — pulando merge desse chunk`);
           await sleep(300);
           await new Promise((r) => setTimeout(r, 0));
           continue;
@@ -544,17 +563,18 @@ serve(async (req) => {
         let chunkPages = 0;
 
         for (const sid of chunk) {
-          const imgBytes = imageByShipment.get(sid);
-          if (!imgBytes) continue;
+          const blockImages = imagesByShipment.get(sid);
+          if (!blockImages || blockImages.length === 0) continue;
 
           try {
-            const pngImage = await chunkPdf.embedPng(imgBytes);
+            // ── Bloco 0: ETIQUETA (recebe cabeçalho quando layout exige) ──
+            const labelImg = await chunkPdf.embedPng(blockImages[0]);
 
             if (layoutInfo.includeHeader) {
               const page = chunkPdf.addPage([targetWPt, targetHPt]);
               const labelAreaY = 0;
               const labelAreaH = LABEL_H_PT;
-              const imgAspect = pngImage.width / pngImage.height;
+              const imgAspect = labelImg.width / labelImg.height;
               const targetAspect = LABEL_W_PT / labelAreaH;
 
               let drawW: number, drawH: number, drawX: number, drawY: number;
@@ -563,7 +583,7 @@ serve(async (req) => {
               } else {
                 drawH = labelAreaH; drawW = labelAreaH * imgAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = labelAreaY;
               }
-              page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
+              page.drawImage(labelImg, { x: drawX, y: drawY, width: drawW, height: drawH });
 
               const orderId = shipMap.get(sid)?.order_id;
               const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
@@ -585,7 +605,7 @@ serve(async (req) => {
               chunkPages++;
             } else {
               const page = chunkPdf.addPage([targetWPt, targetHPt]);
-              const imgAspect = pngImage.width / pngImage.height;
+              const imgAspect = labelImg.width / labelImg.height;
               const pageAspect = targetWPt / targetHPt;
 
               let drawW: number, drawH: number, drawX: number, drawY: number;
@@ -594,51 +614,27 @@ serve(async (req) => {
               } else {
                 drawH = targetHPt; drawW = targetHPt * imgAspect; drawX = (targetWPt - drawW) / 2; drawY = 0;
               }
-              page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
+              page.drawImage(labelImg, { x: drawX, y: drawY, width: drawW, height: drawH });
               chunkPages++;
             }
 
-            // ── DANFE: heurística inteligente. Sempre tenta anexar (inclusive coleta).
-            //    Nunca anexa página de separação.
-            let danfeAttached = false;
-            let danfeReason = '';
-            let danfeSourcePages = 0;
-            let danfePickedIndex = -1;
-            let danfeWPt = 0;
-            let danfeHPt = 0;
+            // ── Blocos 1..N: DANFE e demais (sem cabeçalho, ocupam página inteira) ──
+            let danfePagesAdded = 0;
+            for (let bi = 1; bi < blockImages.length; bi++) {
+              const extraImg = await chunkPdf.embedPng(blockImages[bi]);
+              const page = chunkPdf.addPage([targetWPt, targetHPt]);
+              const imgAspect = extraImg.width / extraImg.height;
+              const pageAspect = targetWPt / targetHPt;
 
-            if (layoutInfo.includeDanfe && layout !== 'meli_100x150_no_nf') {
-              const danfeBytes = await fetchDanfePdf(sid, mlAccount.access_token);
-              if (!danfeBytes) {
-                danfeReason = 'DANFE_FETCH_FAILED';
+              let drawW: number, drawH: number, drawX: number, drawY: number;
+              if (imgAspect > pageAspect) {
+                drawW = targetWPt; drawH = targetWPt / imgAspect; drawX = 0; drawY = (targetHPt - drawH) / 2;
               } else {
-                try {
-                  const danfePdf = await PDFDocument.load(danfeBytes, {
-                    updateMetadata: false,
-                    ignoreEncryption: true,
-                    throwOnInvalidObject: false,
-                  });
-                  const picked = pickDanfePageIndex(danfePdf);
-                  danfeSourcePages = picked.total;
-                  danfePickedIndex = picked.index;
-                  danfeWPt = picked.w;
-                  danfeHPt = picked.h;
-
-                  if (picked.index >= 0) {
-                    const [danfePage] = await chunkPdf.copyPages(danfePdf, [picked.index]);
-                    chunkPdf.addPage(danfePage);
-                    chunkPages++;
-                    danfeAttached = true;
-                    console.log(`[labeltest] DANFE added for ${sid}: page ${picked.index + 1}/${picked.total} (${picked.w.toFixed(0)}x${picked.h.toFixed(0)}pt)`);
-                  } else {
-                    danfeReason = 'DANFE_NOT_AVAILABLE';
-                    console.log(`[labeltest] DANFE skipped for ${sid}: no A4 portrait page found in ${picked.total} pages (separação não será anexada)`);
-                  }
-                } catch (de: any) {
-                  danfeReason = 'DANFE_PARSE_ERROR';
-                  console.warn(`[labeltest] DANFE parse error for ${sid}:`, de.message);
-                }
+                drawH = targetHPt; drawW = targetHPt * imgAspect; drawX = (targetWPt - drawW) / 2; drawY = 0;
               }
+              page.drawImage(extraImg, { x: drawX, y: drawY, width: drawW, height: drawH });
+              chunkPages++;
+              danfePagesAdded++;
             }
 
             await new Promise((r) => setTimeout(r, 0));
@@ -648,10 +644,10 @@ serve(async (req) => {
               shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'zpl_labelary',
               chunk_index: chunkIdx,
               output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
-              include_header: layoutInfo.includeHeader, include_danfe: layoutInfo.includeDanfe,
-              danfe_attached: danfeAttached, danfe_reason: danfeReason,
-              danfe_source_pages: danfeSourcePages, danfe_picked_index: danfePickedIndex,
-              danfe_w_pt: Math.round(danfeWPt), danfe_h_pt: Math.round(danfeHPt),
+              include_header: layoutInfo.includeHeader,
+              zpl_blocks_total: blockImages.length,
+              danfe_pages_added: danfePagesAdded,
+              danfe_status: danfePagesAdded > 0 ? 'attached' : 'missing',
             });
           } catch (embedErr: any) {
             console.error(`[labeltest] Embed error for ${sid}:`, embedErr);
