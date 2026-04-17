@@ -53,6 +53,22 @@ function wrapTextLines(text: string, maxChars: number): string[] {
   return result.length > 0 ? result : [text];
 }
 
+// Fallback: extrai variação do título quando vier no padrão "Title - Cor: Azul / Tamanho: M"
+function extractVariationsFromTitle(title: string): { name: string; value: string }[] {
+  if (!title) return [];
+  const out: { name: string; value: string }[] = [];
+  // Captura segmentos após " - " que contenham "Nome: Valor" separados por " / " ou ","
+  const dashIdx = title.lastIndexOf(' - ');
+  if (dashIdx < 0) return [];
+  const tail = title.substring(dashIdx + 3);
+  const parts = tail.split(/\s*[\/,]\s*/);
+  for (const p of parts) {
+    const m = p.match(/^([A-Za-zÀ-ÿ ]+)\s*:\s*(.+)$/);
+    if (m) out.push({ name: m[1].trim(), value: m[2].trim() });
+  }
+  return out;
+}
+
 function buildProductLines(items: any[], maxLines: number, showSku: boolean, showVarAttrs: boolean, maxLen = 58) {
   if (items.length === 0) return [];
   const sorted = [...items].sort((a, b) => b.quantity !== a.quantity ? b.quantity - a.quantity : (a.sku || a.title_short || '').localeCompare(b.sku || b.title_short || ''));
@@ -62,7 +78,25 @@ function buildProductLines(items: any[], maxLines: number, showSku: boolean, sho
     const title = sanitize(item.title || item.title_short || item.sku || 'Item', 200);
     for (const tl of wrapTextLines(title, maxLen)) { if (lines.length >= maxLines) break; lines.push({ text: tl, bold: true }); }
     if (lines.length < maxLines) { const sku = showSku && item.sku ? ` - Apelido: ${item.sku}` : ''; lines.push({ text: truncate(`Quantidade: ${item.quantity}${sku}`, maxLen), bold: false }); }
-    if (showVarAttrs && item.variation_attributes && lines.length < maxLines) { for (const a of item.variation_attributes) { if (lines.length >= maxLines) break; const n = a?.name || a?.id || ''; const v = a?.value_name || a?.value || ''; if (n && v) lines.push({ text: truncate(`${n}: ${v}`, maxLen), bold: false }); } }
+    if (showVarAttrs && lines.length < maxLines) {
+      // Fonte primária: variation_attributes do cache
+      let attrs: { name: string; value: string }[] = [];
+      if (Array.isArray(item.variation_attributes) && item.variation_attributes.length > 0) {
+        for (const a of item.variation_attributes) {
+          const n = a?.name || a?.id || '';
+          const v = a?.value_name || a?.value || '';
+          if (n && v) attrs.push({ name: n, value: v });
+        }
+      }
+      // Fallback: parse do title quando attrs vier vazio
+      if (attrs.length === 0) {
+        attrs = extractVariationsFromTitle(item.title || item.title_short || '');
+      }
+      for (const a of attrs) {
+        if (lines.length >= maxLines) break;
+        lines.push({ text: truncate(`${a.name}: ${a.value}`, maxLen), bold: false });
+      }
+    }
   }
   return lines;
 }
