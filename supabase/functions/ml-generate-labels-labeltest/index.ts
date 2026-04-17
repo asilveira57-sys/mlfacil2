@@ -563,7 +563,7 @@ serve(async (req) => {
       }
 
       if (totalPages > 0) {
-        const pdfBytes = await resultPdf.save();
+        const pdfBytes = await resultPdf.save({ useObjectStreams: false, addDefaultPage: false });
         finalPdfBase64 = uint8ToBase64(pdfBytes);
         console.log(`[labeltest] PDF built: ${totalSuccess}/${validIds.length} shipments, ${totalPages} pages, ${(pdfBytes.length / 1024).toFixed(0)}KB`);
       } else {
