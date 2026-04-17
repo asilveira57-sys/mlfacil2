@@ -1,49 +1,52 @@
 
-## Plano: 3 alterações no labelTest (sem tocar shipping-labels)
 
-### Alteração 1 — Garantir Etiqueta + DANFE, eliminar página de separação
+## Diagnóstico real (agora corrigido)
 
-**Causa raiz:** A ML retorna por shipment um PDF com N páginas — geralmente `[label, DANFE, separação]`. O código atual (linha 538) faz `copyPages(sourcePdf, [1])` cego, assumindo que índice 1 é sempre DANFE. Em algumas contas/coletas, a ML retorna apenas `[label, separação]` (DANFE ainda não emitida no momento da coleta), e o código embute a separação achando que é a NF.
+A ML retorna **um único payload por requisição em lote** com a seguinte estrutura:
 
-**Fix em `fetchDanfePdf` + bloco DANFE:**
-- Buscar o PDF completo da ML (`response_type=pdf`) por shipment.
-- Detectar a página DANFE por **heurística de tamanho/aspecto**: DANFE é A4 retrato (~595×842 pt, aspecto ~0.71). Separação ML também costuma ser A4 mas em paisagem ou com proporção distinta. Se houver mais de uma candidata A4-retrato, escolher a primeira.
-- Se nenhuma página for compatível com DANFE (PDF tem só label + separação), **logar `DANFE_NOT_AVAILABLE` e seguir SEM anexar separação** (nunca anexar página de separação).
-- Quando houver DANFE válida, **sempre anexar** (inclusive em coleta). Remove qualquer condicional que pule DANFE em coleta.
-- Log por shipment: `danfe_source_pages`, `danfe_picked_index`, `danfe_w_pt`, `danfe_h_pt`.
+```
+[Etiqueta1, Nota1, Etiqueta2, Nota2, ..., EtiquetaN, NotaN, ListaDeSeparação(A4 PDF)]
+```
 
-### Alteração 2 — Variação no cabeçalho
+- Etiquetas e notas vêm em **ZPL** (formato térmico, dimensões pequenas).
+- A **lista de separação** vem como **página A4 em PDF** anexada ao final — é UMA folha só, com todas as separações consolidadas.
+- A regra "descartar bloco 3" estava errada: notas legítimas seriam descartadas em lotes com 2+ shipments.
 
-**Causa raiz:** A query `meli_order_items_cache` (linha 459) busca por `order_id` mas **não filtra por `seller_id`** e não confirma que `variation_attributes` veio populado. Em workspaces multi-conta o item correto pode não estar sendo retornado, e o cache pode ter `variation_attributes = null` mesmo havendo variação.
+## Plano correto
 
-**Fix:**
-- Adicionar `.eq('seller_id', seller_id)` na query de items.
-- No `buildProductLines`, se `variation_attributes` estiver vazio/null, fazer fallback para extrair a variação do `title` quando contiver padrão " - Cor: X / Tamanho: Y" (já vem assim em alguns retornos da ML).
-- Forçar `show_variation_attrs = true` por padrão no labelTest (não depender de preferência do usuário) — alinhado com o engine legado que sempre mostra variação.
+**Arquivo único:** `supabase/functions/ml-generate-labels-labeltest/index.ts`
 
-### Alteração 3 — Lotes de 10 etiquetas+DANFE, merge final
+### 1. Pipeline ZPL para etiqueta + DANFE
+- Por shipment, buscar `response_type=zpl2`.
+- Extrair **todos** os blocos `^XA...^XZ` do payload retornado.
+- Renderizar cada bloco ZPL via Labelary → embed no PDF final.
+- **Nada de descartar por índice.** Todo bloco ZPL válido entra.
 
-**Objetivo:** Permitir 30+ etiquetas por requisição respeitando limites do Labelary (~2MB) e CPU do edge runtime.
+### 2. Detectar e descartar lista de separação (única regra de exclusão)
+- A lista de separação **não vem em ZPL** — vem como página A4 em PDF.
+- No fluxo ZPL puro, ela simplesmente **não aparece** (porque pedimos `zpl2`, e A4 não é ZPL).
+- Garantia adicional: se algum bloco extraído tiver dimensões A4 (~595×842 pt) ou for identificado como PDF/non-ZPL no payload, **descartar esse bloco específico** (não por posição).
+- Critério de descarte: `é A4 retrato` OU `bloco não contém marcadores ZPL válidos`. Nunca por índice.
 
-**Implementação:**
-- Após validação dos shipments, dividir `validIds` em **chunks de 10**.
-- Para cada chunk, executar o pipeline atual (ZPL → Labelary PNG → pdf-lib + DANFE) e gerar **um `PDFDocument` parcial**.
-- Manter um array `chunkPdfs: Uint8Array[]` com o `.save()` de cada bloco.
-- Entre chunks: `await new Promise(r => setTimeout(r, 0))` (yield CPU) + `await sleep(300)` (folga rate-limit Labelary).
-- Erros num chunk não derrubam os demais — registrar `chunk_index` no `perShipmentLog`.
-- **Merge final:** criar `finalPdf = PDFDocument.create()`, `copyPages` de cada chunkPdf na ordem, salvar uma vez só.
-- Cada chunkPdf é descartado após o merge (libera memória).
-- Telemetria nova: `chunks_total`, `chunks_ok`, `bytes_per_chunk[]`.
+### 3. Validação por shipment
+- Mínimo esperado: 2 blocos ZPL válidos (etiqueta + nota).
+- Se vier só 1 bloco → `reason_code: 'DANFE_MISSING'`, shipment falha, lote continua.
+- Se vier 2+ blocos ZPL → todos entram no PDF final, na ordem.
 
-**Capacidade alvo:** 30–35 etiquetas (60–70 páginas com DANFE) por requisição, sem CPU timeout.
+### 4. Manter o que já está funcionando
+- Variação no cabeçalho (`seller_id` no filtro + fallback do título + `show_variation_attrs=true`).
+- Chunks de 10 shipments com merge final.
+- CPU yield entre chunks.
+
+### 5. Telemetria por shipment
+- `zpl_blocks_total`, `zpl_blocks_kept`, `zpl_blocks_discarded_a4`, `danfe_status`.
 
 ### Critérios de aceite
-- Coleta com NF emitida → sai etiqueta + DANFE em todos shipments, **zero** página de separação.
-- Coleta sem NF emitida → sai apenas etiqueta, log `DANFE_NOT_AVAILABLE` por shipment.
-- Cabeçalho mostra "Cor: Azul" / "Tamanho: M" quando o item tem variação.
-- Lote de 30 etiquetas conclui sem CPU exceeded.
-- `shipping-labels` permanece intocado.
+- Lote com N shipments → PDF final tem 2N páginas (etiqueta + nota por shipment).
+- Zero página A4 de lista de separação no PDF final.
+- Shipment sem nota ZPL → falha controlada, demais continuam.
+- `shipping-labels` intocado.
 
 ### Escopo
-- 1 arquivo: `supabase/functions/ml-generate-labels-labeltest/index.ts`.
-- Sem mudanças de schema, frontend ou no módulo legado.
+- 1 arquivo. Sem schema, sem frontend, sem tocar no legado.
+
