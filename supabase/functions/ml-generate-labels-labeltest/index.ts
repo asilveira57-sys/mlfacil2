@@ -291,6 +291,24 @@ async function fetchDanfePdf(shipmentId: string, token: string): Promise<Uint8Ar
   return null;
 }
 
+/**
+ * Heurística DANFE: ML retorna PDF com [label, DANFE?, separação?].
+ * DANFE = A4 retrato (~595×842 pt, aspect ~0.707). Separação geralmente A4 paisagem
+ * ou proporção distinta. Nunca anexar separação no PDF final.
+ * Retorna -1 quando nenhuma candidata existe.
+ */
+function pickDanfePageIndex(pdf: PDFDocument): { index: number; w: number; h: number; total: number } {
+  const total = pdf.getPageCount();
+  for (let i = 1; i < total; i++) {
+    const p = pdf.getPage(i);
+    const { width: w, height: h } = p.getSize();
+    const aspect = w / h;
+    const isA4Portrait = h > 700 && Math.abs(aspect - 0.707) < 0.06;
+    if (isA4Portrait) return { index: i, w, h, total };
+  }
+  return { index: -1, w: 0, h: 0, total };
+}
+
 const HEADER_HEIGHT_PT = HEADER_H_MM * MM_TO_PT;
 const LABEL_W_PT = LABEL_W_MM * MM_TO_PT;
 const LABEL_H_PT = LABEL_H_MM * MM_TO_PT;
