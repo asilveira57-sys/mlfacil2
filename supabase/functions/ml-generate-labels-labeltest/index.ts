@@ -53,6 +53,22 @@ function wrapTextLines(text: string, maxChars: number): string[] {
   return result.length > 0 ? result : [text];
 }
 
+// Fallback: extrai variação do título quando vier no padrão "Title - Cor: Azul / Tamanho: M"
+function extractVariationsFromTitle(title: string): { name: string; value: string }[] {
+  if (!title) return [];
+  const out: { name: string; value: string }[] = [];
+  // Captura segmentos após " - " que contenham "Nome: Valor" separados por " / " ou ","
+  const dashIdx = title.lastIndexOf(' - ');
+  if (dashIdx < 0) return [];
+  const tail = title.substring(dashIdx + 3);
+  const parts = tail.split(/\s*[\/,]\s*/);
+  for (const p of parts) {
+    const m = p.match(/^([A-Za-zÀ-ÿ ]+)\s*:\s*(.+)$/);
+    if (m) out.push({ name: m[1].trim(), value: m[2].trim() });
+  }
+  return out;
+}
+
 function buildProductLines(items: any[], maxLines: number, showSku: boolean, showVarAttrs: boolean, maxLen = 58) {
   if (items.length === 0) return [];
   const sorted = [...items].sort((a, b) => b.quantity !== a.quantity ? b.quantity - a.quantity : (a.sku || a.title_short || '').localeCompare(b.sku || b.title_short || ''));
@@ -62,7 +78,25 @@ function buildProductLines(items: any[], maxLines: number, showSku: boolean, sho
     const title = sanitize(item.title || item.title_short || item.sku || 'Item', 200);
     for (const tl of wrapTextLines(title, maxLen)) { if (lines.length >= maxLines) break; lines.push({ text: tl, bold: true }); }
     if (lines.length < maxLines) { const sku = showSku && item.sku ? ` - Apelido: ${item.sku}` : ''; lines.push({ text: truncate(`Quantidade: ${item.quantity}${sku}`, maxLen), bold: false }); }
-    if (showVarAttrs && item.variation_attributes && lines.length < maxLines) { for (const a of item.variation_attributes) { if (lines.length >= maxLines) break; const n = a?.name || a?.id || ''; const v = a?.value_name || a?.value || ''; if (n && v) lines.push({ text: truncate(`${n}: ${v}`, maxLen), bold: false }); } }
+    if (showVarAttrs && lines.length < maxLines) {
+      // Fonte primária: variation_attributes do cache
+      let attrs: { name: string; value: string }[] = [];
+      if (Array.isArray(item.variation_attributes) && item.variation_attributes.length > 0) {
+        for (const a of item.variation_attributes) {
+          const n = a?.name || a?.id || '';
+          const v = a?.value_name || a?.value || '';
+          if (n && v) attrs.push({ name: n, value: v });
+        }
+      }
+      // Fallback: parse do title quando attrs vier vazio
+      if (attrs.length === 0) {
+        attrs = extractVariationsFromTitle(item.title || item.title_short || '');
+      }
+      for (const a of attrs) {
+        if (lines.length >= maxLines) break;
+        lines.push({ text: truncate(`${a.name}: ${a.value}`, maxLen), bold: false });
+      }
+    }
   }
   return lines;
 }
@@ -257,6 +291,24 @@ async function fetchDanfePdf(shipmentId: string, token: string): Promise<Uint8Ar
   return null;
 }
 
+/**
+ * Heurística DANFE: ML retorna PDF com [label, DANFE?, separação?].
+ * DANFE = A4 retrato (~595×842 pt, aspect ~0.707). Separação geralmente A4 paisagem
+ * ou proporção distinta. Nunca anexar separação no PDF final.
+ * Retorna -1 quando nenhuma candidata existe.
+ */
+function pickDanfePageIndex(pdf: PDFDocument): { index: number; w: number; h: number; total: number } {
+  const total = pdf.getPageCount();
+  for (let i = 1; i < total; i++) {
+    const p = pdf.getPage(i);
+    const { width: w, height: h } = p.getSize();
+    const aspect = w / h;
+    const isA4Portrait = h > 700 && Math.abs(aspect - 0.707) < 0.06;
+    if (isA4Portrait) return { index: i, w, h, total };
+  }
+  return { index: -1, w: 0, h: 0, total };
+}
+
 const HEADER_HEIGHT_PT = HEADER_H_MM * MM_TO_PT;
 const LABEL_W_PT = LABEL_W_MM * MM_TO_PT;
 const LABEL_H_PT = LABEL_H_MM * MM_TO_PT;
@@ -410,34 +462,17 @@ serve(async (req) => {
       }
       finalZplContent = zplParts.join('\n');
     } else {
-      // ─── PDF format: ZPL → Labelary PNG → pdf-lib PDF ────────
-      console.log(`[labeltest] Step 2: Converting ${zplByShipment.size} ZPLs to PNG via Labelary (layout=${layout})`);
-      const imageByShipment = new Map<string, Uint8Array>();
-
-      for (const [sid, zpl] of zplByShipment) {
-        const result = await zplToImage(zpl, sid, layout);
-        if (result.image) {
-          imageByShipment.set(sid, result.image);
-        } else {
-          // Conversão Labelary falhou para este shipment — marca erro e segue (parcial)
-          perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'LABELARY_CONVERSION_FAILED', reason_message: result.reason_message || 'Conversão Labelary falhou' });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', error: result.reason_message });
-          console.error(`[labeltest] Labelary failed for ${sid}: ${result.reason_code} — continuing with remaining`);
-        }
-        await sleep(200);
+      // ─── PDF format: ZPL → Labelary PNG → pdf-lib PDF (CHUNKED) ────────
+      // Lotes de 10 etiquetas; cada chunk gera um PDF parcial; merge final.
+      const CHUNK_SIZE = 10;
+      const sidsForPdf = validIds.filter(sid => zplByShipment.has(sid));
+      const chunks: string[][] = [];
+      for (let i = 0; i < sidsForPdf.length; i += CHUNK_SIZE) {
+        chunks.push(sidsForPdf.slice(i, i + CHUNK_SIZE));
       }
+      console.log(`[labeltest] pipeline=zpl_first chunks_total=${chunks.length} chunk_size=${CHUNK_SIZE} total_shipments=${sidsForPdf.length}`);
 
-      // STEP 3: Build PDF with fixed dimensions
-      console.log(`[labeltest] Step 3: Building PDF, layout=${layout}, images=${imageByShipment.size}`);
-      const resultPdf = await PDFDocument.create();
-
-      let font: any = null;
-      let fontBold: any = null;
-      if (layoutInfo.includeHeader) {
-        font = await resultPdf.embedFont(StandardFonts.Helvetica);
-        fontBold = await resultPdf.embedFont(StandardFonts.HelveticaBold);
-      }
-
+      // ─── Pré-carrega header prefs e order/items uma vez (compartilhado entre chunks) ──
       let headerPrefs = { ...DEFAULT_HEADER_PREFS };
       const orderItemsMap = new Map<string, any[]>();
       const ordersMap = new Map<string, any>();
@@ -447,6 +482,8 @@ serve(async (req) => {
           .from('meli_label_header_preferences').select('*')
           .eq('user_id', user.id).eq('seller_id', seller_id).maybeSingle();
         if (hp) headerPrefs = { ...DEFAULT_HEADER_PREFS, ...hp };
+        // Força exibição de variação no labelTest, alinhado ao engine legado
+        headerPrefs.show_variation_attrs = true;
 
         const orderIds = validIds.map(sid => shipMap.get(sid)?.order_id).filter(Boolean);
         if (orderIds.length > 0) {
@@ -457,6 +494,7 @@ serve(async (req) => {
 
           const { data: items } = await supabaseAdmin
             .from('meli_order_items_cache').select('order_id, title, title_short, sku, quantity, variation_attributes')
+            .eq('seller_id', seller_id)  // ← FIX: filtra por seller_id (multi-conta)
             .in('order_id', orderIds);
           for (const item of (items || [])) {
             const arr = orderItemsMap.get(item.order_id) || [];
@@ -466,110 +504,202 @@ serve(async (req) => {
         }
       }
 
-      // STEP 4: Embed each label into PDF (Labelary PNG ÚNICO — sem fallback PDF direto)
-      for (const sid of validIds) {
-        const imgBytes = imageByShipment.get(sid);
-        if (!imgBytes) continue; // already logged as error in STEP 2/STEP 1
+      const chunkPdfs: Uint8Array[] = [];
+      const bytesPerChunk: number[] = [];
+      let chunksOk = 0;
 
-        try {
-          // ── Standard path: Labelary PNG → embed ──
-          const pngImage = await resultPdf.embedPng(imgBytes);
+      for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+        const chunk = chunks[chunkIdx];
+        console.log(`[labeltest] === Chunk ${chunkIdx + 1}/${chunks.length} (${chunk.length} shipments) ===`);
 
-          if (layoutInfo.includeHeader) {
-            const page = resultPdf.addPage([targetWPt, targetHPt]);
-            const labelAreaY = 0;
-            const labelAreaH = LABEL_H_PT;
-            const imgAspect = pngImage.width / pngImage.height;
-            const targetAspect = LABEL_W_PT / labelAreaH;
-
-            let drawW: number, drawH: number, drawX: number, drawY: number;
-            if (imgAspect > targetAspect) {
-              drawW = LABEL_W_PT; drawH = LABEL_W_PT / imgAspect; drawX = 0; drawY = labelAreaY + (labelAreaH - drawH) / 2;
-            } else {
-              drawH = labelAreaH; drawW = labelAreaH * imgAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = labelAreaY;
-            }
-            page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
-
-            const orderId = shipMap.get(sid)?.order_id;
-            const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
-            const orderItems = orderItemsMap.get(orderId) || [];
-            const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, orderItems);
-
-            const fontSize = headerPrefs.font_size || 9;
-            const lineH = fontSize * HEADER_LINE_HEIGHT_FACTOR;
-            let yPos = targetHPt - HEADER_PADDING_TOP;
-
-            for (const line of lines) {
-              const f = line.bold ? fontBold : font;
-              page.drawText(line.text, { x: 8, y: yPos, size: fontSize, font: f, color: rgb(0, 0, 0) });
-              yPos -= lineH;
-            }
-
-            const sepY = LABEL_H_PT;
-            page.drawLine({ start: { x: 4, y: sepY }, end: { x: LABEL_W_PT - 4, y: sepY }, thickness: 0.5, color: rgb(0.5, 0.5, 0.5) });
-            totalPages++;
+        // ── Step A: Labelary PNG para o chunk ─────────────────────
+        const imageByShipment = new Map<string, Uint8Array>();
+        for (const sid of chunk) {
+          const zpl = zplByShipment.get(sid)!;
+          const result = await zplToImage(zpl, sid, layout);
+          if (result.image) {
+            imageByShipment.set(sid, result.image);
           } else {
-            const page = resultPdf.addPage([targetWPt, targetHPt]);
-            const imgAspect = pngImage.width / pngImage.height;
-            const pageAspect = targetWPt / targetHPt;
-
-            let drawW: number, drawH: number, drawX: number, drawY: number;
-            if (imgAspect > pageAspect) {
-              drawW = targetWPt; drawH = targetWPt / imgAspect; drawX = 0; drawY = (targetHPt - drawH) / 2;
-            } else {
-              drawH = targetHPt; drawW = targetHPt * imgAspect; drawX = (targetWPt - drawW) / 2; drawY = 0;
-            }
-            page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
-            totalPages++;
+            perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'LABELARY_CONVERSION_FAILED', reason_message: result.reason_message || 'Conversão Labelary falhou' });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, error: result.reason_message });
           }
+          await sleep(200);
+        }
 
-          // DANFE
-          if (layoutInfo.includeDanfe && layout !== 'meli_100x150_no_nf') {
-            const danfeBytes = await fetchDanfePdf(sid, mlAccount.access_token);
-            if (danfeBytes) {
-              try {
-                const danfePdf = await PDFDocument.load(danfeBytes, {
-                  updateMetadata: false,
-                  ignoreEncryption: true,
-                  throwOnInvalidObject: false,
-                });
-                const pageCount = danfePdf.getPageCount();
-                if (pageCount > 1) {
-                  const [danfePage] = await resultPdf.copyPages(danfePdf, [1]);
-                  resultPdf.addPage(danfePage);
-                  totalPages++;
-                  console.log(`[labeltest] DANFE added for ${sid}`);
+        if (imageByShipment.size === 0) {
+          console.warn(`[labeltest] Chunk ${chunkIdx + 1}: nenhuma imagem gerada — pulando merge desse chunk`);
+          await sleep(300);
+          await new Promise((r) => setTimeout(r, 0));
+          continue;
+        }
+
+        // ── Step B: Build chunk PDF ───────────────────────────────
+        const chunkPdf = await PDFDocument.create();
+        let font: any = null;
+        let fontBold: any = null;
+        if (layoutInfo.includeHeader) {
+          font = await chunkPdf.embedFont(StandardFonts.Helvetica);
+          fontBold = await chunkPdf.embedFont(StandardFonts.HelveticaBold);
+        }
+
+        let chunkPages = 0;
+
+        for (const sid of chunk) {
+          const imgBytes = imageByShipment.get(sid);
+          if (!imgBytes) continue;
+
+          try {
+            const pngImage = await chunkPdf.embedPng(imgBytes);
+
+            if (layoutInfo.includeHeader) {
+              const page = chunkPdf.addPage([targetWPt, targetHPt]);
+              const labelAreaY = 0;
+              const labelAreaH = LABEL_H_PT;
+              const imgAspect = pngImage.width / pngImage.height;
+              const targetAspect = LABEL_W_PT / labelAreaH;
+
+              let drawW: number, drawH: number, drawX: number, drawY: number;
+              if (imgAspect > targetAspect) {
+                drawW = LABEL_W_PT; drawH = LABEL_W_PT / imgAspect; drawX = 0; drawY = labelAreaY + (labelAreaH - drawH) / 2;
+              } else {
+                drawH = labelAreaH; drawW = labelAreaH * imgAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = labelAreaY;
+              }
+              page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
+
+              const orderId = shipMap.get(sid)?.order_id;
+              const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
+              const orderItems = orderItemsMap.get(orderId) || [];
+              const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, orderItems);
+
+              const fontSize = headerPrefs.font_size || 9;
+              const lineH = fontSize * HEADER_LINE_HEIGHT_FACTOR;
+              let yPos = targetHPt - HEADER_PADDING_TOP;
+
+              for (const line of lines) {
+                const f = line.bold ? fontBold : font;
+                page.drawText(line.text, { x: 8, y: yPos, size: fontSize, font: f, color: rgb(0, 0, 0) });
+                yPos -= lineH;
+              }
+
+              const sepY = LABEL_H_PT;
+              page.drawLine({ start: { x: 4, y: sepY }, end: { x: LABEL_W_PT - 4, y: sepY }, thickness: 0.5, color: rgb(0.5, 0.5, 0.5) });
+              chunkPages++;
+            } else {
+              const page = chunkPdf.addPage([targetWPt, targetHPt]);
+              const imgAspect = pngImage.width / pngImage.height;
+              const pageAspect = targetWPt / targetHPt;
+
+              let drawW: number, drawH: number, drawX: number, drawY: number;
+              if (imgAspect > pageAspect) {
+                drawW = targetWPt; drawH = targetWPt / imgAspect; drawX = 0; drawY = (targetHPt - drawH) / 2;
+              } else {
+                drawH = targetHPt; drawW = targetHPt * imgAspect; drawX = (targetWPt - drawW) / 2; drawY = 0;
+              }
+              page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
+              chunkPages++;
+            }
+
+            // ── DANFE: heurística inteligente. Sempre tenta anexar (inclusive coleta).
+            //    Nunca anexa página de separação.
+            let danfeAttached = false;
+            let danfeReason = '';
+            let danfeSourcePages = 0;
+            let danfePickedIndex = -1;
+            let danfeWPt = 0;
+            let danfeHPt = 0;
+
+            if (layoutInfo.includeDanfe && layout !== 'meli_100x150_no_nf') {
+              const danfeBytes = await fetchDanfePdf(sid, mlAccount.access_token);
+              if (!danfeBytes) {
+                danfeReason = 'DANFE_FETCH_FAILED';
+              } else {
+                try {
+                  const danfePdf = await PDFDocument.load(danfeBytes, {
+                    updateMetadata: false,
+                    ignoreEncryption: true,
+                    throwOnInvalidObject: false,
+                  });
+                  const picked = pickDanfePageIndex(danfePdf);
+                  danfeSourcePages = picked.total;
+                  danfePickedIndex = picked.index;
+                  danfeWPt = picked.w;
+                  danfeHPt = picked.h;
+
+                  if (picked.index >= 0) {
+                    const [danfePage] = await chunkPdf.copyPages(danfePdf, [picked.index]);
+                    chunkPdf.addPage(danfePage);
+                    chunkPages++;
+                    danfeAttached = true;
+                    console.log(`[labeltest] DANFE added for ${sid}: page ${picked.index + 1}/${picked.total} (${picked.w.toFixed(0)}x${picked.h.toFixed(0)}pt)`);
+                  } else {
+                    danfeReason = 'DANFE_NOT_AVAILABLE';
+                    console.log(`[labeltest] DANFE skipped for ${sid}: no A4 portrait page found in ${picked.total} pages (separação não será anexada)`);
+                  }
+                } catch (de: any) {
+                  danfeReason = 'DANFE_PARSE_ERROR';
+                  console.warn(`[labeltest] DANFE parse error for ${sid}:`, de.message);
                 }
-              } catch (de) {
-                console.warn(`[labeltest] DANFE parse error for ${sid}:`, de);
               }
             }
+
+            await new Promise((r) => setTimeout(r, 0));
+
+            totalSuccess++;
+            perShipmentLog.push({
+              shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'zpl_labelary',
+              chunk_index: chunkIdx,
+              output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
+              include_header: layoutInfo.includeHeader, include_danfe: layoutInfo.includeDanfe,
+              danfe_attached: danfeAttached, danfe_reason: danfeReason,
+              danfe_source_pages: danfeSourcePages, danfe_picked_index: danfePickedIndex,
+              danfe_w_pt: Math.round(danfeWPt), danfe_h_pt: Math.round(danfeHPt),
+            });
+          } catch (embedErr: any) {
+            console.error(`[labeltest] Embed error for ${sid}:`, embedErr);
+            perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir imagem: ${embedErr.message}` });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'pdf_embed', chunk_index: chunkIdx, error: 'PDF embed failed: ' + embedErr.message });
           }
-
-          // Yield CPU between shipments to avoid edge-runtime CPU time exceeded on large batches
-          await new Promise((r) => setTimeout(r, 0));
-
-          totalSuccess++;
-          perShipmentLog.push({
-            shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'zpl_labelary',
-            output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
-            include_header: layoutInfo.includeHeader, include_danfe: layoutInfo.includeDanfe,
-          });
-        } catch (embedErr: any) {
-          console.error(`[labeltest] Embed error for ${sid}:`, embedErr);
-          perShipmentErrors.push({ shipment_id: sid, reason_code: 'PDF_EMBED_FAILED', reason_message: `Erro ao embutir imagem: ${embedErr.message}` });
-          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'pdf_embed', error: 'PDF embed failed: ' + embedErr.message });
         }
+
+        // ── Step C: Save chunk PDF ────────────────────────────────
+        if (chunkPages > 0) {
+          const chunkBytes = await chunkPdf.save({ useObjectStreams: false, addDefaultPage: false });
+          chunkPdfs.push(chunkBytes);
+          bytesPerChunk.push(chunkBytes.length);
+          totalPages += chunkPages;
+          chunksOk++;
+          console.log(`[labeltest] Chunk ${chunkIdx + 1} saved: ${chunkPages} pages, ${(chunkBytes.length / 1024).toFixed(0)}KB`);
+        }
+
+        // Yield CPU + folga rate-limit Labelary entre chunks
+        await new Promise((r) => setTimeout(r, 0));
+        await sleep(300);
       }
 
-      if (totalPages > 0) {
-        const pdfBytes = await resultPdf.save({ useObjectStreams: false, addDefaultPage: false });
+      // ─── Merge final dos chunkPdfs ─────────────────────────────
+      console.log(`[labeltest] Merging ${chunkPdfs.length} chunk PDFs into final document`);
+      if (chunkPdfs.length > 0) {
+        const finalPdf = await PDFDocument.create();
+        for (let i = 0; i < chunkPdfs.length; i++) {
+          try {
+            const src = await PDFDocument.load(chunkPdfs[i], { updateMetadata: false });
+            const pages = await finalPdf.copyPages(src, src.getPageIndices());
+            for (const p of pages) finalPdf.addPage(p);
+            // Libera memória do chunk após merge
+            chunkPdfs[i] = new Uint8Array(0);
+            await new Promise((r) => setTimeout(r, 0));
+          } catch (mergeErr: any) {
+            console.error(`[labeltest] Chunk ${i + 1} merge error:`, mergeErr.message);
+          }
+        }
+        const pdfBytes = await finalPdf.save({ useObjectStreams: false, addDefaultPage: false });
         finalPdfBase64 = uint8ToBase64(pdfBytes);
-        console.log(`[labeltest] PDF built: ${totalSuccess}/${validIds.length} shipments, ${totalPages} pages, ${(pdfBytes.length / 1024).toFixed(0)}KB`);
+        console.log(`[labeltest] Final PDF: chunks_total=${chunks.length} chunks_ok=${chunksOk} success=${totalSuccess}/${validIds.length} pages=${totalPages} size=${(pdfBytes.length / 1024).toFixed(0)}KB bytes_per_chunk=[${bytesPerChunk.map(b => (b / 1024).toFixed(0) + 'KB').join(',')}]`);
       } else {
-        console.warn(`[labeltest] PDF has 0 pages — will NOT generate file`);
+        console.warn(`[labeltest] PDF has 0 chunks — will NOT generate file`);
       }
     }
+
 
     // Update job record
     const elapsed = Date.now() - t0;
