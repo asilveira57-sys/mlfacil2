@@ -152,6 +152,22 @@ function validateZpl(raw: string): { valid: boolean; cleaned: string; reason_cod
 // Direct PDF fetch da ML foi removido por gerar páginas A4 deformadas
 // e quebrar determinismo visual com o engine legado.
 
+// ─── ZPL block splitter ─────────────────────────────────────────────
+// ML retorna por shipment um payload com N blocos ^XA...^XZ
+// (etiqueta + DANFE; ocasionalmente blocos extras de separação que NÃO vêm em ZPL — vêm em PDF A4 separado).
+// Como pedimos response_type=zpl2, A4 PDF nunca chega aqui. Todo bloco ZPL válido é mantido.
+function splitZplBlocks(zpl: string): string[] {
+  if (!zpl) return [];
+  const regex = /\^XA[\s\S]*?\^XZ/gi;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(zpl)) !== null) {
+    const block = m[0].trim();
+    if (block.length > 0) out.push(block);
+  }
+  return out;
+}
+
 // ─── ZPL fetch from ML API ──────────────────────────────────────────
 // ML retorna ZIP (PK..) quando response_type=zpl2. Caso seja texto puro (^XA), aceita direto.
 async function extractZplFromBytes(bytes: Uint8Array, shipmentId: string): Promise<string | null> {
@@ -273,41 +289,8 @@ async function zplToImage(
   return { image: null, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: `Conversão Labelary falhou após ${MAX_ATTEMPTS} tentativas` };
 }
 
-// ─── Fetch DANFE PDF from ML (for layouts that need it) ─────────────
-async function fetchDanfePdf(shipmentId: string, token: string): Promise<Uint8Array | null> {
-  for (let a = 1; a <= 3; a++) {
-    try {
-      const r = await fetch(
-        `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a)); continue; }
-      if (!r.ok) return null;
-      return new Uint8Array(await r.arrayBuffer());
-    } catch (e) {
-      if (a < 3) await sleep(getBackoff(a));
-    }
-  }
-  return null;
-}
-
-/**
- * Heurística DANFE: ML retorna PDF com [label, DANFE?, separação?].
- * DANFE = A4 retrato (~595×842 pt, aspect ~0.707). Separação geralmente A4 paisagem
- * ou proporção distinta. Nunca anexar separação no PDF final.
- * Retorna -1 quando nenhuma candidata existe.
- */
-function pickDanfePageIndex(pdf: PDFDocument): { index: number; w: number; h: number; total: number } {
-  const total = pdf.getPageCount();
-  for (let i = 1; i < total; i++) {
-    const p = pdf.getPage(i);
-    const { width: w, height: h } = p.getSize();
-    const aspect = w / h;
-    const isA4Portrait = h > 700 && Math.abs(aspect - 0.707) < 0.06;
-    if (isA4Portrait) return { index: i, w, h, total };
-  }
-  return { index: -1, w: 0, h: 0, total };
-}
+// DANFE pipeline = mesmo bloco ZPL adicional retornado pela ML.
+// Não buscamos mais PDF A4 da ML (era a porta de entrada da lista de separação).
 
 const HEADER_HEIGHT_PT = HEADER_H_MM * MM_TO_PT;
 const LABEL_W_PT = LABEL_W_MM * MM_TO_PT;
@@ -422,19 +405,20 @@ serve(async (req) => {
     const perShipmentErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const perShipmentLog: any[] = [];
 
-    // ─── STEP 1: Fetch ZPL for ALL shipments from ML API (ZPL-first ÚNICO) ──
+    // ─── STEP 1: Fetch ZPL for ALL shipments and split into blocks ──
+    // Cada shipment retorna 1+ blocos ^XA...^XZ (etiqueta + DANFE em ZPL).
+    // A lista de separação NUNCA chega aqui pois pedimos response_type=zpl2 (vem só em PDF A4 separado).
     console.log(`[labeltest] pipeline=zpl_first Step 1: Fetching ZPL for ${validIds.length} shipments`);
-    const zplByShipment = new Map<string, string>();
+    const zplBlocksByShipment = new Map<string, string[]>();
+    const rawZplByShipment = new Map<string, string>();
 
     for (const sid of validIds) {
       const result = await fetchZplFromMl(sid, mlAccount.access_token);
       if (!result.zpl) {
-        // ZPL-first estrito: nada de fallback PDF direto. Marca erro por item.
         perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
         perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'ml_zpl_fetch', error: result.reason_message });
         continue;
       }
-      // Validate ZPL content — sem fallback PDF direto. ZPL inválido = erro por item.
       const validation = validateZpl(result.zpl);
       if (!validation.valid) {
         perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
@@ -442,30 +426,48 @@ serve(async (req) => {
         console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
         continue;
       }
-      zplByShipment.set(sid, validation.cleaned);
-      console.log(`[labeltest] ZPL validated: ${sid} (${validation.cleaned.length} chars)`);
-      // Rate limit between ML calls
+      const blocks = splitZplBlocks(validation.cleaned);
+      if (blocks.length === 0) {
+        perShipmentErrors.push({ shipment_id: sid, reason_code: 'ZPL_NO_BLOCKS', reason_message: 'ZPL retornado não contém blocos ^XA...^XZ' });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_split', error: 'no blocks' });
+        continue;
+      }
+      // Regra: precisa Etiqueta + DANFE (mínimo 2 blocos). Se vier só 1, marca DANFE_MISSING.
+      if (blocks.length < 2) {
+        perShipmentErrors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — tente novamente em alguns minutos' });
+        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'danfe_missing', zpl_blocks_total: blocks.length, error: 'apenas 1 bloco ZPL recebido' });
+        console.warn(`[labeltest] ${sid}: DANFE_MISSING (apenas ${blocks.length} bloco ZPL)`);
+        continue;
+      }
+      zplBlocksByShipment.set(sid, blocks);
+      rawZplByShipment.set(sid, validation.cleaned);
+      console.log(`[labeltest] ZPL validated: ${sid} → ${blocks.length} blocos (${validation.cleaned.length} chars)`);
       if (validIds.indexOf(sid) < validIds.length - 1) await sleep(150);
     }
 
     if (format === 'zpl') {
-      // ─── ZPL format: concatenate valid and return ─────────────
+      // ─── ZPL format: concatenate raw payloads (todos os blocos válidos) ─────────────
       const zplParts: string[] = [];
       for (const sid of validIds) {
-        const zpl = zplByShipment.get(sid);
-        if (zpl) {
-          zplParts.push(zpl);
+        const raw = rawZplByShipment.get(sid);
+        const blocks = zplBlocksByShipment.get(sid);
+        if (raw && blocks) {
+          // Concatena todos os blocos do shipment (etiqueta + DANFE)
+          zplParts.push(blocks.join('\n'));
           totalSuccess++;
-          totalPages++;
-          perShipmentLog.push({ shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'ml_zpl_raw' });
+          totalPages += blocks.length;
+          perShipmentLog.push({ shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'ml_zpl_raw', zpl_blocks: blocks.length });
         }
       }
       finalZplContent = zplParts.join('\n');
     } else {
       // ─── PDF format: ZPL → Labelary PNG → pdf-lib PDF (CHUNKED) ────────
-      // Lotes de 10 etiquetas; cada chunk gera um PDF parcial; merge final.
+      // Para cada shipment processamos TODOS os blocos ZPL retornados:
+      //   bloco 0 = etiqueta (recebe cabeçalho quando layout exige)
+      //   blocos 1..N = páginas adicionais (DANFE, etc.) — sem cabeçalho.
+      // Lista de separação A4 NUNCA chega: pedimos response_type=zpl2.
       const CHUNK_SIZE = 10;
-      const sidsForPdf = validIds.filter(sid => zplByShipment.has(sid));
+      const sidsForPdf = validIds.filter(sid => zplBlocksByShipment.has(sid));
       const chunks: string[][] = [];
       for (let i = 0; i < sidsForPdf.length; i += CHUNK_SIZE) {
         chunks.push(sidsForPdf.slice(i, i + CHUNK_SIZE));
@@ -512,22 +514,38 @@ serve(async (req) => {
         const chunk = chunks[chunkIdx];
         console.log(`[labeltest] === Chunk ${chunkIdx + 1}/${chunks.length} (${chunk.length} shipments) ===`);
 
-        // ── Step A: Labelary PNG para o chunk ─────────────────────
-        const imageByShipment = new Map<string, Uint8Array>();
+        // ── Step A: Labelary PNG para CADA bloco ZPL de cada shipment ─────
+        // Estrutura: imagesByShipment[sid] = Uint8Array[] (uma imagem por bloco)
+        const imagesByShipment = new Map<string, Uint8Array[]>();
+        const renderErrorsByShipment = new Map<string, string>();
+
         for (const sid of chunk) {
-          const zpl = zplByShipment.get(sid)!;
-          const result = await zplToImage(zpl, sid, layout);
-          if (result.image) {
-            imageByShipment.set(sid, result.image);
-          } else {
-            perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'LABELARY_CONVERSION_FAILED', reason_message: result.reason_message || 'Conversão Labelary falhou' });
-            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, error: result.reason_message });
+          const blocks = zplBlocksByShipment.get(sid)!;
+          const imgs: Uint8Array[] = [];
+          let blockErr: string | null = null;
+          for (let bi = 0; bi < blocks.length; bi++) {
+            const result = await zplToImage(blocks[bi], `${sid}#${bi}`, layout);
+            if (result.image) {
+              imgs.push(result.image);
+            } else {
+              blockErr = result.reason_message || 'Conversão Labelary falhou';
+              console.warn(`[labeltest] ${sid} bloco ${bi}: falhou render — ${blockErr}`);
+              break; // se um bloco falha, descarta o shipment inteiro (etiqueta sem DANFE não vai sair)
+            }
+            await sleep(150);
           }
-          await sleep(200);
+          if (blockErr || imgs.length < 2) {
+            const reason = blockErr || `Apenas ${imgs.length} bloco(s) renderizado(s)`;
+            perShipmentErrors.push({ shipment_id: sid, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: reason });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, zpl_blocks_total: blocks.length, blocks_rendered: imgs.length, error: reason });
+            renderErrorsByShipment.set(sid, reason);
+          } else {
+            imagesByShipment.set(sid, imgs);
+          }
         }
 
-        if (imageByShipment.size === 0) {
-          console.warn(`[labeltest] Chunk ${chunkIdx + 1}: nenhuma imagem gerada — pulando merge desse chunk`);
+        if (imagesByShipment.size === 0) {
+          console.warn(`[labeltest] Chunk ${chunkIdx + 1}: nenhum shipment com blocos válidos — pulando merge desse chunk`);
           await sleep(300);
           await new Promise((r) => setTimeout(r, 0));
           continue;
@@ -545,17 +563,18 @@ serve(async (req) => {
         let chunkPages = 0;
 
         for (const sid of chunk) {
-          const imgBytes = imageByShipment.get(sid);
-          if (!imgBytes) continue;
+          const blockImages = imagesByShipment.get(sid);
+          if (!blockImages || blockImages.length === 0) continue;
 
           try {
-            const pngImage = await chunkPdf.embedPng(imgBytes);
+            // ── Bloco 0: ETIQUETA (recebe cabeçalho quando layout exige) ──
+            const labelImg = await chunkPdf.embedPng(blockImages[0]);
 
             if (layoutInfo.includeHeader) {
               const page = chunkPdf.addPage([targetWPt, targetHPt]);
               const labelAreaY = 0;
               const labelAreaH = LABEL_H_PT;
-              const imgAspect = pngImage.width / pngImage.height;
+              const imgAspect = labelImg.width / labelImg.height;
               const targetAspect = LABEL_W_PT / labelAreaH;
 
               let drawW: number, drawH: number, drawX: number, drawY: number;
@@ -564,7 +583,7 @@ serve(async (req) => {
               } else {
                 drawH = labelAreaH; drawW = labelAreaH * imgAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = labelAreaY;
               }
-              page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
+              page.drawImage(labelImg, { x: drawX, y: drawY, width: drawW, height: drawH });
 
               const orderId = shipMap.get(sid)?.order_id;
               const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
@@ -586,7 +605,7 @@ serve(async (req) => {
               chunkPages++;
             } else {
               const page = chunkPdf.addPage([targetWPt, targetHPt]);
-              const imgAspect = pngImage.width / pngImage.height;
+              const imgAspect = labelImg.width / labelImg.height;
               const pageAspect = targetWPt / targetHPt;
 
               let drawW: number, drawH: number, drawX: number, drawY: number;
@@ -595,51 +614,27 @@ serve(async (req) => {
               } else {
                 drawH = targetHPt; drawW = targetHPt * imgAspect; drawX = (targetWPt - drawW) / 2; drawY = 0;
               }
-              page.drawImage(pngImage, { x: drawX, y: drawY, width: drawW, height: drawH });
+              page.drawImage(labelImg, { x: drawX, y: drawY, width: drawW, height: drawH });
               chunkPages++;
             }
 
-            // ── DANFE: heurística inteligente. Sempre tenta anexar (inclusive coleta).
-            //    Nunca anexa página de separação.
-            let danfeAttached = false;
-            let danfeReason = '';
-            let danfeSourcePages = 0;
-            let danfePickedIndex = -1;
-            let danfeWPt = 0;
-            let danfeHPt = 0;
+            // ── Blocos 1..N: DANFE e demais (sem cabeçalho, ocupam página inteira) ──
+            let danfePagesAdded = 0;
+            for (let bi = 1; bi < blockImages.length; bi++) {
+              const extraImg = await chunkPdf.embedPng(blockImages[bi]);
+              const page = chunkPdf.addPage([targetWPt, targetHPt]);
+              const imgAspect = extraImg.width / extraImg.height;
+              const pageAspect = targetWPt / targetHPt;
 
-            if (layoutInfo.includeDanfe && layout !== 'meli_100x150_no_nf') {
-              const danfeBytes = await fetchDanfePdf(sid, mlAccount.access_token);
-              if (!danfeBytes) {
-                danfeReason = 'DANFE_FETCH_FAILED';
+              let drawW: number, drawH: number, drawX: number, drawY: number;
+              if (imgAspect > pageAspect) {
+                drawW = targetWPt; drawH = targetWPt / imgAspect; drawX = 0; drawY = (targetHPt - drawH) / 2;
               } else {
-                try {
-                  const danfePdf = await PDFDocument.load(danfeBytes, {
-                    updateMetadata: false,
-                    ignoreEncryption: true,
-                    throwOnInvalidObject: false,
-                  });
-                  const picked = pickDanfePageIndex(danfePdf);
-                  danfeSourcePages = picked.total;
-                  danfePickedIndex = picked.index;
-                  danfeWPt = picked.w;
-                  danfeHPt = picked.h;
-
-                  if (picked.index >= 0) {
-                    const [danfePage] = await chunkPdf.copyPages(danfePdf, [picked.index]);
-                    chunkPdf.addPage(danfePage);
-                    chunkPages++;
-                    danfeAttached = true;
-                    console.log(`[labeltest] DANFE added for ${sid}: page ${picked.index + 1}/${picked.total} (${picked.w.toFixed(0)}x${picked.h.toFixed(0)}pt)`);
-                  } else {
-                    danfeReason = 'DANFE_NOT_AVAILABLE';
-                    console.log(`[labeltest] DANFE skipped for ${sid}: no A4 portrait page found in ${picked.total} pages (separação não será anexada)`);
-                  }
-                } catch (de: any) {
-                  danfeReason = 'DANFE_PARSE_ERROR';
-                  console.warn(`[labeltest] DANFE parse error for ${sid}:`, de.message);
-                }
+                drawH = targetHPt; drawW = targetHPt * imgAspect; drawX = (targetWPt - drawW) / 2; drawY = 0;
               }
+              page.drawImage(extraImg, { x: drawX, y: drawY, width: drawW, height: drawH });
+              chunkPages++;
+              danfePagesAdded++;
             }
 
             await new Promise((r) => setTimeout(r, 0));
@@ -649,10 +644,10 @@ serve(async (req) => {
               shipment_id: sid, status: 'ok', pipeline: 'zpl_first', source: 'zpl_labelary',
               chunk_index: chunkIdx,
               output_w_mm: layoutInfo.widthMm, output_h_mm: layoutInfo.heightMm,
-              include_header: layoutInfo.includeHeader, include_danfe: layoutInfo.includeDanfe,
-              danfe_attached: danfeAttached, danfe_reason: danfeReason,
-              danfe_source_pages: danfeSourcePages, danfe_picked_index: danfePickedIndex,
-              danfe_w_pt: Math.round(danfeWPt), danfe_h_pt: Math.round(danfeHPt),
+              include_header: layoutInfo.includeHeader,
+              zpl_blocks_total: blockImages.length,
+              danfe_pages_added: danfePagesAdded,
+              danfe_status: danfePagesAdded > 0 ? 'attached' : 'missing',
             });
           } catch (embedErr: any) {
             console.error(`[labeltest] Embed error for ${sid}:`, embedErr);
