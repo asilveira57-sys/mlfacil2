@@ -445,44 +445,100 @@ serve(async (req) => {
     const perShipmentErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const perShipmentLog: any[] = [];
 
-    // ─── STEP 1: Fetch ZPL for ALL shipments and split into blocks ──
-    // Cada shipment retorna 1+ blocos ^XA...^XZ (etiqueta + DANFE em ZPL).
+    // ─── STEP 1: Fetch ZPL em BATCH ÚNICO (igual ao v2 que funciona) ───────
+    // Um único request com todos os shipment_ids retorna TODOS os blocos ^XA...^XZ.
     // A lista de separação NUNCA chega aqui pois pedimos response_type=zpl2 (vem só em PDF A4 separado).
-    console.log(`[labeltest] pipeline=zpl_first Step 1: Fetching ZPL for ${validIds.length} shipments`);
+    // Distribuição: blocos divididos igualmente entre shipments (etiqueta + DANFE = 2 blocos por shipment).
+    console.log(`[labeltest] pipeline=zpl_first Step 1: Fetching ZPL BATCH for ${validIds.length} shipments`);
     const zplBlocksByShipment = new Map<string, string[]>();
     const rawZplByShipment = new Map<string, string>();
 
-    for (const sid of validIds) {
-      const result = await fetchZplFromMl(sid, mlAccount.access_token);
-      if (!result.zpl) {
-        perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
-        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'ml_zpl_fetch', error: result.reason_message });
-        continue;
+    const batchResult = await fetchZplBatchFromMl(validIds, mlAccount.access_token);
+    if (!batchResult.zpl) {
+      // Fallback: se batch falhou, tenta um a um (recupera shipments válidos individualmente)
+      console.warn(`[labeltest] Batch failed (${batchResult.reason_code}), falling back to per-shipment fetch`);
+      for (const sid of validIds) {
+        const result = await fetchZplFromMl(sid, mlAccount.access_token);
+        if (!result.zpl) {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: result.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: result.reason_message || 'Falha ao baixar ZPL' });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'ml_zpl_fetch', error: result.reason_message });
+          continue;
+        }
+        const validation = validateZpl(result.zpl);
+        if (!validation.valid) {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_validation', error: validation.reason_message });
+          continue;
+        }
+        const blocks = splitZplBlocks(validation.cleaned);
+        if (blocks.length === 0) {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: 'ZPL_NO_BLOCKS', reason_message: 'ZPL retornado não contém blocos ^XA...^XZ' });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_split', error: 'no blocks' });
+          continue;
+        }
+        if (blocks.length < 2) {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — tente novamente em alguns minutos' });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'danfe_missing', zpl_blocks_total: blocks.length, error: 'apenas 1 bloco ZPL recebido' });
+          continue;
+        }
+        zplBlocksByShipment.set(sid, blocks);
+        rawZplByShipment.set(sid, validation.cleaned);
+        await sleep(150);
       }
-      const validation = validateZpl(result.zpl);
+    } else {
+      // Batch ok: extrai todos os blocos e distribui pelos shipments
+      const validation = validateZpl(batchResult.zpl);
       if (!validation.valid) {
-        perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
-        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_validation', error: validation.reason_message });
-        console.warn(`[labeltest] ZPL invalid for ${sid}: ${validation.reason_code}`);
-        continue;
+        for (const sid of validIds) {
+          perShipmentErrors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
+          perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_validation', error: validation.reason_message });
+        }
+      } else {
+        const allBlocks = splitZplBlocks(validation.cleaned);
+        console.log(`[labeltest] Batch ZPL: ${allBlocks.length} blocos totais para ${validIds.length} shipments`);
+
+        if (allBlocks.length === 0) {
+          for (const sid of validIds) {
+            perShipmentErrors.push({ shipment_id: sid, reason_code: 'ZPL_NO_BLOCKS', reason_message: 'ZPL retornado não contém blocos ^XA...^XZ' });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_split', error: 'no blocks' });
+          }
+        } else if (allBlocks.length % validIds.length === 0) {
+          // Distribuição uniforme: N blocos por shipment (geralmente 2: etiqueta + nota)
+          const blocksPerShipment = allBlocks.length / validIds.length;
+          console.log(`[labeltest] Distribuição uniforme: ${blocksPerShipment} blocos por shipment`);
+          for (let i = 0; i < validIds.length; i++) {
+            const sid = validIds[i];
+            const blocks = allBlocks.slice(i * blocksPerShipment, (i + 1) * blocksPerShipment);
+            if (blocks.length < 2) {
+              perShipmentErrors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — tente novamente em alguns minutos' });
+              perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'danfe_missing', zpl_blocks_total: blocks.length });
+              continue;
+            }
+            zplBlocksByShipment.set(sid, blocks);
+            rawZplByShipment.set(sid, blocks.join('\n'));
+            console.log(`[labeltest] ZPL distributed: ${sid} → ${blocks.length} blocos`);
+          }
+        } else {
+          // Distribuição não-uniforme: provavelmente alguns shipments tiveram falha/sem DANFE.
+          // Estratégia: assume 2 blocos/shipment (etiqueta+nota) e marca o resto como erro.
+          // Se não bater, marca todos sem garantia como DANFE_MISSING e segue com os que deram match.
+          console.warn(`[labeltest] Distribuição não-uniforme: ${allBlocks.length} blocos / ${validIds.length} shipments. Tentando pares de 2.`);
+          const pairs = Math.floor(allBlocks.length / 2);
+          const shipmentsCovered = Math.min(pairs, validIds.length);
+          for (let i = 0; i < validIds.length; i++) {
+            const sid = validIds[i];
+            if (i < shipmentsCovered) {
+              const blocks = allBlocks.slice(i * 2, (i + 1) * 2);
+              zplBlocksByShipment.set(sid, blocks);
+              rawZplByShipment.set(sid, blocks.join('\n'));
+              console.log(`[labeltest] ZPL paired: ${sid} → 2 blocos`);
+            } else {
+              perShipmentErrors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — tente novamente em alguns minutos' });
+              perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'danfe_missing' });
+            }
+          }
+        }
       }
-      const blocks = splitZplBlocks(validation.cleaned);
-      if (blocks.length === 0) {
-        perShipmentErrors.push({ shipment_id: sid, reason_code: 'ZPL_NO_BLOCKS', reason_message: 'ZPL retornado não contém blocos ^XA...^XZ' });
-        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'zpl_split', error: 'no blocks' });
-        continue;
-      }
-      // Regra: precisa Etiqueta + DANFE (mínimo 2 blocos). Se vier só 1, marca DANFE_MISSING.
-      if (blocks.length < 2) {
-        perShipmentErrors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — tente novamente em alguns minutos' });
-        perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'danfe_missing', zpl_blocks_total: blocks.length, error: 'apenas 1 bloco ZPL recebido' });
-        console.warn(`[labeltest] ${sid}: DANFE_MISSING (apenas ${blocks.length} bloco ZPL)`);
-        continue;
-      }
-      zplBlocksByShipment.set(sid, blocks);
-      rawZplByShipment.set(sid, validation.cleaned);
-      console.log(`[labeltest] ZPL validated: ${sid} → ${blocks.length} blocos (${validation.cleaned.length} chars)`);
-      if (validIds.indexOf(sid) < validIds.length - 1) await sleep(150);
     }
 
     if (format === 'zpl') {
