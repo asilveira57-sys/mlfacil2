@@ -238,6 +238,46 @@ async function fetchZplFromMl(shipmentId: string, token: string): Promise<{ zpl:
   return { zpl: null, reason_code: 'ML_ZPL_FETCH_TIMEOUT', reason_message: 'Falha ao buscar ZPL após 3 tentativas' };
 }
 
+/**
+ * Busca ZPL em BATCH (único request com vários shipment_ids), igual ao módulo v2 que funciona.
+ * A ML retorna um único payload com todos os blocos ^XA...^XZ concatenados na ordem solicitada.
+ * Retorna o ZPL bruto (string) ou erro de batch.
+ */
+async function fetchZplBatchFromMl(shipmentIds: string[], token: string): Promise<{ zpl: string | null; reason_code?: string; reason_message?: string }> {
+  const url = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentIds.join(',')}&response_type=zpl2`;
+  for (let a = 1; a <= 3; a++) {
+    const t0 = Date.now();
+    try {
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const latency = Date.now() - t0;
+      if ((r.status === 429 || r.status >= 500) && a < 3) {
+        console.warn(`[labeltest] ML ZPL batch attempt ${a}: status=${r.status} latency=${latency}ms — retrying`);
+        await sleep(getBackoff(a));
+        continue;
+      }
+      if (!r.ok) {
+        const bodyText = await r.text().catch(() => '');
+        console.error(`[labeltest] ML ZPL batch error: status=${r.status} latency=${latency}ms ids=${shipmentIds.length} body=${bodyText.slice(0, 200)}`);
+        return { zpl: null, reason_code: 'ML_ZPL_FETCH_FAILED', reason_message: `API ML retornou status ${r.status}` };
+      }
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      const ct = r.headers.get('content-type') || '';
+      const zpl = await extractZplFromBytes(bytes, `batch_${shipmentIds.length}`);
+      if (!zpl) {
+        console.error(`[labeltest] ML ZPL batch: could not extract ZPL (content-type=${ct}, ${bytes.length} bytes)`);
+        return { zpl: null, reason_code: 'ML_ZPL_PARSE_FAILED', reason_message: 'Resposta da ML não contém ZPL extraível' };
+      }
+      console.log(`[labeltest] ML ZPL batch fetched: ${shipmentIds.length} ids → ${zpl.length} chars ${latency}ms (raw ${bytes.length}b, ct=${ct})`);
+      return { zpl };
+    } catch (e: any) {
+      const latency = Date.now() - t0;
+      console.error(`[labeltest] ZPL batch fetch error attempt ${a}: ${e.message} ${latency}ms`);
+      if (a < 3) await sleep(getBackoff(a));
+    }
+  }
+  return { zpl: null, reason_code: 'ML_ZPL_FETCH_TIMEOUT', reason_message: 'Falha ao buscar ZPL após 3 tentativas' };
+}
+
 // ─── ZPL → PNG via Labelary (resilient with per-layout dimensions) ──
 async function zplToImage(
   zplContent: string,
