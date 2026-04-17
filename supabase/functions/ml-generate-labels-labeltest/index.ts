@@ -528,7 +528,11 @@ serve(async (req) => {
             const danfeBytes = await fetchDanfePdf(sid, mlAccount.access_token);
             if (danfeBytes) {
               try {
-                const danfePdf = await PDFDocument.load(danfeBytes);
+                const danfePdf = await PDFDocument.load(danfeBytes, {
+                  updateMetadata: false,
+                  ignoreEncryption: true,
+                  throwOnInvalidObject: false,
+                });
                 const pageCount = danfePdf.getPageCount();
                 if (pageCount > 1) {
                   const [danfePage] = await resultPdf.copyPages(danfePdf, [1]);
@@ -541,6 +545,9 @@ serve(async (req) => {
               }
             }
           }
+
+          // Yield CPU between shipments to avoid edge-runtime CPU time exceeded on large batches
+          await new Promise((r) => setTimeout(r, 0));
 
           totalSuccess++;
           perShipmentLog.push({
@@ -556,7 +563,7 @@ serve(async (req) => {
       }
 
       if (totalPages > 0) {
-        const pdfBytes = await resultPdf.save();
+        const pdfBytes = await resultPdf.save({ useObjectStreams: false, addDefaultPage: false });
         finalPdfBase64 = uint8ToBase64(pdfBytes);
         console.log(`[labeltest] PDF built: ${totalSuccess}/${validIds.length} shipments, ${totalPages} pages, ${(pdfBytes.length / 1024).toFixed(0)}KB`);
       } else {
