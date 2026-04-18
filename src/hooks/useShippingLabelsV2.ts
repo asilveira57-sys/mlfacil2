@@ -688,6 +688,28 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     else { setSortField(field); setSortDirection('desc'); }
   }, [sortField]);
 
+  // V2: retomar verificação após estado "stalled" (timeout sem perda do activeJob)
+  const resumeStalledRecovery = useCallback(() => {
+    const job = loadActiveJob();
+    if (!job) return;
+    logRecovery('resume-stalled', `jobId=${job.jobId}`);
+    markActiveJobV2Stalled(false);
+    setActiveJobState({ ...job, stalled: false });
+    setGenerationProgress(prev => ({ ...prev, status: 'processing' }));
+    recoveryAbortRef.current?.abort();
+    const abort = new AbortController();
+    recoveryAbortRef.current = abort;
+    pollJobUntilDone(job.jobId, job.format, abort.signal);
+  }, []);
+
+  const cancelStalledRecovery = useCallback(() => {
+    logRecovery('cancel-stalled', 'user discarded recovery');
+    recoveryAbortRef.current?.abort();
+    setActiveJobState(null);
+    clearActiveJob();
+    setGenerationProgress(INITIAL_PROGRESS);
+  }, []);
+
   return {
     orders, isLoading, refetch, statusFilter, setStatusFilter,
     periodFilter, setPeriodFilter, customDateRange, setDateRange,
@@ -697,6 +719,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     isSyncing, syncPhase, syncProgress, sync, lastSyncAt, statusCounts,
     generateLabels: generateLabelsMutation.mutate,
     isGenerating: generateLabelsMutation.isPending || hasActiveJob,
+    isStalled: !!activeJobState?.stalled,
+    resumeStalledRecovery, cancelStalledRecovery,
     generationProgress, orderItems,
   };
 }
