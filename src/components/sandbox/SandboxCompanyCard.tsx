@@ -56,25 +56,6 @@ async function logEvent(action: string, meta: Record<string, unknown> = {}) {
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
-function CutoffBadge({ label, time }: { label: string; time: string | null }) {
-  const colorClass = useMemo(() => getCutoffColorClass(time), [time]);
-  const isUrgent = useMemo(() => {
-    if (!time) return false;
-    const [h, m] = time.split(':').map(Number);
-    const cutoff = new Date();
-    cutoff.setHours(h, m, 0, 0);
-    return (cutoff.getTime() - Date.now()) / 60000 <= 60;
-  }, [time]);
-
-  return (
-    <div className="flex flex-col items-center flex-1">
-      <span className="text-[9px] text-muted-foreground uppercase tracking-wider">{label}</span>
-      <span className={`font-mono text-base font-bold tabular-nums leading-tight ${colorClass} ${isUrgent ? 'animate-pulse' : ''}`}>
-        {time || '--:--'}
-      </span>
-    </div>
-  );
-}
 
 function MetricRow({
   icon: Icon, label, value, alert, onClick,
