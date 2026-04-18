@@ -110,6 +110,23 @@ export default function LabelTeste() {
         {/* Print instructions */}
         <PrintInstructionsV2 />
 
+        {/* Stalled recovery banner — V2 mantém activeJob mesmo após timeout do poll */}
+        {isStalled && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 p-3 flex items-center justify-between gap-3">
+            <div className="text-sm text-amber-900 dark:text-amber-100">
+              <strong>Verificação pausada.</strong> A geração ainda pode estar em andamento no servidor. Retome a verificação para continuar acompanhando.
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <Button size="sm" variant="default" onClick={resumeStalledRecovery}>
+                Retomar verificação
+              </Button>
+              <Button size="sm" variant="ghost" onClick={cancelStalledRecovery}>
+                Descartar
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* History panel */}
         {showHistory && (
           <div className="space-y-2">
