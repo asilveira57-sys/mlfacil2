@@ -240,7 +240,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           continue;
         }
 
-        const { data, error } = await supabase.functions.invoke('ml-generate-labels-status', {
+        const { data, error } = await supabase.functions.invoke('ml-generate-labels-status-v2', {
           headers,
           body: { job_id: jobId },
         });
@@ -249,10 +249,14 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           notFoundCount++;
           logRecovery('job not found', `attempt ${notFoundCount}/${MAX_NOT_FOUND_ATTEMPTS}`);
 
-          // Resilient: don't clear on transient "not found" — keep polling
+          // V2: NÃO limpa activeJob no timeout — o job pode existir em meli_print_queue_v2
+          // e estar simplesmente lento. Marca como "stalled" e deixa o usuário decidir
+          // quando retomar (botão "Retomar verificação" na UI).
           if (notFoundCount >= MAX_NOT_FOUND_ATTEMPTS || elapsed > JOB_RECOVERY_TIMEOUT_MS) {
-            logRecovery('timeout', `notFound=${notFoundCount}, elapsed=${elapsed}ms`);
-            finalizeJob('error');
+            logRecovery('stalled', `notFound=${notFoundCount}, elapsed=${elapsed}ms — keeping activeJob, marking stalled`);
+            markActiveJobV2Stalled(true);
+            setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
+            setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
             return;
           }
           continue;
