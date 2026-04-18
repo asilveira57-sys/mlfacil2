@@ -662,7 +662,7 @@ serve(async (req) => {
           }
         }
 
-        const LABELARY_CONCURRENCY = 4;
+        const LABELARY_CONCURRENCY = 3;
         const results = await runWithConcurrency(tasks, LABELARY_CONCURRENCY, (t) =>
           zplToImage(t.zpl, `${t.sid}#${t.bi}`, layout)
         );
