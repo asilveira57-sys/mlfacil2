@@ -934,6 +934,7 @@ serve(async (req) => {
           success_count: 0,
           error_count: allErrors.length,
           errors: allErrors,
+          errors_by_category: errorsByCategory,
           per_shipment: perShipmentLog,
           processing_time_ms: elapsed,
         },
