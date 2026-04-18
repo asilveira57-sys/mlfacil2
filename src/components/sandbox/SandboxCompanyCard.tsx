@@ -7,7 +7,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet';
 import {
-  Clock, Package, FileText, MessageCircle, Truck,
+  Package, FileText, MessageCircle, Truck,
   AlertTriangle, MessageSquare, Scale,
   DollarSign, ShoppingCart, TrendingUp, Star,
   Megaphone, ExternalLink, ChevronRight, AlertCircle, Zap,
