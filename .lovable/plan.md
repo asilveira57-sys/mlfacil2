@@ -1,52 +1,48 @@
 
 
-## Diagnóstico real (agora corrigido)
-
-A ML retorna **um único payload por requisição em lote** com a seguinte estrutura:
+## Diagnóstico (do log real)
 
 ```
-[Etiqueta1, Nota1, Etiqueta2, Nota2, ..., EtiquetaN, NotaN, ListaDeSeparação(A4 PDF)]
+errors: 3 shipments × "Labelary retornou 429 após 5 tentativas"
+- 46877006857 (blocos #0 e #1)
+- 46876109012 (blocos #0 e #1)
+- 46876072652 (blocos #0 e #1)
+status: 429 = "Request rate limit exceeded" (Labelary)
 ```
 
-- Etiquetas e notas vêm em **ZPL** (formato térmico, dimensões pequenas).
-- A **lista de separação** vem como **página A4 em PDF** anexada ao final — é UMA folha só, com todas as separações consolidadas.
-- A regra "descartar bloco 3" estava errada: notas legítimas seriam descartadas em lotes com 2+ shipments.
+**Não foi erro de NF, não foi erro do ML, não foi erro do seu lote.**
 
-## Plano correto
+Foi a API pública do **Labelary** (serviço gratuito que converte ZPL → PNG) bloqueando por **rate limit**. Quando paralelizei tudo com `Promise.all` (correção da "CPU exceeded" anterior), passei a disparar 16 requests simultâneos (8 shipments × 2 blocos). O Labelary gratuito aceita ~5 req/seg — acima disso devolve 429. O retry com backoff (5 tentativas) não adiantou porque todas as tentativas caíram dentro da mesma janela saturada.
+
+Ou seja: troquei um problema (CPU) por outro (rate limit). 5 etiquetas passaram, 3 caíram no 429.
+
+## Correção proposta
 
 **Arquivo único:** `supabase/functions/ml-generate-labels-labeltest/index.ts`
 
-### 1. Pipeline ZPL para etiqueta + DANFE
-- Por shipment, buscar `response_type=zpl2`.
-- Extrair **todos** os blocos `^XA...^XZ` do payload retornado.
-- Renderizar cada bloco ZPL via Labelary → embed no PDF final.
-- **Nada de descartar por índice.** Todo bloco ZPL válido entra.
+### 1. Concorrência limitada (sem voltar pro sequencial)
+- Substituir `Promise.all` por um pool com **limite de 4 requests simultâneos** ao Labelary.
+- Mantém ganho de performance (~3–4s por chunk de 10) sem estourar o rate limit.
+- Sem CPU exceeded, sem 429.
 
-### 2. Detectar e descartar lista de separação (única regra de exclusão)
-- A lista de separação **não vem em ZPL** — vem como página A4 em PDF.
-- No fluxo ZPL puro, ela simplesmente **não aparece** (porque pedimos `zpl2`, e A4 não é ZPL).
-- Garantia adicional: se algum bloco extraído tiver dimensões A4 (~595×842 pt) ou for identificado como PDF/non-ZPL no payload, **descartar esse bloco específico** (não por posição).
-- Critério de descarte: `é A4 retrato` OU `bloco não contém marcadores ZPL válidos`. Nunca por índice.
+### 2. Backoff que efetivamente espera
+- Hoje o retry tenta de novo quase imediatamente. Ajustar para backoff exponencial real: 500ms → 1s → 2s → 4s → 8s.
+- Em 429 especificamente, respeitar `Retry-After` se vier no header.
 
-### 3. Validação por shipment
-- Mínimo esperado: 2 blocos ZPL válidos (etiqueta + nota).
-- Se vier só 1 bloco → `reason_code: 'DANFE_MISSING'`, shipment falha, lote continua.
-- Se vier 2+ blocos ZPL → todos entram no PDF final, na ordem.
+### 3. Rede de segurança: fila de retry pós-chunk
+- Ao final de cada chunk, juntar shipments que falharam **só por 429** numa segunda passada serial (1 req por vez, 250ms entre cada).
+- Isso garante que 429 transitório nunca aborte uma etiqueta — só aborta se ML não tiver o ZPL.
 
-### 4. Manter o que já está funcionando
-- Variação no cabeçalho (`seller_id` no filtro + fallback do título + `show_variation_attrs=true`).
-- Chunks de 10 shipments com merge final.
-- CPU yield entre chunks.
-
-### 5. Telemetria por shipment
-- `zpl_blocks_total`, `zpl_blocks_kept`, `zpl_blocks_discarded_a4`, `danfe_status`.
+### 4. Telemetria mais clara no resumo
+- Separar `error_count` por categoria: `rate_limit`, `danfe_missing`, `ml_api_error`, `other`.
+- Hoje todos viram "LABELARY_CONVERSION_FAILED" — você não consegue distinguir falha de infra de falha de regra.
 
 ### Critérios de aceite
-- Lote com N shipments → PDF final tem 2N páginas (etiqueta + nota por shipment).
-- Zero página A4 de lista de separação no PDF final.
-- Shipment sem nota ZPL → falha controlada, demais continuam.
-- `shipping-labels` intocado.
+- Lote de 8 etiquetas → 8 etiquetas no PDF.
+- Zero falhas por 429 em lotes de até ~30 shipments.
+- Se uma falha real ocorrer (ML sem ZPL), aparece no resumo com motivo correto.
+- `shipping-labels` (produção) intocado.
 
 ### Escopo
-- 1 arquivo. Sem schema, sem frontend, sem tocar no legado.
+- 1 arquivo. Sem schema, sem frontend.
 
