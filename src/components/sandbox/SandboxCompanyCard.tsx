@@ -32,16 +32,7 @@ function formatRelativeTime(dateStr: string): string {
   return `${Math.floor(h / 24)}d`;
 }
 
-function getCutoffColorClass(time: string | null): string {
-  if (!time) return 'text-muted-foreground';
-  const [h, m] = time.split(':').map(Number);
-  const cutoff = new Date();
-  cutoff.setHours(h, m, 0, 0);
-  const diffMin = (cutoff.getTime() - Date.now()) / 60000;
-  if (diffMin <= 0) return 'text-destructive';
-  if (diffMin <= 60) return 'text-[hsl(var(--warning))]';
-  return 'text-[hsl(var(--success,142_72%_29%))]';
-}
+
 
 function fmt(v: number) {
   return v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
