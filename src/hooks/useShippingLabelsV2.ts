@@ -5,7 +5,13 @@ import { useToast } from '@/hooks/use-toast';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { startOfDay, endOfDay, subDays } from 'date-fns';
 import { toast as sonnerToast } from 'sonner';
-import { saveActiveJob, loadActiveJob, clearActiveJob, type ActivePrintJob } from '@/lib/shippingLabelsSession';
+import {
+  saveActiveJobV2 as saveActiveJob,
+  loadActiveJobV2 as loadActiveJob,
+  clearActiveJobV2 as clearActiveJob,
+  markActiveJobV2Stalled,
+  type ActivePrintJob,
+} from '@/lib/shippingLabelsSession';
 
 // Re-export shared types from V1
 export type { OrderItemSummary } from '@/hooks/useShippingLabels';
