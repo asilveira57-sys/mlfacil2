@@ -179,20 +179,7 @@ export function SandboxCompanyCard({ snapshot, isQuickSyncing = false }: Props) 
           </div>
         </div>
 
-        {/* Cutoff block */}
-        <div className="px-3 py-2 border-b border-border/40 bg-muted/20">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Clock className="h-2.5 w-2.5 text-muted-foreground" />
-            <span className="text-[9px] uppercase tracking-widest font-bold text-muted-foreground">
-              Hora de Corte
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <CutoffBadge label="Flex" time={snapshot.cutoff_flex_time} />
-            <div className="w-px bg-border/50" />
-            <CutoffBadge label="Coleta" time={snapshot.cutoff_coleta_time} />
-          </div>
-        </div>
+
 
         {/* Operation block */}
         <div className="px-3 py-1.5 border-b border-border/40">
