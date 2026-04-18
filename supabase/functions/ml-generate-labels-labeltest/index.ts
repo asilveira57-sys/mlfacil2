@@ -662,7 +662,7 @@ serve(async (req) => {
           }
         }
 
-        const LABELARY_CONCURRENCY = 4;
+        const LABELARY_CONCURRENCY = 3;
         const results = await runWithConcurrency(tasks, LABELARY_CONCURRENCY, (t) =>
           zplToImage(t.zpl, `${t.sid}#${t.bi}`, layout)
         );
@@ -856,8 +856,15 @@ serve(async (req) => {
       }
 
       // ─── Merge final dos chunkPdfs ─────────────────────────────
-      console.log(`[labeltest] Merging ${chunkPdfs.length} chunk PDFs into final document`);
-      if (chunkPdfs.length > 0) {
+      // Fast-path: se só houve 1 chunk, evita re-decodificar tudo no pdf-lib (causa principal
+      // de WORKER_RESOURCE_LIMIT em lotes pequenos). Reusa o byte stream do chunk diretamente.
+      if (chunkPdfs.length === 1) {
+        const pdfBytes = chunkPdfs[0];
+        finalPdfBase64 = uint8ToBase64(pdfBytes);
+        chunkPdfs[0] = new Uint8Array(0);
+        console.log(`[labeltest] Final PDF (single-chunk fast-path): chunks_total=${chunks.length} chunks_ok=${chunksOk} success=${totalSuccess}/${validIds.length} pages=${totalPages} size=${(pdfBytes.length / 1024).toFixed(0)}KB`);
+      } else if (chunkPdfs.length > 1) {
+        console.log(`[labeltest] Merging ${chunkPdfs.length} chunk PDFs into final document`);
         const finalPdf = await PDFDocument.create();
         for (let i = 0; i < chunkPdfs.length; i++) {
           try {
