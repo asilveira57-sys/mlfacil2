@@ -146,7 +146,10 @@ const Auth = () => {
         window.clearTimeout(timeoutId);
 
         if (session) {
-          navigate("/primeiro-acesso", { replace: true });
+          // Send to /dashboard — ProtectedRoute will redirect to /primeiro-acesso
+          // ONLY if onboarding is actually pending. This prevents the bug where
+          // users who already completed onboarding land on /primeiro-acesso.
+          navigate("/dashboard", { replace: true });
           return;
         }
 
@@ -161,7 +164,9 @@ const Auth = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session) {
-        navigate("/primeiro-acesso", { replace: true });
+        // Always send to /dashboard — ProtectedRoute decides whether to forward
+        // to /primeiro-acesso based on the real onboarding state.
+        navigate("/dashboard", { replace: true });
       } else if (event === "SIGNED_OUT") {
         setCheckingSession(false);
       }
@@ -219,7 +224,9 @@ const Auth = () => {
         } catch { /* silent */ }
 
         if (signInData.session) {
-          navigate("/primeiro-acesso", { replace: true });
+          // Route through /dashboard so ProtectedRoute can read the real
+          // onboarding state and only redirect to /primeiro-acesso when needed.
+          navigate("/dashboard", { replace: true });
         }
       }
     } catch {
