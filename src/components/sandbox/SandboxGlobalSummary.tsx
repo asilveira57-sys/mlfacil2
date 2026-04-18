@@ -56,14 +56,6 @@ export function SandboxGlobalSummary({ snapshots, disconnectedCount = 0 }: Props
       icon: Package,
       accent: totalEtiquetas > 0,
     },
-    {
-      label: 'Corte mais próx.',
-      value: closestCutoff
-        ? closestCutoff.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-        : '--:--',
-      icon: Clock,
-      accent: closestCutoff ? (closestCutoff.getTime() - now.getTime()) < 3600000 : false,
-    },
   ];
 
   return (
