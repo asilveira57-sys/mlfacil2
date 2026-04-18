@@ -647,13 +647,12 @@ serve(async (req) => {
         const chunk = chunks[chunkIdx];
         console.log(`[labeltest] === Chunk ${chunkIdx + 1}/${chunks.length} (${chunk.length} shipments) ===`);
 
-        // ── Step A: Labelary PNG para CADA bloco ZPL — PARALELO no chunk ──
-        // Estrutura: imagesByShipment[sid] = Uint8Array[] (uma imagem por bloco)
+        // ── Step A: Labelary PNG para CADA bloco ZPL ──
+        // Pool de concorrência limitada (4 simultâneos) — mantém ganho do paralelismo
+        // sem estourar rate limit do Labelary (~5 req/s na cota gratuita).
         const imagesByShipment = new Map<string, Uint8Array[]>();
-        const renderErrorsByShipment = new Map<string, string>();
+        const renderErrorsByShipment = new Map<string, { reason: string; category: string }>();
 
-        // Monta lista plana de tarefas (sid, blockIndex, zpl) e dispara todas em paralelo.
-        // Paralelismo elimina o tempo de espera serial que estourava CPU do edge.
         type RenderTask = { sid: string; bi: number; zpl: string };
         const tasks: RenderTask[] = [];
         for (const sid of chunk) {
@@ -663,25 +662,51 @@ serve(async (req) => {
           }
         }
 
-        const results = await Promise.all(
-          tasks.map((t) => zplToImage(t.zpl, `${t.sid}#${t.bi}`, layout))
+        const LABELARY_CONCURRENCY = 4;
+        const results = await runWithConcurrency(tasks, LABELARY_CONCURRENCY, (t) =>
+          zplToImage(t.zpl, `${t.sid}#${t.bi}`, layout)
         );
 
-        // Agrupa resultados por shipment, preservando ordem dos blocos
-        const tmpBySid = new Map<string, { imgs: (Uint8Array | null)[]; err: string | null }>();
+        // Agrupa resultados por shipment + identifica tasks 429 que merecem retry serial
+        type Entry = { imgs: (Uint8Array | null)[]; err: string | null; category: string | null };
+        const tmpBySid = new Map<string, Entry>();
+        const retryQueue: { sid: string; bi: number; zpl: string }[] = [];
         for (let k = 0; k < tasks.length; k++) {
           const t = tasks[k];
           const r = results[k];
           let entry = tmpBySid.get(t.sid);
           if (!entry) {
             const total = zplBlocksByShipment.get(t.sid)!.length;
-            entry = { imgs: new Array(total).fill(null), err: null };
+            entry = { imgs: new Array(total).fill(null), err: null, category: null };
             tmpBySid.set(t.sid, entry);
           }
           if (r.image) {
             entry.imgs[t.bi] = r.image;
-          } else if (!entry.err) {
-            entry.err = r.reason_message || 'Conversão Labelary falhou';
+          } else {
+            if (r.error_category === 'rate_limit') {
+              retryQueue.push({ sid: t.sid, bi: t.bi, zpl: t.zpl });
+            }
+            if (!entry.err) {
+              entry.err = r.reason_message || 'Conversão Labelary falhou';
+              entry.category = r.error_category || 'other';
+            }
+          }
+        }
+
+        // ── Step A.2: Retry serial para 429 ─────────────────────────
+        // Rede de segurança: refaz só os blocos que caíram em rate limit, 1 por vez,
+        // com pausa de 250ms entre cada. Evita aborto por 429 transitório.
+        if (retryQueue.length > 0) {
+          console.log(`[labeltest] Chunk ${chunkIdx + 1}: retry serial de ${retryQueue.length} bloco(s) em rate_limit`);
+          for (const t of retryQueue) {
+            await sleep(250);
+            const r = await zplToImage(t.zpl, `${t.sid}#${t.bi}~retry`, layout, 3);
+            if (r.image) {
+              const entry = tmpBySid.get(t.sid)!;
+              entry.imgs[t.bi] = r.image;
+              // Limpa erro se todos os blocos agora têm imagem
+              if (entry.imgs.every(x => x !== null)) { entry.err = null; entry.category = null; }
+            }
           }
         }
 
@@ -691,9 +716,13 @@ serve(async (req) => {
           const blocksTotal = zplBlocksByShipment.get(sid)!.length;
           if (entry.err || imgs.length < 2 || imgs.length !== blocksTotal) {
             const reason = entry.err || `Apenas ${imgs.length}/${blocksTotal} bloco(s) renderizado(s)`;
-            perShipmentErrors.push({ shipment_id: sid, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: reason });
-            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, zpl_blocks_total: blocksTotal, blocks_rendered: imgs.length, error: reason });
-            renderErrorsByShipment.set(sid, reason);
+            const category = entry.category || 'other';
+            const reasonCode = category === 'rate_limit' ? 'LABELARY_RATE_LIMIT'
+              : category === 'timeout' ? 'LABELARY_TIMEOUT'
+              : 'LABELARY_CONVERSION_FAILED';
+            perShipmentErrors.push({ shipment_id: sid, reason_code: reasonCode, reason_message: reason });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, zpl_blocks_total: blocksTotal, blocks_rendered: imgs.length, error_category: category, error: reason });
+            renderErrorsByShipment.set(sid, { reason, category });
           } else {
             imagesByShipment.set(sid, imgs);
           }
