@@ -226,16 +226,7 @@ export default function ShippingLabels() {
     >
       {/* Main Content */}
       <main className="container mx-auto px-3 py-3 space-y-3">
-        {/* Cutoff Card */}
-        <ShippingCutoffCard
-          data={cutoffData}
-          isLoading={cutoffLoading}
-          isRefreshing={cutoffRefreshing}
-          error={cutoffError}
-          onRefresh={refreshCutoff}
-          canRefresh={isAdmin}
-          zoneDetails={zoneDetails}
-        />
+
 
         {/* Filters */}
         <ShippingFilters
