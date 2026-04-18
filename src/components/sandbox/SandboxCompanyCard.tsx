@@ -225,28 +225,7 @@ export function SandboxCompanyCard({ snapshot, isQuickSyncing = false }: Props) 
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
-            {/* Cutoff */}
-            <div>
-              <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1">
-                <Clock className="h-3 w-3" /> Hora de Corte
-              </h4>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: 'Flex', time: snapshot.cutoff_flex_time },
-                  { label: 'Coleta/Places', time: snapshot.cutoff_coleta_time },
-                ].map(({ label, time }) => {
-                  const colorClass = getCutoffColorClass(time);
-                  return (
-                    <div key={label} className="p-3 rounded-lg bg-muted/30 border border-border/50 text-center">
-                      <p className="text-[9px] text-muted-foreground uppercase mb-1">{label}</p>
-                      <p className={`font-mono text-2xl font-bold tabular-nums ${colorClass}`}>{time || '--:--'}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
 
-            <Separator />
 
             {/* Operação + Atendimento */}
             <div>
