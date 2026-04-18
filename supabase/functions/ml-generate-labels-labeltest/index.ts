@@ -42,6 +42,30 @@ function getLabelaryParams(layout: string) {
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const getBackoff = (attempt: number) => Math.min(Math.pow(2, attempt - 1) * 1000, 8000);
 
+// Pool de concorrência limitada — evita estourar rate limit do Labelary (~5 req/s).
+// Mantém ganho do paralelismo (vs sequencial) sem disparar dezenas de requests simultâneos.
+async function runWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const runners: Promise<void>[] = [];
+  const runnersCount = Math.min(limit, items.length);
+  for (let i = 0; i < runnersCount; i++) {
+    runners.push((async () => {
+      while (true) {
+        const idx = cursor++;
+        if (idx >= items.length) return;
+        results[idx] = await worker(items[idx], idx);
+      }
+    })());
+  }
+  await Promise.all(runners);
+  return results;
+}
+
 function truncate(t: string, max: number) { return t.length <= max ? t : t.substring(0, max - 3) + '...'; }
 function sanitize(t: string | null | undefined, max = 90) { if (!t) return ''; return truncate(t.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim(), max); }
 
@@ -283,14 +307,15 @@ async function zplToImage(
   zplContent: string,
   shipmentId: string,
   layout: string,
-): Promise<{ image: Uint8Array | null; reason_code?: string; reason_message?: string }> {
+  maxAttempts = 5,
+): Promise<{ image: Uint8Array | null; reason_code?: string; reason_message?: string; error_category?: 'rate_limit' | 'labelary_other' | 'timeout' | 'other' }> {
   const { dpmm, wInch, hInch } = getLabelaryParams(layout);
   const url = `http://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${wInch}x${hInch}/0/`;
-  const MAX_ATTEMPTS = 5;
 
-  for (let a = 1; a <= MAX_ATTEMPTS; a++) {
+  let lastWas429 = false;
+  for (let a = 1; a <= maxAttempts; a++) {
     const t0 = Date.now();
-    const timeoutMs = 10000 + (a * 2000); // progressive timeout: 12s, 14s, 16s, 18s, 20s
+    const timeoutMs = 10000 + (a * 2000); // progressive timeout: 12s..20s
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -303,30 +328,42 @@ async function zplToImage(
       clearTimeout(timer);
       const latency = Date.now() - t0;
 
-      if (r.status === 429 || r.status >= 500) {
+      if (r.status === 429) {
+        lastWas429 = true;
+        const retryAfter = parseInt(r.headers.get('retry-after') || '0', 10);
+        await r.text().catch(() => '');
+        const waitMs = retryAfter > 0 ? retryAfter * 1000 : getBackoff(a);
+        console.warn(`[labeltest] Labelary ${shipmentId} 429 attempt ${a}/${maxAttempts}: latency=${latency}ms wait=${waitMs}ms`);
+        if (a < maxAttempts) { await sleep(waitMs); continue; }
+        return { image: null, reason_code: 'LABELARY_RATE_LIMIT', reason_message: `Labelary rate limit (429) após ${maxAttempts} tentativas`, error_category: 'rate_limit' };
+      }
+
+      if (r.status >= 500) {
+        lastWas429 = false;
         const snippet = (await r.text().catch(() => '')).substring(0, 100);
-        console.warn(`[labeltest] Labelary ${shipmentId} attempt ${a}/${MAX_ATTEMPTS}: status=${r.status} latency=${latency}ms snippet="${snippet}"`);
-        if (a < MAX_ATTEMPTS) { await sleep(getBackoff(a) + 300); continue; }
-        return { image: null, reason_code: 'LABELARY_SERVER_ERROR', reason_message: `Labelary retornou ${r.status} após ${MAX_ATTEMPTS} tentativas` };
+        console.warn(`[labeltest] Labelary ${shipmentId} ${r.status} attempt ${a}/${maxAttempts}: latency=${latency}ms snippet="${snippet}"`);
+        if (a < maxAttempts) { await sleep(getBackoff(a)); continue; }
+        return { image: null, reason_code: 'LABELARY_SERVER_ERROR', reason_message: `Labelary retornou ${r.status} após ${maxAttempts} tentativas`, error_category: 'labelary_other' };
       }
 
       if (!r.ok) {
         const snippet = (await r.text().catch(() => '')).substring(0, 200);
         console.error(`[labeltest] Labelary ${shipmentId}: status=${r.status} latency=${latency}ms body="${snippet}"`);
-        return { image: null, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: `Labelary retornou status ${r.status}: ${snippet.substring(0, 80)}` };
+        return { image: null, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: `Labelary retornou status ${r.status}: ${snippet.substring(0, 80)}`, error_category: 'labelary_other' };
       }
 
       const bytes = new Uint8Array(await r.arrayBuffer());
-      console.log(`[labeltest] Labelary OK: ${shipmentId} ${(bytes.length / 1024).toFixed(0)}KB ${latency}ms dpmm=${dpmm} ${wInch}x${hInch}in`);
+      console.log(`[labeltest] Labelary OK: ${shipmentId} ${(bytes.length / 1024).toFixed(0)}KB ${latency}ms dpmm=${dpmm} ${wInch}x${hInch}in${a > 1 ? ` (attempt ${a})` : ''}`);
       return { image: bytes };
     } catch (e: any) {
       const latency = Date.now() - t0;
       const isTimeout = e.name === 'AbortError';
-      console.error(`[labeltest] Labelary ${shipmentId} attempt ${a}/${MAX_ATTEMPTS}: ${isTimeout ? 'TIMEOUT' : e.message} ${latency}ms`);
-      if (a < MAX_ATTEMPTS) await sleep(getBackoff(a));
+      console.error(`[labeltest] Labelary ${shipmentId} attempt ${a}/${maxAttempts}: ${isTimeout ? 'TIMEOUT' : e.message} ${latency}ms`);
+      if (a < maxAttempts) await sleep(getBackoff(a));
+      else return { image: null, reason_code: isTimeout ? 'LABELARY_TIMEOUT' : 'LABELARY_NETWORK_ERROR', reason_message: isTimeout ? `Timeout após ${maxAttempts} tentativas` : `Erro de rede: ${e.message}`, error_category: isTimeout ? 'timeout' : 'other' };
     }
   }
-  return { image: null, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: `Conversão Labelary falhou após ${MAX_ATTEMPTS} tentativas` };
+  return { image: null, reason_code: lastWas429 ? 'LABELARY_RATE_LIMIT' : 'LABELARY_CONVERSION_FAILED', reason_message: `Conversão Labelary falhou após ${maxAttempts} tentativas`, error_category: lastWas429 ? 'rate_limit' : 'labelary_other' };
 }
 
 // DANFE pipeline = mesmo bloco ZPL adicional retornado pela ML.
@@ -610,13 +647,12 @@ serve(async (req) => {
         const chunk = chunks[chunkIdx];
         console.log(`[labeltest] === Chunk ${chunkIdx + 1}/${chunks.length} (${chunk.length} shipments) ===`);
 
-        // ── Step A: Labelary PNG para CADA bloco ZPL — PARALELO no chunk ──
-        // Estrutura: imagesByShipment[sid] = Uint8Array[] (uma imagem por bloco)
+        // ── Step A: Labelary PNG para CADA bloco ZPL ──
+        // Pool de concorrência limitada (4 simultâneos) — mantém ganho do paralelismo
+        // sem estourar rate limit do Labelary (~5 req/s na cota gratuita).
         const imagesByShipment = new Map<string, Uint8Array[]>();
-        const renderErrorsByShipment = new Map<string, string>();
+        const renderErrorsByShipment = new Map<string, { reason: string; category: string }>();
 
-        // Monta lista plana de tarefas (sid, blockIndex, zpl) e dispara todas em paralelo.
-        // Paralelismo elimina o tempo de espera serial que estourava CPU do edge.
         type RenderTask = { sid: string; bi: number; zpl: string };
         const tasks: RenderTask[] = [];
         for (const sid of chunk) {
@@ -626,25 +662,51 @@ serve(async (req) => {
           }
         }
 
-        const results = await Promise.all(
-          tasks.map((t) => zplToImage(t.zpl, `${t.sid}#${t.bi}`, layout))
+        const LABELARY_CONCURRENCY = 4;
+        const results = await runWithConcurrency(tasks, LABELARY_CONCURRENCY, (t) =>
+          zplToImage(t.zpl, `${t.sid}#${t.bi}`, layout)
         );
 
-        // Agrupa resultados por shipment, preservando ordem dos blocos
-        const tmpBySid = new Map<string, { imgs: (Uint8Array | null)[]; err: string | null }>();
+        // Agrupa resultados por shipment + identifica tasks 429 que merecem retry serial
+        type Entry = { imgs: (Uint8Array | null)[]; err: string | null; category: string | null };
+        const tmpBySid = new Map<string, Entry>();
+        const retryQueue: { sid: string; bi: number; zpl: string }[] = [];
         for (let k = 0; k < tasks.length; k++) {
           const t = tasks[k];
           const r = results[k];
           let entry = tmpBySid.get(t.sid);
           if (!entry) {
             const total = zplBlocksByShipment.get(t.sid)!.length;
-            entry = { imgs: new Array(total).fill(null), err: null };
+            entry = { imgs: new Array(total).fill(null), err: null, category: null };
             tmpBySid.set(t.sid, entry);
           }
           if (r.image) {
             entry.imgs[t.bi] = r.image;
-          } else if (!entry.err) {
-            entry.err = r.reason_message || 'Conversão Labelary falhou';
+          } else {
+            if (r.error_category === 'rate_limit') {
+              retryQueue.push({ sid: t.sid, bi: t.bi, zpl: t.zpl });
+            }
+            if (!entry.err) {
+              entry.err = r.reason_message || 'Conversão Labelary falhou';
+              entry.category = r.error_category || 'other';
+            }
+          }
+        }
+
+        // ── Step A.2: Retry serial para 429 ─────────────────────────
+        // Rede de segurança: refaz só os blocos que caíram em rate limit, 1 por vez,
+        // com pausa de 250ms entre cada. Evita aborto por 429 transitório.
+        if (retryQueue.length > 0) {
+          console.log(`[labeltest] Chunk ${chunkIdx + 1}: retry serial de ${retryQueue.length} bloco(s) em rate_limit`);
+          for (const t of retryQueue) {
+            await sleep(250);
+            const r = await zplToImage(t.zpl, `${t.sid}#${t.bi}~retry`, layout, 3);
+            if (r.image) {
+              const entry = tmpBySid.get(t.sid)!;
+              entry.imgs[t.bi] = r.image;
+              // Limpa erro se todos os blocos agora têm imagem
+              if (entry.imgs.every(x => x !== null)) { entry.err = null; entry.category = null; }
+            }
           }
         }
 
@@ -654,9 +716,13 @@ serve(async (req) => {
           const blocksTotal = zplBlocksByShipment.get(sid)!.length;
           if (entry.err || imgs.length < 2 || imgs.length !== blocksTotal) {
             const reason = entry.err || `Apenas ${imgs.length}/${blocksTotal} bloco(s) renderizado(s)`;
-            perShipmentErrors.push({ shipment_id: sid, reason_code: 'LABELARY_CONVERSION_FAILED', reason_message: reason });
-            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, zpl_blocks_total: blocksTotal, blocks_rendered: imgs.length, error: reason });
-            renderErrorsByShipment.set(sid, reason);
+            const category = entry.category || 'other';
+            const reasonCode = category === 'rate_limit' ? 'LABELARY_RATE_LIMIT'
+              : category === 'timeout' ? 'LABELARY_TIMEOUT'
+              : 'LABELARY_CONVERSION_FAILED';
+            perShipmentErrors.push({ shipment_id: sid, reason_code: reasonCode, reason_message: reason });
+            perShipmentLog.push({ shipment_id: sid, status: 'error', pipeline: 'zpl_first', stage: 'labelary', chunk_index: chunkIdx, zpl_blocks_total: blocksTotal, blocks_rendered: imgs.length, error_category: category, error: reason });
+            renderErrorsByShipment.set(sid, { reason, category });
           } else {
             imagesByShipment.set(sid, imgs);
           }
@@ -821,6 +887,18 @@ serve(async (req) => {
     // Merge all errors
     const allErrors = [...validationErrors, ...perShipmentErrors];
 
+    // Categoriza erros para diagnóstico claro (rate_limit vs danfe vs ml_api vs other)
+    const errorsByCategory = { rate_limit: 0, danfe_missing: 0, ml_api_error: 0, labelary_other: 0, validation: 0, other: 0 };
+    for (const e of allErrors) {
+      const code = e.reason_code || '';
+      if (code === 'LABELARY_RATE_LIMIT') errorsByCategory.rate_limit++;
+      else if (code === 'DANFE_MISSING') errorsByCategory.danfe_missing++;
+      else if (code.startsWith('ML_ZPL_')) errorsByCategory.ml_api_error++;
+      else if (code.startsWith('LABELARY_')) errorsByCategory.labelary_other++;
+      else if (['shipment_nao_encontrado', 'full', 'sem_label_available'].includes(code)) errorsByCategory.validation++;
+      else errorsByCategory.other++;
+    }
+
     // Structured log summary
     console.log(`[labeltest] === GENERATION SUMMARY ===`);
     console.log(JSON.stringify({
@@ -828,6 +906,7 @@ serve(async (req) => {
       valid_shipments: validIds.length,
       processed_labels: totalSuccess,
       error_count: allErrors.length,
+      errors_by_category: errorsByCategory,
       total_pages: totalPages,
       pdf_size_bytes: finalPdfBase64 ? Math.round(finalPdfBase64.length * 0.75) : 0,
       zpl_size_bytes: finalZplContent?.length || 0,
@@ -855,6 +934,7 @@ serve(async (req) => {
           success_count: 0,
           error_count: allErrors.length,
           errors: allErrors,
+          errors_by_category: errorsByCategory,
           per_shipment: perShipmentLog,
           processing_time_ms: elapsed,
         },
@@ -869,6 +949,7 @@ serve(async (req) => {
         success_count: totalSuccess,
         error_count: perShipmentErrors.length,
         errors: allErrors,
+        errors_by_category: errorsByCategory,
         total_success: totalSuccess,
         total_pages: totalPages,
         per_shipment: perShipmentLog,
