@@ -5,7 +5,13 @@ import { useToast } from '@/hooks/use-toast';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { startOfDay, endOfDay, subDays } from 'date-fns';
 import { toast as sonnerToast } from 'sonner';
-import { saveActiveJob, loadActiveJob, clearActiveJob, type ActivePrintJob } from '@/lib/shippingLabelsSession';
+import {
+  saveActiveJobV2 as saveActiveJob,
+  loadActiveJobV2 as loadActiveJob,
+  clearActiveJobV2 as clearActiveJob,
+  markActiveJobV2Stalled,
+  type ActivePrintJob,
+} from '@/lib/shippingLabelsSession';
 
 // Re-export shared types from V1
 export type { OrderItemSummary } from '@/hooks/useShippingLabels';
@@ -218,8 +224,10 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           jobId = refreshed.jobId;
           logRecovery('pending-resolved', `Real jobId=${jobId}`);
         } else if (elapsed > JOB_RECOVERY_TIMEOUT_MS) {
-          logRecovery('pending-timeout', 'Job never got a real ID, giving up');
-          finalizeJob('error');
+          logRecovery('pending-stalled', 'Job ID still pending — marking stalled (user can retry)');
+          markActiveJobV2Stalled(true);
+          setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
+          setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
           return;
         } else {
           logRecovery('pending-waiting', `attempt ${attempt}, still pending...`);
@@ -234,7 +242,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           continue;
         }
 
-        const { data, error } = await supabase.functions.invoke('ml-generate-labels-status', {
+        const { data, error } = await supabase.functions.invoke('ml-generate-labels-status-v2', {
           headers,
           body: { job_id: jobId },
         });
@@ -243,10 +251,14 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           notFoundCount++;
           logRecovery('job not found', `attempt ${notFoundCount}/${MAX_NOT_FOUND_ATTEMPTS}`);
 
-          // Resilient: don't clear on transient "not found" — keep polling
+          // V2: NÃO limpa activeJob no timeout — o job pode existir em meli_print_queue_v2
+          // e estar simplesmente lento. Marca como "stalled" e deixa o usuário decidir
+          // quando retomar (botão "Retomar verificação" na UI).
           if (notFoundCount >= MAX_NOT_FOUND_ATTEMPTS || elapsed > JOB_RECOVERY_TIMEOUT_MS) {
-            logRecovery('timeout', `notFound=${notFoundCount}, elapsed=${elapsed}ms`);
-            finalizeJob('error');
+            logRecovery('stalled', `notFound=${notFoundCount}, elapsed=${elapsed}ms — keeping activeJob, marking stalled`);
+            markActiveJobV2Stalled(true);
+            setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
+            setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
             return;
           }
           continue;
@@ -676,6 +688,28 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     else { setSortField(field); setSortDirection('desc'); }
   }, [sortField]);
 
+  // V2: retomar verificação após estado "stalled" (timeout sem perda do activeJob)
+  const resumeStalledRecovery = useCallback(() => {
+    const job = loadActiveJob();
+    if (!job) return;
+    logRecovery('resume-stalled', `jobId=${job.jobId}`);
+    markActiveJobV2Stalled(false);
+    setActiveJobState({ ...job, stalled: false });
+    setGenerationProgress(prev => ({ ...prev, status: 'processing' }));
+    recoveryAbortRef.current?.abort();
+    const abort = new AbortController();
+    recoveryAbortRef.current = abort;
+    pollJobUntilDone(job.jobId, job.format, abort.signal);
+  }, []);
+
+  const cancelStalledRecovery = useCallback(() => {
+    logRecovery('cancel-stalled', 'user discarded recovery');
+    recoveryAbortRef.current?.abort();
+    setActiveJobState(null);
+    clearActiveJob();
+    setGenerationProgress(INITIAL_PROGRESS);
+  }, []);
+
   return {
     orders, isLoading, refetch, statusFilter, setStatusFilter,
     periodFilter, setPeriodFilter, customDateRange, setDateRange,
@@ -685,6 +719,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     isSyncing, syncPhase, syncProgress, sync, lastSyncAt, statusCounts,
     generateLabels: generateLabelsMutation.mutate,
     isGenerating: generateLabelsMutation.isPending || hasActiveJob,
+    isStalled: !!activeJobState?.stalled,
+    resumeStalledRecovery, cancelStalledRecovery,
     generationProgress, orderItems,
   };
 }
