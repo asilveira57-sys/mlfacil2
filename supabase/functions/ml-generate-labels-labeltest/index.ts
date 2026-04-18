@@ -42,6 +42,30 @@ function getLabelaryParams(layout: string) {
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const getBackoff = (attempt: number) => Math.min(Math.pow(2, attempt - 1) * 1000, 8000);
 
+// Pool de concorrência limitada — evita estourar rate limit do Labelary (~5 req/s).
+// Mantém ganho do paralelismo (vs sequencial) sem disparar dezenas de requests simultâneos.
+async function runWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const runners: Promise<void>[] = [];
+  const runnersCount = Math.min(limit, items.length);
+  for (let i = 0; i < runnersCount; i++) {
+    runners.push((async () => {
+      while (true) {
+        const idx = cursor++;
+        if (idx >= items.length) return;
+        results[idx] = await worker(items[idx], idx);
+      }
+    })());
+  }
+  await Promise.all(runners);
+  return results;
+}
+
 function truncate(t: string, max: number) { return t.length <= max ? t : t.substring(0, max - 3) + '...'; }
 function sanitize(t: string | null | undefined, max = 90) { if (!t) return ''; return truncate(t.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim(), max); }
 
