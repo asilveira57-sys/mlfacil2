@@ -39,6 +39,7 @@ export default function LabelTeste() {
     selectedIds, toggleSelection, selectAll, clearSelection,
     isSyncing, syncPhase, syncProgress, sync, lastSyncAt, statusCounts,
     generateLabels, isGenerating, generationProgress,
+    isStalled, resumeStalledRecovery, cancelStalledRecovery,
     searchQuery, setSearchQuery, sortField, sortDirection, toggleSort,
     orderItems,
   } = useShippingLabelsV2({ sellerId: sellerId || null });
