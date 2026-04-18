@@ -949,6 +949,7 @@ serve(async (req) => {
         success_count: totalSuccess,
         error_count: perShipmentErrors.length,
         errors: allErrors,
+        errors_by_category: errorsByCategory,
         total_success: totalSuccess,
         total_pages: totalPages,
         per_shipment: perShipmentLog,
