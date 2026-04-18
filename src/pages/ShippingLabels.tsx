@@ -10,8 +10,6 @@ import { ShippingTable } from '@/components/shipping/ShippingTable';
 import { ShippingPagination } from '@/components/shipping/ShippingPagination';
 import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
-import { ShippingCutoffCard } from '@/components/shipping/ShippingCutoffCard';
-import { useShippingCutoff } from '@/hooks/useShippingCutoff';
 import { useUserRole } from '@/hooks/useUserRole';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -47,39 +45,7 @@ export default function ShippingLabels() {
   const companyId = activeAccount?.companyId || null;
 
   // Shipping cutoff
-  const {
-    data: cutoffData,
-    isLoading: cutoffLoading,
-    isRefreshing: cutoffRefreshing,
-    error: cutoffError,
-    refresh: refreshCutoff,
-  } = useShippingCutoff({
-    sellerId: activeAccount?.id || null,
-    mlUserId: sellerId || null,
-    companyId: activeAccount?.companyId || null,
-  });
 
-  // Fetch zone details from cache when cutoff has by_zone flex
-  const [zoneDetails, setZoneDetails] = useState<Array<{ zone: string; cutoff: string }> | null>(null);
-  useEffect(() => {
-    if (cutoffData?.flex?.cutoff_type === 'by_zone' && cutoffData?.flex?.zone_details_count > 0 && companyId && sellerId) {
-      supabase
-        .from('shipping_cutoff_cache')
-        .select('flex_zone_details')
-        .eq('company_id', companyId)
-        .eq('seller_id', sellerId)
-        .order('date_ref', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (data?.flex_zone_details) {
-            setZoneDetails(data.flex_zone_details as any);
-          }
-        });
-    } else {
-      setZoneDetails(null);
-    }
-  }, [cutoffData?.flex?.cutoff_type, cutoffData?.flex?.zone_details_count, companyId, sellerId]);
 
   const {
     orders,
@@ -260,16 +226,7 @@ export default function ShippingLabels() {
     >
       {/* Main Content */}
       <main className="container mx-auto px-3 py-3 space-y-3">
-        {/* Cutoff Card */}
-        <ShippingCutoffCard
-          data={cutoffData}
-          isLoading={cutoffLoading}
-          isRefreshing={cutoffRefreshing}
-          error={cutoffError}
-          onRefresh={refreshCutoff}
-          canRefresh={isAdmin}
-          zoneDetails={zoneDetails}
-        />
+
 
         {/* Filters */}
         <ShippingFilters

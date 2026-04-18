@@ -7,7 +7,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet';
 import {
-  Clock, Package, FileText, MessageCircle, Truck,
+  Package, FileText, MessageCircle, Truck,
   AlertTriangle, MessageSquare, Scale,
   DollarSign, ShoppingCart, TrendingUp, Star,
   Megaphone, ExternalLink, ChevronRight, AlertCircle, Zap,
@@ -32,16 +32,7 @@ function formatRelativeTime(dateStr: string): string {
   return `${Math.floor(h / 24)}d`;
 }
 
-function getCutoffColorClass(time: string | null): string {
-  if (!time) return 'text-muted-foreground';
-  const [h, m] = time.split(':').map(Number);
-  const cutoff = new Date();
-  cutoff.setHours(h, m, 0, 0);
-  const diffMin = (cutoff.getTime() - Date.now()) / 60000;
-  if (diffMin <= 0) return 'text-destructive';
-  if (diffMin <= 60) return 'text-[hsl(var(--warning))]';
-  return 'text-[hsl(var(--success,142_72%_29%))]';
-}
+
 
 function fmt(v: number) {
   return v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -65,25 +56,6 @@ async function logEvent(action: string, meta: Record<string, unknown> = {}) {
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
-function CutoffBadge({ label, time }: { label: string; time: string | null }) {
-  const colorClass = useMemo(() => getCutoffColorClass(time), [time]);
-  const isUrgent = useMemo(() => {
-    if (!time) return false;
-    const [h, m] = time.split(':').map(Number);
-    const cutoff = new Date();
-    cutoff.setHours(h, m, 0, 0);
-    return (cutoff.getTime() - Date.now()) / 60000 <= 60;
-  }, [time]);
-
-  return (
-    <div className="flex flex-col items-center flex-1">
-      <span className="text-[9px] text-muted-foreground uppercase tracking-wider">{label}</span>
-      <span className={`font-mono text-base font-bold tabular-nums leading-tight ${colorClass} ${isUrgent ? 'animate-pulse' : ''}`}>
-        {time || '--:--'}
-      </span>
-    </div>
-  );
-}
 
 function MetricRow({
   icon: Icon, label, value, alert, onClick,
@@ -179,20 +151,7 @@ export function SandboxCompanyCard({ snapshot, isQuickSyncing = false }: Props) 
           </div>
         </div>
 
-        {/* Cutoff block */}
-        <div className="px-3 py-2 border-b border-border/40 bg-muted/20">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Clock className="h-2.5 w-2.5 text-muted-foreground" />
-            <span className="text-[9px] uppercase tracking-widest font-bold text-muted-foreground">
-              Hora de Corte
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <CutoffBadge label="Flex" time={snapshot.cutoff_flex_time} />
-            <div className="w-px bg-border/50" />
-            <CutoffBadge label="Coleta" time={snapshot.cutoff_coleta_time} />
-          </div>
-        </div>
+
 
         {/* Operation block */}
         <div className="px-3 py-1.5 border-b border-border/40">
@@ -238,28 +197,7 @@ export function SandboxCompanyCard({ snapshot, isQuickSyncing = false }: Props) 
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
-            {/* Cutoff */}
-            <div>
-              <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1">
-                <Clock className="h-3 w-3" /> Hora de Corte
-              </h4>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: 'Flex', time: snapshot.cutoff_flex_time },
-                  { label: 'Coleta/Places', time: snapshot.cutoff_coleta_time },
-                ].map(({ label, time }) => {
-                  const colorClass = getCutoffColorClass(time);
-                  return (
-                    <div key={label} className="p-3 rounded-lg bg-muted/30 border border-border/50 text-center">
-                      <p className="text-[9px] text-muted-foreground uppercase mb-1">{label}</p>
-                      <p className={`font-mono text-2xl font-bold tabular-nums ${colorClass}`}>{time || '--:--'}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
 
-            <Separator />
 
             {/* Operação + Atendimento */}
             <div>

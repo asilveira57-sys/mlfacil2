@@ -1,4 +1,4 @@
-import { DollarSign, Megaphone, AlertTriangle, Package, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { DollarSign, Megaphone, AlertTriangle, Package, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { SandboxSnapshot } from '@/hooks/useSandboxSnapshots';
 
 interface Props {
@@ -21,21 +21,7 @@ export function SandboxGlobalSummary({ snapshots, disconnectedCount = 0 }: Props
   const totalReclamacoes = snapshots.reduce((s, c) => s + (c.reclamacoes_abertas || 0), 0);
   const totalEtiquetas = snapshots.reduce((s, c) => s + (c.etiquetas_pendentes || 0), 0);
 
-  // Find closest cutoff
   const now = new Date();
-  const cutoffs = snapshots
-    .map(s => s.cutoff_flex_time || s.cutoff_coleta_time)
-    .filter(Boolean)
-    .map(t => {
-      const [h, m] = (t as string).split(':').map(Number);
-      const d = new Date();
-      d.setHours(h, m, 0, 0);
-      return d;
-    })
-    .filter(d => d > now)
-    .sort((a, b) => a.getTime() - b.getTime());
-
-  const closestCutoff = cutoffs[0];
 
   // Last update (most recent snapshot)
   const lastUpdate = snapshots.reduce((latest, snap) => {
@@ -69,14 +55,6 @@ export function SandboxGlobalSummary({ snapshots, disconnectedCount = 0 }: Props
       value: totalEtiquetas.toString(),
       icon: Package,
       accent: totalEtiquetas > 0,
-    },
-    {
-      label: 'Corte mais próx.',
-      value: closestCutoff
-        ? closestCutoff.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-        : '--:--',
-      icon: Clock,
-      accent: closestCutoff ? (closestCutoff.getTime() - now.getTime()) < 3600000 : false,
     },
   ];
 
