@@ -224,8 +224,10 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           jobId = refreshed.jobId;
           logRecovery('pending-resolved', `Real jobId=${jobId}`);
         } else if (elapsed > JOB_RECOVERY_TIMEOUT_MS) {
-          logRecovery('pending-timeout', 'Job never got a real ID, giving up');
-          finalizeJob('error');
+          logRecovery('pending-stalled', 'Job ID still pending — marking stalled (user can retry)');
+          markActiveJobV2Stalled(true);
+          setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
+          setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
           return;
         } else {
           logRecovery('pending-waiting', `attempt ${attempt}, still pending...`);
