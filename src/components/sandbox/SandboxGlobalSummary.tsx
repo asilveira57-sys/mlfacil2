@@ -1,4 +1,4 @@
-import { DollarSign, Megaphone, AlertTriangle, Package, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { DollarSign, Megaphone, AlertTriangle, Package, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { SandboxSnapshot } from '@/hooks/useSandboxSnapshots';
 
 interface Props {
