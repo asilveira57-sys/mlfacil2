@@ -11,6 +11,7 @@ import { ShippingPagination } from '@/components/shipping/ShippingPagination';
 import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { useUserRole } from '@/hooks/useUserRole';
+import { supabase } from '@/integrations/supabase/client';
 
 import { useToast } from '@/hooks/use-toast';
 import { PageContainer } from '@/components/layout/PageContainer';
