@@ -887,6 +887,18 @@ serve(async (req) => {
     // Merge all errors
     const allErrors = [...validationErrors, ...perShipmentErrors];
 
+    // Categoriza erros para diagnóstico claro (rate_limit vs danfe vs ml_api vs other)
+    const errorsByCategory = { rate_limit: 0, danfe_missing: 0, ml_api_error: 0, labelary_other: 0, validation: 0, other: 0 };
+    for (const e of allErrors) {
+      const code = e.reason_code || '';
+      if (code === 'LABELARY_RATE_LIMIT') errorsByCategory.rate_limit++;
+      else if (code === 'DANFE_MISSING') errorsByCategory.danfe_missing++;
+      else if (code.startsWith('ML_ZPL_')) errorsByCategory.ml_api_error++;
+      else if (code.startsWith('LABELARY_')) errorsByCategory.labelary_other++;
+      else if (['shipment_nao_encontrado', 'full', 'sem_label_available'].includes(code)) errorsByCategory.validation++;
+      else errorsByCategory.other++;
+    }
+
     // Structured log summary
     console.log(`[labeltest] === GENERATION SUMMARY ===`);
     console.log(JSON.stringify({
@@ -894,6 +906,7 @@ serve(async (req) => {
       valid_shipments: validIds.length,
       processed_labels: totalSuccess,
       error_count: allErrors.length,
+      errors_by_category: errorsByCategory,
       total_pages: totalPages,
       pdf_size_bytes: finalPdfBase64 ? Math.round(finalPdfBase64.length * 0.75) : 0,
       zpl_size_bytes: finalZplContent?.length || 0,
