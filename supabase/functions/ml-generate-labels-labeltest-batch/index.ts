@@ -139,11 +139,8 @@ serve(async (req) => {
     const elapsed = Date.now() - t0;
     console.log(`[labeltest-batch] job=${jobId} batch=${batchIdx} done: success=${successCount}/${sids.length} pages=${pages} errors=${errors.length} elapsed=${elapsed}ms`);
 
-    // ─── Atualiza estado do job (re-lê para evitar race com outro worker) ──
-    const { data: freshJob } = await supabaseAdmin.from('meli_print_queue_v2').select('batches, processed_labels, per_shipment_log').eq('id', jobId).single();
-    const freshBatches: any[] = Array.isArray(freshJob?.batches) ? [...freshJob!.batches] : batches;
-    freshBatches[batchIdx] = {
-      ...freshBatches[batchIdx],
+    // ─── Atualiza estado via RPC atômica (lock por job_id) ──────────────
+    const batchPatch = {
       status: pdfBytes ? 'success' : 'error',
       success_count: successCount,
       error_count: errors.length,
@@ -152,21 +149,33 @@ serve(async (req) => {
       completed_at: new Date().toISOString(),
       elapsed_ms: elapsed,
     };
+    const logEntries = [
+      ...log,
+      ...errors.map(e => ({ shipment_id: e.shipment_id, status: 'error', error: e.reason_message, reason_code: e.reason_code, batch_index: batchIdx })),
+    ];
 
-    const newProcessed = (freshJob?.processed_labels || 0) + successCount;
-    const existingLog: any[] = Array.isArray(freshJob?.per_shipment_log) ? freshJob!.per_shipment_log : [];
-    const mergedLog = [...existingLog, ...log, ...errors.map(e => ({ shipment_id: e.shipment_id, status: 'error', error: e.reason_message, reason_code: e.reason_code, batch_index: batchIdx }))];
-
-    const allDone = freshBatches.every(b => b.status === 'success' || b.status === 'error');
-    let finalUpdate: any = { batches: freshBatches, processed_labels: newProcessed, per_shipment_log: mergedLog };
+    const { data: rpcRows, error: rpcErr } = await supabaseAdmin.rpc('labeltest_complete_batch', {
+      p_job_id: jobId,
+      p_batch_index: batchIdx,
+      p_batch_patch: batchPatch as any,
+      p_success_count: successCount,
+      p_log_entries: logEntries as any,
+    });
+    if (rpcErr) {
+      console.error(`[labeltest-batch] RPC error:`, rpcErr);
+      throw rpcErr;
+    }
+    const rpcRow: any = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+    const allDone: boolean = !!rpcRow?.all_done;
+    const freshBatches: any[] = Array.isArray(rpcRow?.batches) ? rpcRow.batches : [];
 
     if (allDone) {
       // ─── Merge final ─────────────────────────────────────────────
       const successPdfs: Uint8Array[] = freshBatches
-        .filter(b => b.status === 'success' && b.pdf_b64)
-        .map(b => base64ToUint8(b.pdf_b64));
-      const totalPages = freshBatches.reduce((s, b) => s + (b.pages || 0), 0);
-      const totalSuccess = freshBatches.reduce((s, b) => s + (b.success_count || 0), 0);
+        .filter((b: any) => b.status === 'success' && b.pdf_b64)
+        .map((b: any) => base64ToUint8(b.pdf_b64));
+      const totalPages = freshBatches.reduce((s: number, b: any) => s + (b.pages || 0), 0);
+      const totalSuccess = freshBatches.reduce((s: number, b: any) => s + (b.success_count || 0), 0);
 
       let finalPdfBase64: string | null = null;
       if (successPdfs.length > 0) {
@@ -174,23 +183,24 @@ serve(async (req) => {
         finalPdfBase64 = uint8ToBase64(merged);
       }
 
-      // Limpa pdf_b64 dos batches para reduzir tamanho da row (já temos o merged)
-      const cleanedBatches = freshBatches.map(b => { const { pdf_b64, ...rest } = b; return rest; });
+      // Limpa pdf_b64 dos batches para reduzir tamanho da row
+      const cleanedBatches = freshBatches.map((b: any) => { const { pdf_b64, ...rest } = b; return rest; });
 
-      const finalStatus = totalSuccess === 0 ? 'erro' : totalSuccess === (job.total_labels || 0) ? 'concluido' : 'parcial';
-      finalUpdate = {
-        ...finalUpdate,
-        batches: cleanedBatches,
+      const totalLabels = rpcRow?.total_labels || 0;
+      const finalStatus = totalSuccess === 0 ? 'erro' : totalSuccess === totalLabels ? 'concluido' : 'parcial';
+      const startedAt = rpcRow?.job_started_at ? new Date(rpcRow.job_started_at).getTime() : t0;
+
+      await supabaseAdmin.from('meli_print_queue_v2').update({
+        batches: cleanedBatches as any,
         pdf_base64: finalPdfBase64,
         total_pages: totalPages,
         status: finalStatus,
         job_completed_at: new Date().toISOString(),
-        duration_ms: Date.now() - new Date(job.job_started_at).getTime(),
-      };
-      console.log(`[labeltest-batch] job=${jobId} FINALIZED status=${finalStatus} success=${totalSuccess}/${job.total_labels} pages=${totalPages}`);
-    }
+        duration_ms: Date.now() - startedAt,
+      } as any).eq('id', jobId);
 
-    await supabaseAdmin.from('meli_print_queue_v2').update(finalUpdate as any).eq('id', jobId);
+      console.log(`[labeltest-batch] job=${jobId} FINALIZED status=${finalStatus} success=${totalSuccess}/${totalLabels} pages=${totalPages}`);
+    }
 
     return new Response(JSON.stringify({ ok: true, success_count: successCount, errors: errors.length, all_done: allDone }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {
