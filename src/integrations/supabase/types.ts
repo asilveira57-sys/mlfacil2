@@ -21664,6 +21664,23 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      labeltest_complete_batch: {
+        Args: {
+          p_batch_index: number
+          p_batch_patch: Json
+          p_job_id: string
+          p_log_entries: Json
+          p_success_count: number
+        }
+        Returns: {
+          all_done: boolean
+          batches: Json
+          job_started_at: string
+          layout: string
+          processed_labels: number
+          total_labels: number
+        }[]
+      }
       log_admin_action: {
         Args: {
           p_action_type: string
