@@ -62,7 +62,7 @@ serve(async (req) => {
 
     const { data: job, error: jobError } = await supabaseAdmin
       .from('meli_print_queue_v2')
-      .select('*')
+      .select('id, user_id, status, format, layout, total_labels, processed_labels, batches, job_started_at, job_completed_at, file_url, zpl_content, pdf_base64, download_filename, page_width_mm, page_height_mm, total_pages, error_log, per_shipment_log')
       .eq('id', job_id)
       .eq('user_id', user.id)
       .maybeSingle();
@@ -88,6 +88,17 @@ serve(async (req) => {
     const errorBatches = batches.filter((b: any) => b?.status === 'error').length;
     const processingBatches = batches.filter((b: any) => b?.status === 'processing' || b?.status === 'retrying').length;
 
+    // Coleta erros por shipment do per_shipment_log para entregar ao cliente
+    const perLog = Array.isArray(job.per_shipment_log) ? job.per_shipment_log : [];
+    const errors = perLog
+      .filter((e: any) => e?.status === 'error')
+      .map((e: any) => ({
+        shipment_id: e.shipment_id,
+        reason_code: e.reason_code || 'UNKNOWN',
+        reason_message: e.error || e.reason_message || 'Erro desconhecido',
+      }));
+    const successCount = perLog.filter((e: any) => e?.status === 'ok').length;
+
     return new Response(
       JSON.stringify({
         job_id: job.id,
@@ -105,6 +116,10 @@ serve(async (req) => {
         completed_at: job.job_completed_at,
         file_url: job.file_url,
         zpl_content: job.zpl_content,
+        pdf_base64: job.pdf_base64,
+        success_count: successCount > 0 ? successCount : job.processed_labels,
+        error_count: errors.length,
+        errors,
         download_filename: job.download_filename,
         page_width_mm: job.page_width_mm,
         page_height_mm: job.page_height_mm,
