@@ -216,7 +216,50 @@ export async function fetchZplBatchFromMl(shipmentIds: string[], token: string):
   return { zpl: null, reason_code: 'ML_ZPL_FETCH_TIMEOUT', reason_message: 'Falha ao buscar ZPL após 3 tentativas' };
 }
 
-// Distribuição de blocos ZPL para shipments (mesma lógica do dispatcher legado)
+// ─── Enriquecimento de variação via ML API ──────────────────────────
+// O cache local (meli_order_items_cache) raramente tem variation_attributes populado
+// (legado + sync nem sempre captura). Buscamos /items?attributes=variations on-the-fly
+// para os items únicos do batch e devolvemos um Map (item_id|variation_id) → attrs[].
+//
+// Custo: ~1 fetch por item único (~150ms). Para batch de 5 envios → ≤5 fetches paralelos.
+export async function fetchVariationAttributesMap(
+  pairs: { item_id: string; variation_id: string | null }[],
+  token: string,
+): Promise<Map<string, { name: string; value_name: string }[]>> {
+  const result = new Map<string, { name: string; value_name: string }[]>();
+
+  // Items únicos (uma chamada por item_id, mesmo se houver várias variations)
+  const uniqueItems = [...new Set(pairs.map(p => p.item_id).filter(Boolean))];
+  if (uniqueItems.length === 0) return result;
+
+  await runWithConcurrency(uniqueItems, 4, async (itemId) => {
+    try {
+      const url = `https://api.mercadolibre.com/items/${itemId}?attributes=variations`;
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) {
+        console.warn(`[labeltest-shared] variation fetch ${itemId}: status=${r.status}`);
+        return;
+      }
+      const json = await r.json().catch(() => null);
+      const variations: any[] = json?.variations || [];
+      for (const v of variations) {
+        const vid = v?.id ? String(v.id) : null;
+        const combos: any[] = v?.attribute_combinations || [];
+        const attrs = combos
+          .map((c: any) => ({ name: String(c?.name || c?.id || ''), value_name: String(c?.value_name || c?.value || '') }))
+          .filter(a => a.name && a.value_name);
+        if (attrs.length === 0) continue;
+        // Chave: itemId|variationId (e também itemId| para fallback sem variation)
+        if (vid) result.set(`${itemId}|${vid}`, attrs);
+      }
+    } catch (e: any) {
+      console.warn(`[labeltest-shared] variation fetch ${itemId} error: ${e.message}`);
+    }
+  });
+
+  console.log(`[labeltest-shared] variation enrichment: ${uniqueItems.length} items → ${result.size} variation maps`);
+  return result;
+}
 export function distributeZplBlocks(allBlocks: string[], shipmentIds: string[]): {
   blocksByShipment: Map<string, string[]>;
   rawBySid: Map<string, string>;
