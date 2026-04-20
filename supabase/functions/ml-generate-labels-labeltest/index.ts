@@ -599,7 +599,9 @@ serve(async (req) => {
       //   bloco 0 = etiqueta (recebe cabeçalho quando layout exige)
       //   blocos 1..N = páginas adicionais (DANFE, etc.) — sem cabeçalho.
       // Lista de separação A4 NUNCA chega: pedimos response_type=zpl2.
-      const CHUNK_SIZE = 10;
+      // CHUNK_SIZE=6: lotes ≤6 caem no fast-path (sem merge pdf-lib), economizando CPU.
+      // Lotes maiores ainda processam, mas com menos páginas por chunk → menor pico de memória.
+      const CHUNK_SIZE = 6;
       const sidsForPdf = validIds.filter(sid => zplBlocksByShipment.has(sid));
       const chunks: string[][] = [];
       for (let i = 0; i < sidsForPdf.length; i += CHUNK_SIZE) {
