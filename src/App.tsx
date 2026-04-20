@@ -21,6 +21,7 @@ import { ShippingEligibilityGuard } from "@/components/access/ShippingEligibilit
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoHead } from "@/components/seo/SeoHead";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 // === Eager-loaded routes (critical path) ===
 import Index from "./pages/Index";
@@ -312,6 +313,7 @@ const App = () => {
                 <Route path="*" element={<NotFound />} />
               </Routes>
               </Suspense>
+              </RouteErrorBoundary>
               </ModuleAccessGuard>
               </CookieConsentGate>
               </BrowserRouter>
