@@ -1,69 +1,73 @@
 
 
-## Diagnóstico (do log de produção)
+## Diagnóstico (4 problemas, todos confirmados em log/DB)
 
-```
-2026-04-20T14:09:17Z ERROR CPU Time exceeded   ← lote de 15
-2026-04-20T14:09:07Z [labeltest] chunks_total=3 chunk_size=6 total=15
-```
+### 1) Variação não aparece no cabeçalho
+- 97.385 linhas em `meli_order_items_cache` têm `variation_attributes = NULL` (legado, antes do sync passar a popular).
+- O sync novo **popula corretamente** (`ml-sync-orders` linhas 376-387), mas pedidos antigos não foram retro-preenchidos.
+- O fallback `extractVariationsFromTitle` só pega títulos terminados em `Cor: Azul`, que quase nenhum tem.
 
-**Por que 15 falha no labeltest mas 50 funciona no shipping-labels:**
+### 2) Geração extremamente lenta (≈32s para 15 etiquetas)
+- Log do worker: cada batch leva ~10s. `triggerBatchWorkers` chama os 3 batches **estritamente sequencial** (`await` em série + `sleep(500)` entre cada). Total: 10+10+10+1.5 ≈ 32s.
+- Não é necessário sequencial — Labelary aguenta 2 workers em paralelo (cada worker já roda 2 PNGs concorrentes).
 
-| Módulo | Pipeline | Custo CPU |
-|---|---|---|
-| `shipping-labels` (legado) e `ml-generate-labels-v2` | ML → **PDF pronto** → `copyPages` | baixíssimo |
-| `ml-generate-labels-labeltest` | ML → ZPL → **Labelary PNG** → `embedPng` → `addPage` por bloco → merge | alto (decode PNG + render pdf-lib por página) |
+### 3) Arquivo dividido em 2
+- Job `87b970f9`: 14/15 sucessos (1 falha 429), gerou PDF parcial. Status `parcial` faz `handleGenerationComplete` baixar o PDF.
+- Como o estado se perde ao navegar (problema 4), o usuário gera de novo → recebe segundo PDF com os mesmos. Resultado prático: 2 PDFs.
+- Causa raiz é o problema 4 + ausência de "anti-duplo-disparo" enquanto há job ativo.
 
-O labeltest precisa do Labelary porque é o caminho que normaliza a etiqueta para 100×175mm com cabeçalho customizado. Mas para 15 envios são **30 PNGs decodificados e embutidos no mesmo request** — passa do orçamento de CPU do worker (~2s de CPU time, mesmo com wall clock alto).
+### 4) Perde o arquivo ao mudar de guia (CRÍTICO)
+- Bug confirmado em `useShippingLabelsV2.ts` linhas 282-290:
+  ```
+  if (data.file_url) { handleGenerationComplete(...) }   ← V2 não usa file_url
+  else { finalizeJob(status) }                            ← NÃO baixa o PDF
+  ```
+- V2 grava `pdf_base64` (não `file_url`). Quando o poll é abortado pela navegação e reinicia no remount com job já `concluido`, cai no `else` e perde o download.
+- Confirmado: `meli_print_queue_v2` tem `pdf_base64` populado (2.8MB), `file_url` sempre nulo.
 
-Não dá pra resolver baixando mais o `CHUNK_SIZE`/`CONCURRENCY` — já está em 6/2, abaixar mais só piora throughput sem resolver o pico de CPU acumulado da função inteira.
+## Correção (4 arquivos, sem schema)
 
-ZPL puro (format=zpl) **não tem esse problema** porque pula Labelary e pdf-lib inteiros.
+### A) `useShippingLabelsV2.ts` — fix do recovery (resolve #3 e #4)
+1. No `pollJobUntilDone`, trocar a condição:
+   ```
+   if (isTerminalStatus(status)) {
+     if (data.pdf_base64 || data.zpl_content || data.file_url) {
+       handleGenerationComplete(data, format);
+     } else {
+       finalizeJob(status as any);
+     }
+   }
+   ```
+2. No bloco de recovery on-mount (linhas 183-188), garantir que se `completedData` existir mas o usuário ainda não baixou (ex.: navegou antes do download), refazer o download.
+3. Bloquear botão "Gerar etiquetas" enquanto `hasActiveJob` for true (evita gerar 2 PDFs do mesmo lote — passa `disabled={hasActiveJob}` para o `BulkActionsBarV2` ou ignora o disparo no `mutationFn` se já houver job pendente).
 
-## Correção: processar por chunk em invocações separadas
+### B) `ml-generate-labels-labeltest/index.ts` — paralelismo dos batches (resolve #2)
+- Trocar o loop sequencial em `triggerBatchWorkers` por uma janela de **2 workers concorrentes**, mantendo `sleep(250ms)` entre disparos para não saturar Labelary:
+  ```
+  const CONCURRENT_BATCHES = 2;
+  // pool simples: dispara 2, espera o primeiro terminar, dispara o próximo...
+  ```
+- Resultado esperado para 15 etiquetas: ~16-18s (vs. 32s atual).
+- ZPL continua single-shot (sem mudança).
 
-A mesma técnica que o `ml-generate-labels-v2` usa (batches), porém aproveitando o job `meli_print_queue_v2` que já existe e o poller V2 que já está plugado.
+### C) `_shared/labeltest-render.ts` — variação no cabeçalho (resolve #1)
+- Em `buildProductLines`, quando `item.variation_attributes` for nulo/vazio, **enriquecer on-the-fly** consultando `meli_listings_cache` por `(seller_id, item_id, variation_id)` e extraindo `attribute_combinations`.
+  - Pré-condição: passar um `Map<string, any>` opcional `listingsMap` ou simplesmente um lookup `(item_id, variation_id) → attrs[]` calculado no worker antes de renderizar.
+- No worker (`ml-generate-labels-labeltest-batch/index.ts`), adicionar consulta única em `meli_listings_cache` com os `item_id`+`variation_id` do batch e injetar no `orderItemsMap` antes de chamar `renderChunkToPdf`.
+- Fallback adicional: se ainda não tiver, manter `extractVariationsFromTitle` atual.
 
-### Mudanças
+### D) `ml-generate-labels-labeltest-batch/index.ts` — enriquecimento + idempotência
+1. Carregar variações de `meli_listings_cache` para os items do batch e mesclar em `orderItemsMap[*].variation_attributes` antes de `renderChunkToPdf`.
+2. Garantir que, se o batch já estava `success`, não reprocesse (já tem o guard de `skipped`, ok).
+3. No finalize (último batch), garantir que `pdf_base64` é gravado **antes** de marcar `status=concluido` (já está correto, mas validar a ordem do `update`).
 
-**1. `supabase/functions/ml-generate-labels-labeltest/index.ts`** — vira **dispatcher**:
-- Valida shipments, cria job em `meli_print_queue_v2` com `status='processando'`, `batches=[{idx, sids, status:'pending'}]` (chunks de **5** shipments para PDF; ZPL fica single-shot como hoje).
-- Retorna **imediatamente** `{ job_id, total_labels, total_batches }` sem processar.
-- Dispara assincronamente `EdgeRuntime.waitUntil(processBatches(jobId))` que invoca a próxima função para cada batch sequencialmente.
+## Critérios de aceite
+- Lote de 15 etiquetas: PDF único, 15 etiquetas com variação no cabeçalho (quando o produto tiver), ≤ 20s.
+- Navegar para outra rota durante a geração e voltar: PDF é baixado automaticamente quando concluído (sem regenerar).
+- Tentar clicar "Gerar etiquetas" enquanto há job ativo: botão desabilitado / no-op.
+- `shipping-labels` (V1) e `ml-generate-labels-v2` permanecem intocados.
 
-**2. Nova `supabase/functions/ml-generate-labels-labeltest-batch/index.ts`** — processa **1 batch só**:
-- Recebe `{ job_id, batch_index }`, lê o batch do `meli_print_queue_v2`.
-- Faz fetch ZPL → Labelary → pdf-lib **só desses 5 shipments** (cabe folgado no orçamento de CPU).
-- Salva o PDF do batch como base64 dentro de `batches[idx].pdf_b64` no job, marca `status='success'` e atualiza `processed_labels`.
-- Quando todos os batches terminam, faz o merge final (ainda no worker do último batch ou em finalize separado se passar de 30).
-
-**3. `useShippingLabelsV2.ts`** — adapta o fluxo de geração:
-- A `mutationFn` chama `ml-generate-labels-labeltest`, recebe `job_id` e **delega ao poller V2 já existente** (`pollJobUntilDone`) em vez de esperar a resposta síncrona.
-- O poller já lê `ml-generate-labels-status-v2` e mostra progresso `processed_labels/total_labels` — vai animar batch a batch automaticamente.
-- Ao `status==='completed'`, baixa `pdf_base64` que o `status-v2` já devolve.
-
-**4. `ml-generate-labels-status-v2/index.ts`** — pequeno ajuste:
-- Já retorna `processed_labels`, `total_batches`, `completed_batches`. Só precisa também devolver `file_url`/`pdf_base64` quando `status='concluido'` (já lê esses campos da tabela; só garantir que o finalize grava `file_url` ou um campo `pdf_base64`).
-
-**5. Limites:**
-- Mantém o limite de **30 etiquetas por geração** (regra de negócio).
-- Chunk de 5 → no máximo 6 invocações da função batch, todas dentro do orçamento de CPU.
-
-### Por que não tocar `shipping-labels` nem `ZPL converter`
-Já funcionam (PDF direto da ML, sem Labelary). Mantidos intocados.
-
-### Critérios de aceite
-- Lote de **15** no labeltest → 15 etiquetas no PDF, sem 546 / sem CPU exceeded.
-- Lote de **30** no labeltest → 30 etiquetas no PDF.
-- Barra de progresso no UI evolui (5, 10, 15… processed_labels) durante a geração.
-- Navegar entre rotas no meio da geração e voltar continua funcionando (recovery V2 já cobre).
-- `shipping-labels` e `ml-generate-labels-v2` **não tocados**.
-- `format=zpl` continua single-shot (já não tem o problema).
-
-### Escopo de arquivos
-- Edita: `supabase/functions/ml-generate-labels-labeltest/index.ts`, `supabase/functions/ml-generate-labels-status-v2/index.ts`, `src/hooks/useShippingLabelsV2.ts`.
-- Cria: `supabase/functions/ml-generate-labels-labeltest-batch/index.ts`.
-- Sem schema novo (usa colunas `batches`, `pdf_base64`/`file_url`, `processed_labels` já existentes em `meli_print_queue_v2`; se `pdf_base64` não existir, criamos via migration).
-
-**Lovable plan: Aprova?**
+## Escopo
+- **Edita**: `src/hooks/useShippingLabelsV2.ts`, `supabase/functions/ml-generate-labels-labeltest/index.ts`, `supabase/functions/_shared/labeltest-render.ts`, `supabase/functions/ml-generate-labels-labeltest-batch/index.ts`.
+- **Sem schema novo, sem mexer em V1**.
 
