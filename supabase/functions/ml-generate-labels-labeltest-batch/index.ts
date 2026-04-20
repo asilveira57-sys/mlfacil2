@@ -10,6 +10,7 @@ import {
   LAYOUTS, fetchZplBatchFromMl, validateZpl, splitZplBlocks,
   distributeZplBlocks, renderChunkToPdf, mergeChunkPdfs,
   base64ToUint8, uint8ToBase64, DEFAULT_HEADER_PREFS,
+  fetchVariationAttributesMap,
 } from "../_shared/labeltest-render.ts";
 
 const corsHeaders = {
@@ -102,8 +103,25 @@ serve(async (req) => {
             if (orderIds.length > 0) {
               const { data: orders } = await supabaseAdmin.from('meli_orders_cache').select('order_id, buyer_name, order_comment').eq('seller_id', job.seller_id).in('order_id', orderIds);
               for (const o of (orders || [])) ordersMap.set(o.order_id, o);
-              const { data: items } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, title, title_short, sku, quantity, variation_attributes').eq('seller_id', job.seller_id).in('order_id', orderIds);
-              for (const it of (items || [])) { const arr = orderItemsMap.get(it.order_id) || []; arr.push(it); orderItemsMap.set(it.order_id, arr); }
+              const { data: items } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, item_id, variation_id, title, title_short, sku, quantity, variation_attributes').eq('seller_id', job.seller_id).in('order_id', orderIds);
+
+              // ── Enriquecimento on-the-fly: cache de variation_attributes está vazio
+              // para a maioria dos pedidos. Buscamos /items?attributes=variations da ML
+              // e mesclamos antes de renderizar (corrige variação ausente no cabeçalho).
+              const itemsForEnrich = (items || [])
+                .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
+                .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
+              const variationMap = itemsForEnrich.length > 0
+                ? await fetchVariationAttributesMap(itemsForEnrich, mlAccount.access_token)
+                : new Map<string, { name: string; value_name: string }[]>();
+
+              for (const it of (items || [])) {
+                if (it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0)) {
+                  const enriched = variationMap.get(`${it.item_id}|${it.variation_id}`);
+                  if (enriched && enriched.length > 0) it.variation_attributes = enriched as any;
+                }
+                const arr = orderItemsMap.get(it.order_id) || []; arr.push(it); orderItemsMap.set(it.order_id, arr);
+              }
             }
           }
 
