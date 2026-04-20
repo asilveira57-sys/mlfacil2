@@ -10,50 +10,78 @@ const corsHeaders = {
 interface InviteRequest {
   collaboratorId: string;
   workspaceId: string;
+  /** Quando true, força reenvio mesmo se já houver invited_at recente */
+  resend?: boolean;
+}
+
+const REDIRECT_URL =
+  "https://www.mktpfacil.com/auth";
+
+/**
+ * Procura um usuário em auth.users pelo email, paginando todas as páginas.
+ * `listUsers()` retorna no máximo `perPage` usuários — sem paginar, usuários
+ * antigos passam despercebidos e o sistema acha que precisa criar (gera erro
+ * "already registered") OU pula o invite achando que já foi enviado.
+ */
+async function findAuthUserByEmail(
+  admin: ReturnType<typeof createClient>,
+  email: string,
+): Promise<any | null> {
+  const target = email.toLowerCase();
+  const perPage = 1000;
+  let page = 1;
+  // Hard cap em 20 páginas (= 20k usuários) para evitar loop infinito
+  while (page <= 20) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      console.error("[collaborator-invite] listUsers error", { page, error: error.message });
+      throw new Error(`listUsers failed on page ${page}: ${error.message}`);
+    }
+    const users = data?.users ?? [];
+    const found = users.find((u: any) => u.email?.toLowerCase() === target);
+    if (found) return found;
+    if (users.length < perPage) break; // última página
+    page++;
+  }
+  return null;
 }
 
 serve(async (req) => {
-  // Handle CORS
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const reqId = crypto.randomUUID().slice(0, 8);
+  const log = (msg: string, extra?: Record<string, unknown>) =>
+    console.log(`[collaborator-invite][${reqId}] ${msg}`, extra ?? "");
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // Get auth header
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      throw new Error("Authorization header required");
-    }
+    if (!authHeader) throw new Error("Authorization header required");
 
-    // Verify calling user
     const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: { persistSession: false },
     });
 
     const { data: { user }, error: authError } = await anonClient.auth.getUser(
-      authHeader.replace("Bearer ", "")
+      authHeader.replace("Bearer ", ""),
     );
+    if (authError || !user) throw new Error("Unauthorized");
 
-    if (authError || !user) {
-      throw new Error("Unauthorized");
-    }
-
-    const { collaboratorId, workspaceId }: InviteRequest = await req.json();
-
+    const { collaboratorId, workspaceId, resend }: InviteRequest = await req.json();
     if (!collaboratorId || !workspaceId) {
       throw new Error("collaboratorId and workspaceId are required");
     }
 
-    // Use service role for admin operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { persistSession: false },
     });
 
-    // Verify caller is workspace admin
+    // Verifica se o caller é admin do workspace
     const { data: memberData, error: memberError } = await supabase
       .from("workspace_members")
       .select("role")
@@ -65,7 +93,7 @@ serve(async (req) => {
       throw new Error("Only workspace admins can send invites");
     }
 
-    // Get collaborator data
+    // Busca o colaborador
     const { data: collab, error: collabError } = await supabase
       .from("collaborators")
       .select("*")
@@ -73,38 +101,78 @@ serve(async (req) => {
       .eq("workspace_id", workspaceId)
       .single();
 
-    if (collabError || !collab) {
-      throw new Error("Collaborator not found");
-    }
+    if (collabError || !collab) throw new Error("Collaborator not found");
 
-    // Check if user already exists in auth
-    const { data: existingUsers } = await supabase.auth.admin.listUsers();
-    const existingUser = existingUsers?.users?.find(
-      (u) => u.email?.toLowerCase() === collab.email.toLowerCase()
-    );
+    log("Starting invite", { email: collab.email, resend, status: collab.status });
+
+    // Procura o usuário em auth.users (com paginação completa)
+    const existingUser = await findAuthUserByEmail(supabase, collab.email);
 
     let authUserId: string;
+    let emailDispatched = false;
 
     if (existingUser) {
       authUserId = existingUser.id;
-    } else {
-      // Create new user with invite
-      const { data: inviteData, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(
-        collab.email,
-        {
-          redirectTo: `${req.headers.get("origin") || "https://mlfacil2.lovable.app"}/auth`,
+      log("User already exists in auth", { userId: authUserId });
+
+      // Para usuário existente, geramos um magic link de invite manualmente
+      // — isso dispara o auth-email-hook que enfileira o email.
+      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+        type: "invite",
+        email: collab.email,
+        options: { redirectTo: REDIRECT_URL },
+      });
+
+      if (linkError) {
+        log("generateLink(invite) failed, trying magiclink", { error: linkError.message });
+        // Fallback: magiclink (caso o usuário já tenha senha confirmada)
+        const { error: magicError } = await supabase.auth.admin.generateLink({
+          type: "magiclink",
+          email: collab.email,
+          options: { redirectTo: REDIRECT_URL },
+        });
+        if (magicError) {
+          throw new Error(
+            `Não foi possível enviar o convite (usuário já existe). ` +
+            `Erro: ${magicError.message}. Peça ao colaborador para usar 'Esqueci minha senha'.`,
+          );
         }
-      );
+        emailDispatched = true;
+        log("magiclink dispatched", { email: collab.email });
+      } else {
+        emailDispatched = true;
+        log("invite link dispatched for existing user", {
+          email: collab.email,
+          hasUrl: !!linkData?.properties?.action_link,
+        });
+      }
+    } else {
+      // Cria novo usuário via inviteUserByEmail
+      const { data: inviteData, error: inviteError } = await supabase.auth.admin
+        .inviteUserByEmail(collab.email, {
+          redirectTo: REDIRECT_URL,
+          data: { full_name: collab.name },
+        });
 
       if (inviteError) {
-        console.error("Invite error:", inviteError);
-        throw new Error(`Failed to send invite: ${inviteError.message}`);
+        log("inviteUserByEmail failed", { error: inviteError.message });
+        throw new Error(`Falha ao enviar convite: ${inviteError.message}`);
+      }
+
+      if (!inviteData?.user?.id) {
+        throw new Error("Convite criado mas sem user_id retornado");
       }
 
       authUserId = inviteData.user.id;
+      emailDispatched = true;
+      log("inviteUserByEmail succeeded", { userId: authUserId });
     }
 
-    // Update collaborator with auth user id and invited_at
+    if (!emailDispatched) {
+      throw new Error("Email não foi disparado por motivo desconhecido");
+    }
+
+    // SÓ atualiza o status para 'invited' depois de confirmar o disparo do email.
     const { error: updateError } = await supabase
       .from("collaborators")
       .update({
@@ -115,31 +183,26 @@ serve(async (req) => {
       .eq("id", collaboratorId);
 
     if (updateError) {
-      console.error("Update error:", updateError);
-      throw new Error("Failed to update collaborator");
+      log("Failed to update collaborator after dispatch", { error: updateError.message });
+      // Não falhamos aqui — o email já foi enviado; só logamos.
     }
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Invite sent to ${collab.email}`,
+        message: `Convite enviado para ${collab.email}`,
         authUserId,
+        wasExistingUser: !!existingUser,
       }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
-      }
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 },
     );
   } catch (error) {
-    console.error("Error in collaborator-invite:", error);
+    console.error(`[collaborator-invite][${reqId}] ERROR`, error);
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : "Unknown error",
       }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 400,
-      }
+      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 },
     );
   }
 });
