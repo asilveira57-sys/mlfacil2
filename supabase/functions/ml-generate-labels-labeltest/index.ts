@@ -664,7 +664,8 @@ serve(async (req) => {
           }
         }
 
-        const LABELARY_CONCURRENCY = 3;
+        // Concorrência 2: minimiza pressão de CPU/memória durante decode PNG + pdf-lib.
+        const LABELARY_CONCURRENCY = 2;
         const results = await runWithConcurrency(tasks, LABELARY_CONCURRENCY, (t) =>
           zplToImage(t.zpl, `${t.sid}#${t.bi}`, layout)
         );
