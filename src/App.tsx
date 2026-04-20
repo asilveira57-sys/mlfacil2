@@ -38,35 +38,42 @@ import PublicLayout from "./components/PublicLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
 // === Lazy-loaded routes (heavy modules) ===
+const clearLazyReloadFlag = () => {
+  try { sessionStorage.removeItem('lazy_module_reloaded'); } catch { /* ignore */ }
+};
+
 const lazyRetry = (factory: () => Promise<any>) =>
   lazy(() =>
-    factory().catch(() =>
-      new Promise<any>((resolve, reject) => {
-        // First retry after 1.5s
-        setTimeout(() => {
-          factory()
-            .then(resolve)
-            .catch(() => {
-              // Second retry after another 1.5s
-              setTimeout(() => {
-                factory()
-                  .then(resolve)
-                  .catch((err) => {
-                    // All retries failed — force full page reload once
-                    const reloadKey = 'lazy_reload_' + Date.now();
-                    if (!sessionStorage.getItem('lazy_module_reloaded')) {
-                      sessionStorage.setItem('lazy_module_reloaded', '1');
-                      window.location.reload();
-                    } else {
-                      sessionStorage.removeItem('lazy_module_reloaded');
-                      reject(err);
-                    }
-                  });
-              }, 1500);
-            });
-        }, 1500);
-      }),
-    ),
+    factory()
+      .then((mod) => { clearLazyReloadFlag(); return mod; })
+      .catch(() =>
+        new Promise<any>((resolve, reject) => {
+          // First retry after 1.5s
+          setTimeout(() => {
+            factory()
+              .then((mod) => { clearLazyReloadFlag(); resolve(mod); })
+              .catch(() => {
+                // Second retry after another 1.5s
+                setTimeout(() => {
+                  factory()
+                    .then((mod) => { clearLazyReloadFlag(); resolve(mod); })
+                    .catch((err) => {
+                      // All retries failed — force full page reload once.
+                      // If the flag is already set, propagate the error so the
+                      // RouteErrorBoundary can render a recovery UI (avoids blank screen).
+                      if (!sessionStorage.getItem('lazy_module_reloaded')) {
+                        try { sessionStorage.setItem('lazy_module_reloaded', '1'); } catch { /* ignore */ }
+                        window.location.reload();
+                      } else {
+                        clearLazyReloadFlag();
+                        reject(err);
+                      }
+                    });
+                }, 1500);
+              });
+          }, 1500);
+        }),
+      ),
   );
 
 const ShippingLabels = lazyRetry(() => import("./pages/ShippingLabels"));
