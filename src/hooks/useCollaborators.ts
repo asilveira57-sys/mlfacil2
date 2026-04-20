@@ -111,6 +111,8 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
 
+      // Cria o registro como 'invited' mas SEM invited_at — só vamos marcar
+      // invited_at depois que a edge function confirmar o envio do email.
       const { data: newCollab, error: insertError } = await supabase
         .from('collaborators')
         .insert({
@@ -118,7 +120,6 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
           name: data.name,
           email: data.email.toLowerCase().trim(),
           status: 'invited',
-          invited_at: new Date().toISOString(),
           created_by: user.id,
           profile_id: data.profileId || null,
         })
@@ -138,7 +139,39 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
         status: newCollab.status as CollaboratorStatus,
       };
 
-      toast.success('Colaborador criado com sucesso!');
+      // 🔴 Bug histórico: o invite NUNCA era disparado no cadastro.
+      // Agora chamamos a edge function imediatamente após o insert.
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error('Sessão expirada');
+
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/collaborator-invite`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              collaboratorId: newCollab.id,
+              workspaceId: data.workspaceId,
+            }),
+          }
+        );
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Erro desconhecido');
+
+        toast.success(`Colaborador criado e convite enviado para ${data.email}!`);
+      } catch (inviteErr) {
+        console.error('[createCollaborator] invite dispatch failed:', inviteErr);
+        toast.warning(
+          `Colaborador criado, mas o e-mail de convite falhou. Use o botão "Reenviar convite" na lista. ` +
+          `(${inviteErr instanceof Error ? inviteErr.message : 'erro'})`,
+          { duration: 8000 }
+        );
+      }
+
       await fetchCollaborators();
       return typedCollab;
     } catch (err) {
