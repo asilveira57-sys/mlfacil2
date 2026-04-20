@@ -8768,6 +8768,7 @@ export type Database = {
           page_height_pt: number | null
           page_width_mm: number | null
           page_width_pt: number | null
+          pdf_base64: string | null
           per_shipment_log: Json | null
           processed_labels: number
           seller_id: string
@@ -8797,6 +8798,7 @@ export type Database = {
           page_height_pt?: number | null
           page_width_mm?: number | null
           page_width_pt?: number | null
+          pdf_base64?: string | null
           per_shipment_log?: Json | null
           processed_labels?: number
           seller_id: string
@@ -8826,6 +8828,7 @@ export type Database = {
           page_height_pt?: number | null
           page_width_mm?: number | null
           page_width_pt?: number | null
+          pdf_base64?: string | null
           per_shipment_log?: Json | null
           processed_labels?: number
           seller_id?: string

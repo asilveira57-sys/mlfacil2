@@ -1,0 +1,1 @@
+ALTER TABLE public.meli_print_queue_v2 ADD COLUMN IF NOT EXISTS pdf_base64 text;
