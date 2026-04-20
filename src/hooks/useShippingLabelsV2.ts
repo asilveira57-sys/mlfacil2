@@ -281,7 +281,13 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
 
         if (isTerminalStatus(status)) {
           logRecovery('terminal status', `status=${status}`);
-          if (data.file_url) {
+          // V2 grava pdf_base64 (não file_url). Se houver QUALQUER artefato baixável,
+          // dispara o download — mesmo que o usuário tenha navegado durante a geração.
+          const hasArtifact =
+            (typeof data.pdf_base64 === 'string' && data.pdf_base64.length > 100) ||
+            (typeof data.zpl_content === 'string' && data.zpl_content.length > 10) ||
+            !!data.file_url;
+          if (hasArtifact) {
             handleGenerationComplete(data, format);
           } else {
             finalizeJob(status as any);
@@ -590,6 +596,10 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const generateLabelsMutation = useMutation({
     mutationFn: async ({ format, layout, shipmentId }: { format: 'pdf' | 'zpl'; layout: LabelLayout; shipmentId?: string }) => {
       if (!sellerId) throw new Error('Seller ID not set');
+      // Anti-duplo-disparo: se já existe job em andamento, bloqueia para evitar 2 PDFs do mesmo lote
+      if (hasActiveGenerationJob()) {
+        throw new Error('Já existe uma geração em andamento. Aguarde a conclusão antes de iniciar outra.');
+      }
       const headers = await getAuthHeaders();
       if (!headers) throw new Error('Not authenticated');
       let shipmentIds: string[];
