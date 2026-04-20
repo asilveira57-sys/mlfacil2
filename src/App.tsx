@@ -217,6 +217,7 @@ const App = () => {
               <TrialExpiredPaywall />
               <BillingDataGate />
               <ModuleAccessGuard>
+              <RouteErrorBoundary>
               <Suspense fallback={<LazyFallback />}>
               <Routes>
                 {/* ===== Public routes (no shell, no auth) ===== */}
