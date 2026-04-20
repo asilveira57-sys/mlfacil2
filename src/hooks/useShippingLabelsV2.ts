@@ -660,6 +660,33 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     },
     onSuccess: (data, variables) => {
       if (!variables.shipmentId) setSelectedIds(new Set());
+
+      // ── PDF assíncrono (lote V2): dispatcher só criou o job, workers rodam em background.
+      // Delega ao poller V2 que já existe — ele anima processed_labels/total_labels e baixa
+      // o pdf_base64 quando status='concluido'.
+      if (data?.async_job && data?.job_id) {
+        const job = loadActiveJob();
+        if (job) {
+          job.jobId = data.job_id;
+          saveActiveJob(job);
+          setActiveJobState({ ...job });
+        }
+        setGenerationProgress({
+          status: 'processing',
+          total_labels: data.total_labels || 0,
+          processed_labels: 0,
+          total_batches: data.total_batches || 1,
+          completed_batches: 0,
+          error_batches: 0,
+        });
+        recoveryAbortRef.current?.abort();
+        const abort = new AbortController();
+        recoveryAbortRef.current = abort;
+        pollJobUntilDone(data.job_id, variables.format, abort.signal);
+        return;
+      }
+
+      // ZPL inline (single-shot) ou resposta legada com pdf_base64 imediato
       handleGenerationComplete(data, variables.format);
     },
     onError: (error: any) => {
