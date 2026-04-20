@@ -36,18 +36,19 @@ const REPRINT_SUBSTATUSES = new Set([
   'invoice_issued', 'invoice_validated', 'not_required',
 ]);
 
-// ─── Background trigger: invoca os workers de batch sequencialmente ──
+// ─── Background trigger: invoca os workers de batch com concorrência 2 ──
+// Labelary aguenta 2 workers em paralelo (cada um já roda 2 PNGs concorrentes).
+// Lote de 15 etiquetas (3 batches): ~10s + ~10s = ~20s (vs 32s sequencial).
 async function triggerBatchWorkers(supabaseUrl: string, serviceKey: string, jobId: string, totalBatches: number) {
-  console.log(`[labeltest-dispatcher] triggerBatchWorkers job=${jobId} totalBatches=${totalBatches}`);
-  for (let idx = 0; idx < totalBatches; idx++) {
+  const CONCURRENT_BATCHES = 2;
+  console.log(`[labeltest-dispatcher] triggerBatchWorkers job=${jobId} totalBatches=${totalBatches} concurrency=${CONCURRENT_BATCHES}`);
+
+  const invokeBatch = async (idx: number) => {
+    const t0 = Date.now();
     try {
-      const t0 = Date.now();
       const r = await fetch(`${supabaseUrl}/functions/v1/ml-generate-labels-labeltest-batch`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${serviceKey}`,
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
         body: JSON.stringify({ job_id: jobId, batch_index: idx }),
       });
       const elapsed = Date.now() - t0;
@@ -59,9 +60,24 @@ async function triggerBatchWorkers(supabaseUrl: string, serviceKey: string, jobI
     } catch (e: any) {
       console.error(`[labeltest-dispatcher] batch ${idx} exception: ${e.message}`);
     }
-    // Pequena folga entre batches (rate limit Labelary)
-    await sleep(500);
+  };
+
+  // Pool simples com janela de N concorrentes
+  let cursor = 0;
+  const runners: Promise<void>[] = [];
+  const runnersCount = Math.min(CONCURRENT_BATCHES, totalBatches);
+  for (let i = 0; i < runnersCount; i++) {
+    runners.push((async () => {
+      while (true) {
+        const idx = cursor++;
+        if (idx >= totalBatches) return;
+        await invokeBatch(idx);
+        // Pequena folga entre disparos do mesmo runner (rate limit Labelary)
+        if (cursor < totalBatches) await sleep(250);
+      }
+    })());
   }
+  await Promise.all(runners);
   console.log(`[labeltest-dispatcher] all batches dispatched for job=${jobId}`);
 }
 
