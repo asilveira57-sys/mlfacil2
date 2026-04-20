@@ -260,6 +260,8 @@ export async function fetchVariationAttributesMap(
   console.log(`[labeltest-shared] variation enrichment: ${uniqueItems.length} items → ${result.size} variation maps`);
   return result;
 }
+
+// Distribuição de blocos ZPL para shipments (mesma lógica do dispatcher legado)
 export function distributeZplBlocks(allBlocks: string[], shipmentIds: string[]): {
   blocksByShipment: Map<string, string[]>;
   rawBySid: Map<string, string>;
