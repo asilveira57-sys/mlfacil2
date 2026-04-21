@@ -396,6 +396,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
     refetchOnWindowFocus: false,
+    // REGRA: com job ativo, sem refetch destrutivo (mount/reconnect/focus).
+    refetchOnMount: !hasActiveJobV1,
+    refetchOnReconnect: !hasActiveJobV1,
     placeholderData: (prev: any) => prev,
   });
 
@@ -509,6 +512,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
     enabled: !!sellerId && orders.length > 0,
     staleTime: 60000,
+    refetchOnMount: !hasActiveJobV1,
+    refetchOnReconnect: !hasActiveJobV1,
+    refetchOnWindowFocus: false,
   });
 
   const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();
