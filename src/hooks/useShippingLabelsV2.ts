@@ -46,9 +46,11 @@ function dbg(...args: any[]) {
   }
 }
 
-function logRecovery(tag: string, ...args: any[]) {
-  console.info(`[recovery] ${tag}`, ...args);
-  dbg(`[recovery] ${tag}`, ...args);
+function logRecovery(tag: string, ctx: Record<string, any> = {}) {
+  // Logs estruturados obrigatórios: [recovery:tag] {module, seller_id, job_id, elapsed_ms, ...}
+  const payload = { module: MODULE, ...ctx };
+  console.info(`[recovery:${tag}]`, payload);
+  dbg(`[recovery:${tag}]`, payload);
 }
 
 // ─── localStorage-based active job check (sync, no hooks) ────────────
