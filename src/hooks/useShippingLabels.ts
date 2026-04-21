@@ -1063,14 +1063,18 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       setIsJobGenerating(true);
 
       // Persist active job so it survives navigation
-      saveActiveJob({
-        jobId: 'pending', // will be updated if backend returns job_id
+      const jobEntry: ActivePrintJob = {
+        jobId: 'pending',
         sellerId,
         format,
         layout,
         shipmentIds,
         startedAt: new Date().toISOString(),
-      });
+        module: 'label_shipping',
+      };
+      saveActiveJob(jobEntry);
+      setActiveJobV1State(jobEntry);
+      logRecoveryV1('start', { seller_id: sellerId, shipments: shipmentIds.length, source: 'mutation' });
 
       const response = await supabase.functions.invoke('ml-generate-labels', {
         headers,
@@ -1096,8 +1100,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       return response.data;
     },
     onSuccess: (data, variables) => {
-      // Clear active job
+      logRecoveryV1('clear', { reason: 'mutation-success', seller_id: sellerId ?? 'unknown' });
       clearActiveJob();
+      setActiveJobV1State(null);
+      setIsStalledV1(false);
       setIsJobGenerating(false);
 
       if (!variables.shipmentId) {
@@ -1140,7 +1146,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
     onError: (error) => {
       console.error('Generate labels error:', error);
+      logRecoveryV1('clear', { reason: 'mutation-error', seller_id: sellerId ?? 'unknown' });
       clearActiveJob();
+      setActiveJobV1State(null);
+      setIsStalledV1(false);
       setIsJobGenerating(false);
       setGenerationProgress(prev => ({
         ...prev,
