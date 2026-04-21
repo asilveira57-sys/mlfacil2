@@ -24,12 +24,15 @@ const PAGE_SIZE = 30;
 const SHIPMENT_SYNC_BATCH = 200;
 const INVOICE_SYNC_BATCH = 300;
 
-/** How long to poll for a "not found" job before giving up (ms) */
-const JOB_RECOVERY_TIMEOUT_MS = 90_000;
+/** How long to poll for a "not found" job before marking stalled (ms).
+ *  REGRA: mínimo 120s — jobs grandes podem demorar a aparecer no status endpoint. */
+const JOB_RECOVERY_TIMEOUT_MS = 120_000;
 /** Polling interval during recovery (ms) */
 const JOB_POLL_INTERVAL_MS = 2_000;
-/** Max consecutive not-found before giving up */
-const MAX_NOT_FOUND_ATTEMPTS = 22;
+/** Max consecutive not-found before marking stalled (60 × 2s = 120s) */
+const MAX_NOT_FOUND_ATTEMPTS = 60;
+/** Module identifier — para logs estruturados [recovery:*] */
+const MODULE = 'label_teste';
 
 const INITIAL_PROGRESS: GenerationProgress = {
   status: 'idle', total_labels: 0, processed_labels: 0,
