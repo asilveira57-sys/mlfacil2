@@ -172,7 +172,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       return;
     }
 
-    logRecovery('start', `jobId=${persisted.jobId}, format=${persisted.format}, shipments=${persisted.shipmentIds.length}`);
+    logRecovery('start', { seller_id: sellerId, job_id: persisted.jobId, format: persisted.format, shipments: persisted.shipmentIds.length });
 
     // Restore UI state
     setActiveJobState(persisted);
@@ -187,7 +187,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
 
     // If we already had completed data cached, use it directly
     if (persisted.completedData) {
-      logRecovery('cached-data', 'Using cached completed data');
+      logRecovery('cached-data', { seller_id: sellerId, job_id: persisted.jobId, msg: 'Using cached completed data' });
       handleGenerationComplete(persisted.completedData, persisted.format);
       return;
     }
@@ -212,7 +212,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     let notFoundCount = 0;
     let attempt = 0;
 
-    logRecovery('poll-start', `jobId=${jobId}`);
+    logRecovery('poll', { phase: 'start', seller_id: sellerId, job_id: jobId });
 
     while (!signal.aborted) {
       await sleep(JOB_POLL_INTERVAL_MS);
@@ -227,15 +227,15 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         const refreshed = loadActiveJob();
         if (refreshed && refreshed.jobId !== 'pending') {
           jobId = refreshed.jobId;
-          logRecovery('pending-resolved', `Real jobId=${jobId}`);
+          logRecovery('poll', { phase: 'pending-resolved', seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
         } else if (elapsed > JOB_RECOVERY_TIMEOUT_MS) {
-          logRecovery('pending-stalled', 'Job ID still pending — marking stalled (user can retry)');
+          logRecovery('terminal', { status: 'stalled', reason: 'pending-timeout', seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
           markActiveJobV2Stalled(true);
           setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
           setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
           return;
         } else {
-          logRecovery('pending-waiting', `attempt ${attempt}, still pending...`);
+          logRecovery('poll', { phase: 'pending-waiting', seller_id: sellerId, attempt, elapsed_ms: elapsed });
           continue;
         }
       }
@@ -254,13 +254,13 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
 
         if (error || !data) {
           notFoundCount++;
-          logRecovery('job not found', `attempt ${notFoundCount}/${MAX_NOT_FOUND_ATTEMPTS}`);
+          logRecovery('not_found', { seller_id: sellerId, job_id: jobId, attempt: notFoundCount, max: MAX_NOT_FOUND_ATTEMPTS, elapsed_ms: elapsed });
 
           // V2: NÃO limpa activeJob no timeout — o job pode existir em meli_print_queue_v2
           // e estar simplesmente lento. Marca como "stalled" e deixa o usuário decidir
           // quando retomar (botão "Retomar verificação" na UI).
           if (notFoundCount >= MAX_NOT_FOUND_ATTEMPTS || elapsed > JOB_RECOVERY_TIMEOUT_MS) {
-            logRecovery('stalled', `notFound=${notFoundCount}, elapsed=${elapsed}ms — keeping activeJob, marking stalled`);
+            logRecovery('terminal', { status: 'stalled', reason: 'not-found-timeout', seller_id: sellerId, job_id: jobId, not_found: notFoundCount, elapsed_ms: elapsed });
             markActiveJobV2Stalled(true);
             setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
             setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
@@ -285,7 +285,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         });
 
         if (isTerminalStatus(status)) {
-          logRecovery('terminal status', `status=${status}`);
+          logRecovery('terminal', { status, seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
           // V2 grava pdf_base64 (não file_url). Se houver QUALQUER artefato baixável,
           // dispara o download — mesmo que o usuário tenha navegado durante a geração.
           const hasArtifact =
@@ -300,7 +300,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           return;
         }
 
-        logRecovery('keep active job', `status=${status}`);
+        logRecovery('poll', { phase: 'in-progress', seller_id: sellerId, job_id: jobId, status, processed: data.processed_labels, total: data.total_labels });
       } catch (err) {
         console.error('[V2] Poll error:', err);
         dbg('[poll] transient error, continuing...', err);
@@ -313,7 +313,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     const labelCount = data.success_count ?? data.total_success ?? data.total_labels ?? 0;
     const errorCount = data.error_count ?? data.error_batches ?? 0;
     const errors: Array<{ shipment_id: string; reason_code: string; reason_message: string }> = data.errors || data.validation_errors || [];
-    logRecovery('complete', `labels=${labelCount}, errors=${errorCount}`);
+    logRecovery('clear', { reason: 'complete', seller_id: sellerId, labels: labelCount, errors: errorCount });
 
     setActiveJobState(null);
     clearActiveJob();
@@ -377,7 +377,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   }
 
   function finalizeJob(status: 'completed' | 'partial' | 'error' | string) {
-    logRecovery('finalize', `status=${status}`);
+    logRecovery('clear', { reason: 'finalize', seller_id: sellerId, status });
 
     setActiveJobState(null);
     clearActiveJob();
@@ -734,7 +734,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const resumeStalledRecovery = useCallback(() => {
     const job = loadActiveJob();
     if (!job) return;
-    logRecovery('resume-stalled', `jobId=${job.jobId}`);
+    logRecovery('poll', { phase: 'resume-stalled', seller_id: sellerId, job_id: job.jobId });
     markActiveJobV2Stalled(false);
     setActiveJobState({ ...job, stalled: false });
     setGenerationProgress(prev => ({ ...prev, status: 'processing' }));
@@ -745,7 +745,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   }, []);
 
   const cancelStalledRecovery = useCallback(() => {
-    logRecovery('cancel-stalled', 'user discarded recovery');
+    logRecovery('clear', { reason: 'user-cancel', seller_id: sellerId });
     recoveryAbortRef.current?.abort();
     setActiveJobState(null);
     clearActiveJob();
