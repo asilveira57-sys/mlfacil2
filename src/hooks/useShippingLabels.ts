@@ -12,8 +12,32 @@ import {
   saveActiveJob,
   loadActiveJob,
   clearActiveJob,
+  markActiveJobStalled,
   type ShippingFiltersState,
+  type ActivePrintJob,
 } from '@/lib/shippingLabelsSession';
+
+// ─── Recovery constants (V1 / label-shipping) ────────────────────────
+/** Mínimo 120s antes de marcar stalled — REGRA. */
+const V1_RECOVERY_TIMEOUT_MS = 120_000;
+const V1_POLL_INTERVAL_MS = 2_000;
+const V1_MAX_NOT_FOUND_ATTEMPTS = 60; // 60 × 2s = 120s
+const MODULE_V1 = 'label_shipping';
+
+function logRecoveryV1(tag: string, ctx: Record<string, any> = {}) {
+  // Logs estruturados: [recovery:tag] {module, seller_id, job_id, elapsed_ms, ...}
+  console.info(`[recovery:${tag}]`, { module: MODULE_V1, ...ctx });
+}
+
+/** Status terminais confirmados — só esses limpam o job. */
+function isV1Terminal(status: string): boolean {
+  return ['completed', 'partial', 'error', 'failed', 'cancelled'].includes(status);
+}
+
+/** Existe job ativo no localStorage? Lido sincronamente para inicialização de hooks. */
+function hasV1ActiveJob(): boolean {
+  return !!loadActiveJob();
+}
 
 /** Check if edge function response indicates trial expired (402) */
 function isTrialExpiredResponse(response: { data?: any; error?: any }): boolean {
