@@ -12,8 +12,32 @@ import {
   saveActiveJob,
   loadActiveJob,
   clearActiveJob,
+  markActiveJobStalled,
   type ShippingFiltersState,
+  type ActivePrintJob,
 } from '@/lib/shippingLabelsSession';
+
+// ─── Recovery constants (V1 / label-shipping) ────────────────────────
+/** Mínimo 120s antes de marcar stalled — REGRA. */
+const V1_RECOVERY_TIMEOUT_MS = 120_000;
+const V1_POLL_INTERVAL_MS = 2_000;
+const V1_MAX_NOT_FOUND_ATTEMPTS = 60; // 60 × 2s = 120s
+const MODULE_V1 = 'label_shipping';
+
+function logRecoveryV1(tag: string, ctx: Record<string, any> = {}) {
+  // Logs estruturados: [recovery:tag] {module, seller_id, job_id, elapsed_ms, ...}
+  console.info(`[recovery:${tag}]`, { module: MODULE_V1, ...ctx });
+}
+
+/** Status terminais confirmados — só esses limpam o job. */
+function isV1Terminal(status: string): boolean {
+  return ['completed', 'partial', 'error', 'failed', 'cancelled'].includes(status);
+}
+
+/** Existe job ativo no localStorage? Lido sincronamente para inicialização de hooks. */
+function hasV1ActiveJob(): boolean {
+  return !!loadActiveJob();
+}
 
 /** Check if edge function response indicates trial expired (402) */
 function isTrialExpiredResponse(response: { data?: any; error?: any }): boolean {
@@ -230,6 +254,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(INITIAL_GENERATION_PROGRESS);
   const [isJobGenerating, setIsJobGenerating] = useState(false);
+  // Estado reativo do job ativo (V1) — espelha localStorage para que useQuery
+  // possa decidir refetchOnMount/Reconnect de forma estável (REGRA: nunca
+  // refazer fetch destrutivo enquanto há geração em curso).
+  const [activeJobV1State, setActiveJobV1State] = useState<ActivePrintJob | null>(() => {
+    const persisted = loadActiveJob();
+    return persisted ?? null;
+  });
+  const hasActiveJobV1 = !!activeJobV1State;
+  const [isStalledV1, setIsStalledV1] = useState<boolean>(() => !!loadActiveJob()?.stalled);
   const [diagnosticInfo, setDiagnosticInfo] = useState<DiagnosticInfo>({
     lastOrderDate: null,
     missingShipments30d: 0,
@@ -363,6 +396,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
     refetchOnWindowFocus: false,
+    // REGRA: com job ativo, sem refetch destrutivo (mount/reconnect/focus).
+    refetchOnMount: !hasActiveJobV1,
+    refetchOnReconnect: !hasActiveJobV1,
     placeholderData: (prev: any) => prev,
   });
 
@@ -476,6 +512,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
     enabled: !!sellerId && orders.length > 0,
     staleTime: 60000,
+    refetchOnMount: !hasActiveJobV1,
+    refetchOnReconnect: !hasActiveJobV1,
+    refetchOnWindowFocus: false,
   });
 
   const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();
@@ -564,6 +603,12 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // Core sync pipeline - silent mode available
   const startSyncPipeline = useCallback(async (silent = false) => {
+    // REGRA: nunca disparar sync com job ativo — sync mexe em cache que invalida
+    // queries da listagem e pode quebrar o estado em tela.
+    if (hasV1ActiveJob()) {
+      if (!silent) console.info('[V1] Sync skipped — active generation job in progress');
+      return;
+    }
     const now = Date.now();
     if (isSyncing || (now - lastSyncTimeRef.current) < 5000) {
       console.log('Sync skipped: already syncing or debounced');
@@ -1018,14 +1063,18 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       setIsJobGenerating(true);
 
       // Persist active job so it survives navigation
-      saveActiveJob({
-        jobId: 'pending', // will be updated if backend returns job_id
+      const jobEntry: ActivePrintJob = {
+        jobId: 'pending',
         sellerId,
         format,
         layout,
         shipmentIds,
         startedAt: new Date().toISOString(),
-      });
+        module: 'label_shipping',
+      };
+      saveActiveJob(jobEntry);
+      setActiveJobV1State(jobEntry);
+      logRecoveryV1('start', { seller_id: sellerId, shipments: shipmentIds.length, source: 'mutation' });
 
       const response = await supabase.functions.invoke('ml-generate-labels', {
         headers,
@@ -1051,8 +1100,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       return response.data;
     },
     onSuccess: (data, variables) => {
-      // Clear active job
+      logRecoveryV1('clear', { reason: 'mutation-success', seller_id: sellerId ?? 'unknown' });
       clearActiveJob();
+      setActiveJobV1State(null);
+      setIsStalledV1(false);
       setIsJobGenerating(false);
 
       if (!variables.shipmentId) {
@@ -1095,7 +1146,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
     onError: (error) => {
       console.error('Generate labels error:', error);
+      logRecoveryV1('clear', { reason: 'mutation-error', seller_id: sellerId ?? 'unknown' });
       clearActiveJob();
+      setActiveJobV1State(null);
+      setIsStalledV1(false);
       setIsJobGenerating(false);
       setGenerationProgress(prev => ({
         ...prev,
@@ -1114,129 +1168,221 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
   });
 
-  // Recover active job on mount (survives navigation)
+  // ─── Recovery resiliente V1 (label-shipping) ──────────────────────
+  // Regras: nunca limpa por not_found imediato; só limpa em status terminal
+  // confirmado (completed|partial|error|failed|cancelled); timeout mínimo 120s
+  // antes de marcar stalled (mantém activeJob preservado).
   useEffect(() => {
     if (!sellerId || jobPollingRef.current) return;
     const activeJob = loadActiveJob();
     if (!activeJob || activeJob.sellerId !== sellerId) return;
-    // If there's a pending job marker, it means the mutation was in-flight
-    // when the user navigated away. Show a processing indicator.
-    if (activeJob.jobId === 'pending') {
-      // The mutation call was interrupted - show recovery state briefly then clear
+
+    jobPollingRef.current = true;
+    const startedAt = Date.now();
+    let aborted = false;
+    logRecoveryV1('start', {
+      seller_id: sellerId,
+      job_id: activeJob.jobId,
+      shipments: activeJob.shipmentIds.length,
+      stalled: !!activeJob.stalled,
+    });
+
+    // Restaura UI "processando" imediatamente (não espera primeiro poll).
+    setActiveJobV1State(activeJob);
+    setIsStalledV1(!!activeJob.stalled);
+    setGenerationProgress({
+      status: 'processing',
+      total_labels: activeJob.shipmentIds.length,
+      processed_labels: 0,
+      total_batches: Math.ceil(activeJob.shipmentIds.length / 50),
+      completed_batches: 0,
+      error_batches: 0,
+    });
+    setIsJobGenerating(true);
+
+    const finishWithDownload = async (job: any) => {
+      const batches = (job.batches || []) as unknown as BatchInfo[];
+      const completedBatches = batches.filter(b => b.status === 'success').length;
+      const errorBatches = batches.filter(b => b.status === 'error').length;
       setGenerationProgress({
-        status: 'processing',
-        total_labels: activeJob.shipmentIds.length,
-        processed_labels: 0,
-        total_batches: Math.ceil(activeJob.shipmentIds.length / 50),
-        completed_batches: 0,
-        error_batches: 0,
+        status: job.status as any,
+        total_labels: job.total_labels || 0,
+        processed_labels: job.processed_labels || 0,
+        total_batches: batches.length || 1,
+        completed_batches: completedBatches,
+        error_batches: errorBatches,
       });
-      setIsJobGenerating(true);
-      jobPollingRef.current = true;
-
-      // Poll meli_print_queue for the most recent job for this seller
-      const pollForJob = async () => {
+      if ((job.status === 'completed' || job.status === 'partial') && job.file_url) {
         try {
-          const { data: recentJob } = await supabase
-            .from('meli_print_queue')
-            .select('id, status, total_labels, processed_labels, batches, file_url, zpl_content, error_log')
-            .eq('seller_id', sellerId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+          const resp = await fetch(job.file_url);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `etiquetas_${Date.now()}.${activeJob.format === 'zpl' ? 'zpl' : 'pdf'}`;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast({ title: 'Etiquetas recuperadas!', description: `${job.total_labels} etiqueta(s)` });
+          }
+        } catch (e) {
+          console.error('Failed to download recovered labels:', e);
+        }
+      }
+      logRecoveryV1('clear', {
+        reason: 'terminal',
+        seller_id: sellerId,
+        job_id: job.id,
+        status: job.status,
+        elapsed_ms: Date.now() - startedAt,
+      });
+      clearActiveJob();
+      setActiveJobV1State(null);
+      setIsStalledV1(false);
+      setIsJobGenerating(false);
+      setTimeout(() => setGenerationProgress(INITIAL_GENERATION_PROGRESS), 3000);
+    };
 
-          if (!recentJob) {
-            // No job found - the call may have failed silently
-            clearActiveJob();
-            setIsJobGenerating(false);
-            setGenerationProgress(INITIAL_GENERATION_PROGRESS);
+    const pollLoop = async () => {
+      let notFoundCount = 0;
+      let attempt = 0;
+      let resolvedJobId: string | null =
+        activeJob.jobId && activeJob.jobId !== 'pending' ? activeJob.jobId : null;
+
+      while (!aborted) {
+        attempt++;
+        const elapsed = Date.now() - startedAt;
+        try {
+          // Localiza job real: por id se já temos, senão pega o mais recente do seller.
+          let job: any = null;
+          if (resolvedJobId) {
+            const { data } = await supabase
+              .from('meli_print_queue')
+              .select('id, status, total_labels, processed_labels, batches, file_url, zpl_content, error_log')
+              .eq('id', resolvedJobId)
+              .maybeSingle();
+            job = data;
+          } else {
+            const { data } = await supabase
+              .from('meli_print_queue')
+              .select('id, status, total_labels, processed_labels, batches, file_url, zpl_content, error_log')
+              .eq('seller_id', sellerId)
+              .gte('created_at', activeJob.startedAt)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            job = data;
+            if (job?.id) {
+              resolvedJobId = job.id;
+              logRecoveryV1('poll', {
+                phase: 'pending-resolved',
+                seller_id: sellerId,
+                job_id: resolvedJobId,
+                elapsed_ms: elapsed,
+              });
+            }
+          }
+
+          if (!job) {
+            notFoundCount++;
+            logRecoveryV1('not_found', {
+              seller_id: sellerId,
+              job_id: resolvedJobId ?? 'pending',
+              attempt: notFoundCount,
+              max: V1_MAX_NOT_FOUND_ATTEMPTS,
+              elapsed_ms: elapsed,
+            });
+            // REGRA: NUNCA limpar no not_found imediato. Marca stalled após 120s.
+            if (notFoundCount >= V1_MAX_NOT_FOUND_ATTEMPTS || elapsed >= V1_RECOVERY_TIMEOUT_MS) {
+              logRecoveryV1('terminal', {
+                status: 'stalled',
+                reason: 'not-found-timeout',
+                seller_id: sellerId,
+                job_id: resolvedJobId ?? 'pending',
+                elapsed_ms: elapsed,
+              });
+              markActiveJobStalled(true);
+              setIsStalledV1(true);
+              setActiveJobV1State(prev => (prev ? { ...prev, stalled: true } : prev));
+              jobPollingRef.current = false;
+              return;
+            }
+            await sleep(V1_POLL_INTERVAL_MS);
+            continue;
+          }
+
+          // Job encontrado — reset not_found
+          notFoundCount = 0;
+
+          if (isV1Terminal(job.status)) {
+            logRecoveryV1('terminal', {
+              status: job.status,
+              seller_id: sellerId,
+              job_id: job.id,
+              elapsed_ms: elapsed,
+            });
+            await finishWithDownload(job);
             jobPollingRef.current = false;
             return;
           }
 
-          // Poll until complete
-          let attempts = 0;
-          const maxAttempts = 60; // 2 min max
-          while (attempts < maxAttempts) {
-            const { data: job } = await supabase
-              .from('meli_print_queue')
-              .select('id, status, total_labels, processed_labels, batches, file_url, zpl_content, error_log')
-              .eq('id', recentJob.id)
-              .single();
-
-            if (!job) break;
-
-            const batches = (job.batches || []) as unknown as BatchInfo[];
-            const completedBatches = batches.filter(b => b.status === 'success').length;
-            const errorBatches = batches.filter(b => b.status === 'error').length;
-
-            if (job.status === 'completed' || job.status === 'partial' || job.status === 'error') {
-              setGenerationProgress({
-                status: job.status as any,
-                total_labels: job.total_labels || 0,
-                processed_labels: job.processed_labels || 0,
-                total_batches: batches.length,
-                completed_batches: completedBatches,
-                error_batches: errorBatches,
-              });
-
-              // If completed successfully, trigger download via file_url or zpl_content
-              if ((job.status === 'completed' || job.status === 'partial') && job.file_url) {
-                // Download from storage URL
-                try {
-                  const resp = await fetch(job.file_url);
-                  if (resp.ok) {
-                    const blob = await resp.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `etiquetas_${new Date().getTime()}.${activeJob.format === 'zpl' ? 'zpl' : 'pdf'}`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    toast({ title: 'Etiquetas recuperadas!', description: `${job.total_labels} etiqueta(s)` });
-                  }
-                } catch (e) {
-                  console.error('Failed to download recovered labels:', e);
-                }
-              }
-
-              clearActiveJob();
-              setIsJobGenerating(false);
-              setTimeout(() => setGenerationProgress(INITIAL_GENERATION_PROGRESS), 3000);
-              break;
-            }
-
-            // Still processing - update progress
-            setGenerationProgress({
-              status: 'processing',
-              total_labels: job.total_labels || 0,
-              processed_labels: job.processed_labels || 0,
-              total_batches: batches.length,
-              completed_batches: completedBatches,
-              error_batches: errorBatches,
-            });
-
-            await sleep(2000);
-            attempts++;
-          }
-
-          if (attempts >= maxAttempts) {
-            clearActiveJob();
-            setIsJobGenerating(false);
-            setGenerationProgress(INITIAL_GENERATION_PROGRESS);
-          }
+          // Em progresso — atualiza UI sem destruir nada.
+          const batches = (job.batches || []) as unknown as BatchInfo[];
+          setGenerationProgress({
+            status: 'processing',
+            total_labels: job.total_labels || 0,
+            processed_labels: job.processed_labels || 0,
+            total_batches: batches.length || 1,
+            completed_batches: batches.filter(b => b.status === 'success').length,
+            error_batches: batches.filter(b => b.status === 'error').length,
+          });
+          logRecoveryV1('poll', {
+            phase: 'in-progress',
+            seller_id: sellerId,
+            job_id: job.id,
+            status: job.status,
+            processed: job.processed_labels,
+            total: job.total_labels,
+            elapsed_ms: elapsed,
+          });
+          await sleep(V1_POLL_INTERVAL_MS);
         } catch (e) {
-          console.error('Job recovery error:', e);
-          clearActiveJob();
-          setIsJobGenerating(false);
-          setGenerationProgress(INITIAL_GENERATION_PROGRESS);
+          console.error('[V1] poll transient error', e);
+          await sleep(V1_POLL_INTERVAL_MS);
         }
-        jobPollingRef.current = false;
-      };
+      }
+    };
 
-      pollForJob();
-    }
+    pollLoop();
+    return () => {
+      aborted = true;
+      jobPollingRef.current = false;
+    };
   }, [sellerId, toast]);
+
+  // Retomar verificação manual após estado stalled (V1).
+  const resumeStalledRecoveryV1 = useCallback(() => {
+    const job = loadActiveJob();
+    if (!job) return;
+    logRecoveryV1('poll', { phase: 'resume-stalled', seller_id: job.sellerId, job_id: job.jobId });
+    markActiveJobStalled(false);
+    setIsStalledV1(false);
+    setActiveJobV1State({ ...job, stalled: false });
+    // Força re-mount do effect de recovery alterando ref
+    jobPollingRef.current = false;
+    // Trigger via leve mudança de estado
+    setIsJobGenerating(true);
+  }, []);
+
+  const cancelStalledRecoveryV1 = useCallback(() => {
+    logRecoveryV1('clear', { reason: 'user-cancel', seller_id: sellerId ?? 'unknown' });
+    clearActiveJob();
+    setActiveJobV1State(null);
+    setIsStalledV1(false);
+    setIsJobGenerating(false);
+    setGenerationProgress(INITIAL_GENERATION_PROGRESS);
+  }, [sellerId]);
+
 
 
   // Selection helpers
@@ -1278,7 +1424,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // === SILENT AUTO-REFRESH: Update shipment statuses every 5 minutes ===
   const refreshShipmentStatuses = useCallback(async () => {
-    if (!sellerId || isSyncing || isJobGenerating || generateLabelsMutation.isPending) return;
+    // Bloqueia auto-refresh com job ativo (regra: sem refetch destrutivo).
+    if (!sellerId || isSyncing || isJobGenerating || hasV1ActiveJob() || generateLabelsMutation.isPending) return;
 
     try {
       // Query only active shipments (status that can change) from local DB
@@ -1311,7 +1458,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   // The server-side cron (shipping-labels-sync) handles the heavy sync now
   useEffect(() => {
     if (!sellerId || hasAutoSyncedRef.current) return;
-    
+    // Bloqueia auto-sync inicial se há job ativo recuperado.
+    if (hasV1ActiveJob()) return;
+
     hasAutoSyncedRef.current = true;
     
     const checkLastSync = async () => {
@@ -1398,9 +1547,13 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     lastSyncAt,
     statusCounts,
     generateLabels: generateLabelsMutation.mutate,
-    isGenerating: generateLabelsMutation.isPending || isJobGenerating,
+    isGenerating: generateLabelsMutation.isPending || isJobGenerating || hasActiveJobV1,
     generationProgress,
     orderItems,
     diagnosticInfo,
+    // Stalled recovery API (V1)
+    isStalled: isStalledV1,
+    resumeStalledRecovery: resumeStalledRecoveryV1,
+    cancelStalledRecovery: cancelStalledRecoveryV1,
   };
 }
