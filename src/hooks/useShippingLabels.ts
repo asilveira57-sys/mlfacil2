@@ -254,6 +254,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(INITIAL_GENERATION_PROGRESS);
   const [isJobGenerating, setIsJobGenerating] = useState(false);
+  // Estado reativo do job ativo (V1) — espelha localStorage para que useQuery
+  // possa decidir refetchOnMount/Reconnect de forma estável (REGRA: nunca
+  // refazer fetch destrutivo enquanto há geração em curso).
+  const [activeJobV1State, setActiveJobV1State] = useState<ActivePrintJob | null>(() => {
+    const persisted = loadActiveJob();
+    return persisted ?? null;
+  });
+  const hasActiveJobV1 = !!activeJobV1State;
+  const [isStalledV1, setIsStalledV1] = useState<boolean>(() => !!loadActiveJob()?.stalled);
   const [diagnosticInfo, setDiagnosticInfo] = useState<DiagnosticInfo>({
     lastOrderDate: null,
     missingShipments30d: 0,
