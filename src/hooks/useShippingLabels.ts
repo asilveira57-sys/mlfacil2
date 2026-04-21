@@ -603,6 +603,12 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // Core sync pipeline - silent mode available
   const startSyncPipeline = useCallback(async (silent = false) => {
+    // REGRA: nunca disparar sync com job ativo — sync mexe em cache que invalida
+    // queries da listagem e pode quebrar o estado em tela.
+    if (hasV1ActiveJob()) {
+      if (!silent) console.info('[V1] Sync skipped — active generation job in progress');
+      return;
+    }
     const now = Date.now();
     if (isSyncing || (now - lastSyncTimeRef.current) < 5000) {
       console.log('Sync skipped: already syncing or debounced');
@@ -1317,7 +1323,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // === SILENT AUTO-REFRESH: Update shipment statuses every 5 minutes ===
   const refreshShipmentStatuses = useCallback(async () => {
-    if (!sellerId || isSyncing || isJobGenerating || generateLabelsMutation.isPending) return;
+    // Bloqueia auto-refresh com job ativo (regra: sem refetch destrutivo).
+    if (!sellerId || isSyncing || isJobGenerating || hasV1ActiveJob() || generateLabelsMutation.isPending) return;
 
     try {
       // Query only active shipments (status that can change) from local DB
@@ -1350,7 +1357,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   // The server-side cron (shipping-labels-sync) handles the heavy sync now
   useEffect(() => {
     if (!sellerId || hasAutoSyncedRef.current) return;
-    
+    // Bloqueia auto-sync inicial se há job ativo recuperado.
+    if (hasV1ActiveJob()) return;
+
     hasAutoSyncedRef.current = true;
     
     const checkLastSync = async () => {
