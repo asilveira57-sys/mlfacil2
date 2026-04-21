@@ -1547,9 +1547,13 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     lastSyncAt,
     statusCounts,
     generateLabels: generateLabelsMutation.mutate,
-    isGenerating: generateLabelsMutation.isPending || isJobGenerating,
+    isGenerating: generateLabelsMutation.isPending || isJobGenerating || hasActiveJobV1,
     generationProgress,
     orderItems,
     diagnosticInfo,
+    // Stalled recovery API (V1)
+    isStalled: isStalledV1,
+    resumeStalledRecovery: resumeStalledRecoveryV1,
+    cancelStalledRecovery: cancelStalledRecoveryV1,
   };
 }
