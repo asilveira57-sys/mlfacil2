@@ -261,8 +261,18 @@ export async function fetchVariationAttributesMap(
   return result;
 }
 
-// Distribuição de blocos ZPL para shipments (mesma lógica do dispatcher legado)
-export function distributeZplBlocks(allBlocks: string[], shipmentIds: string[]): {
+// Distribuição de blocos ZPL para shipments — Flex-aware.
+// Regras:
+//   - Coleta (xd_drop_off, cross_docking, etc.): ML devolve 2 blocos (etiqueta + DANFE).
+//   - Flex (self_service): ML devolve 1 bloco (só etiqueta, sem DANFE).
+//   - Layout sem DANFE (`includeDanfe = false`): aceitamos 1 bloco por shipment (descarta excedente).
+// Quando `flexShipmentIds` é fornecido, distribuímos sequencialmente respeitando o
+// "tamanho esperado" de cada shipment (1 para Flex, 2 para Coleta).
+export function distributeZplBlocks(
+  allBlocks: string[],
+  shipmentIds: string[],
+  opts?: { flexShipmentIds?: Set<string>; includeDanfe?: boolean },
+): {
   blocksByShipment: Map<string, string[]>;
   rawBySid: Map<string, string>;
   errors: { shipment_id: string; reason_code: string; reason_message: string }[];
@@ -270,26 +280,77 @@ export function distributeZplBlocks(allBlocks: string[], shipmentIds: string[]):
   const blocksByShipment = new Map<string, string[]>();
   const rawBySid = new Map<string, string>();
   const errors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
+  const flexSet = opts?.flexShipmentIds || new Set<string>();
+  const includeDanfe = opts?.includeDanfe !== false; // default true (compat legado)
 
   if (allBlocks.length === 0) {
     for (const sid of shipmentIds) errors.push({ shipment_id: sid, reason_code: 'ZPL_NO_BLOCKS', reason_message: 'ZPL retornado não contém blocos ^XA...^XZ' });
     return { blocksByShipment, rawBySid, errors };
   }
+
+  // Tamanho esperado por shipment:
+  //   Flex            → 1 bloco
+  //   Coleta + DANFE  → 2 blocos
+  //   Coleta sem NF / layout sem DANFE → 1 bloco (ML pode mandar só etiqueta, ou descartamos o 2º)
+  const expected = shipmentIds.map(sid => {
+    if (flexSet.has(sid)) return 1;
+    return includeDanfe ? 2 : 1;
+  });
+  const expectedTotal = expected.reduce((a, b) => a + b, 0);
+
+  // Caso A: bate exatamente com o que ML mandou — distribui sequencialmente.
+  if (allBlocks.length === expectedTotal) {
+    let cursor = 0;
+    for (let i = 0; i < shipmentIds.length; i++) {
+      const sid = shipmentIds[i];
+      const take = expected[i];
+      const blocks = allBlocks.slice(cursor, cursor + take);
+      cursor += take;
+      if (blocks.length === 0) { errors.push({ shipment_id: sid, reason_code: 'ZPL_NO_BLOCKS', reason_message: 'ML não retornou blocos para este envio' }); continue; }
+      blocksByShipment.set(sid, blocks); rawBySid.set(sid, blocks.join('\n'));
+    }
+    return { blocksByShipment, rawBySid, errors };
+  }
+
+  // Caso B: ML mandou 1 bloco por shipment para todos (ex.: tudo Flex, ou layout sem DANFE).
+  if (allBlocks.length === shipmentIds.length) {
+    for (let i = 0; i < shipmentIds.length; i++) {
+      const sid = shipmentIds[i];
+      const blocks = [allBlocks[i]];
+      blocksByShipment.set(sid, blocks); rawBySid.set(sid, blocks.join('\n'));
+      // Sinaliza apenas como log informativo: Coleta com DANFE solicitado mas ML mandou 1 bloco
+      if (!flexSet.has(sid) && includeDanfe) {
+        errors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — etiqueta gerada sem DANFE' });
+      }
+    }
+    return { blocksByShipment, rawBySid, errors };
+  }
+
+  // Caso C: ML mandou 2 blocos por shipment (ignora flexSet, comportamento legado).
   if (allBlocks.length % shipmentIds.length === 0) {
     const blocksPerShipment = allBlocks.length / shipmentIds.length;
     for (let i = 0; i < shipmentIds.length; i++) {
       const sid = shipmentIds[i];
       const blocks = allBlocks.slice(i * blocksPerShipment, (i + 1) * blocksPerShipment);
-      if (blocks.length < 2) { errors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — tente novamente em alguns minutos' }); continue; }
-      blocksByShipment.set(sid, blocks); rawBySid.set(sid, blocks.join('\n'));
+      // Para Flex, só nos interessa o 1º bloco (etiqueta) — DANFE não se aplica
+      const finalBlocks = flexSet.has(sid) ? [blocks[0]] : (includeDanfe ? blocks : [blocks[0]]);
+      blocksByShipment.set(sid, finalBlocks); rawBySid.set(sid, finalBlocks.join('\n'));
     }
-  } else {
-    const pairs = Math.floor(allBlocks.length / 2);
-    const shipmentsCovered = Math.min(pairs, shipmentIds.length);
-    for (let i = 0; i < shipmentIds.length; i++) {
-      const sid = shipmentIds[i];
-      if (i < shipmentsCovered) { const blocks = allBlocks.slice(i * 2, (i + 1) * 2); blocksByShipment.set(sid, blocks); rawBySid.set(sid, blocks.join('\n')); }
-      else errors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — tente novamente em alguns minutos' });
+    return { blocksByShipment, rawBySid, errors };
+  }
+
+  // Caso D: distribuição ambígua — best-effort: tenta consumir conforme expected,
+  // restantes são marcados como erro.
+  let cursor = 0;
+  for (let i = 0; i < shipmentIds.length; i++) {
+    const sid = shipmentIds[i];
+    const take = Math.min(expected[i], allBlocks.length - cursor);
+    if (take <= 0) { errors.push({ shipment_id: sid, reason_code: 'ZPL_NO_BLOCKS', reason_message: 'ML não retornou blocos suficientes' }); continue; }
+    const blocks = allBlocks.slice(cursor, cursor + take);
+    cursor += take;
+    blocksByShipment.set(sid, blocks); rawBySid.set(sid, blocks.join('\n'));
+    if (!flexSet.has(sid) && includeDanfe && blocks.length < 2) {
+      errors.push({ shipment_id: sid, reason_code: 'DANFE_MISSING', reason_message: 'Nota fiscal indisponível na ML — etiqueta gerada sem DANFE' });
     }
   }
   return { blocksByShipment, rawBySid, errors };
@@ -413,7 +474,9 @@ export async function renderChunkToPdf(input: RenderChunkInput): Promise<RenderC
     const entry = tmpBySid.get(sid); if (!entry) continue;
     const imgs = entry.imgs.filter((x): x is Uint8Array => x !== null);
     const blocksTotal = zplBlocksByShipment.get(sid)!.length;
-    if (entry.err || imgs.length < 2 || imgs.length !== blocksTotal) {
+    // Aceita qualquer shipment cujos blocos foram TODOS renderizados (1 para Flex, 2+ para Coleta+DANFE).
+    // O número mínimo é 1 (etiqueta). Falha só se houver erro de Labelary OU se faltar bloco.
+    if (entry.err || imgs.length === 0 || imgs.length !== blocksTotal) {
       const reason = entry.err || `Apenas ${imgs.length}/${blocksTotal} bloco(s) renderizado(s)`;
       const category = entry.category || 'other';
       const reasonCode = category === 'rate_limit' ? 'LABELARY_RATE_LIMIT' : category === 'timeout' ? 'LABELARY_TIMEOUT' : 'LABELARY_CONVERSION_FAILED';
