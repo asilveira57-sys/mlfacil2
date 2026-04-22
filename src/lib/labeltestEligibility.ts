@@ -151,7 +151,8 @@ export function computeCapabilitiesV2(orders: ShipmentData[]): SelectionCapabili
     };
   }
 
-  // "Cabeçalho + DANFE" requires NF for coleta orders
+  // "Cabeçalho + DANFE" requires NF for COLETA orders.
+  // Flex (self_service) NUNCA bloqueia: o backend gera só a etiqueta (sem DANFE) automaticamente.
   const coletaWithoutNf = eligibleOrders.filter(o =>
     o.logistic_type !== 'self_service' && !hasNfReady(o)
   );
