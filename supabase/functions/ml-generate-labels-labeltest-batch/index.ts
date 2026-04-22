@@ -8,10 +8,27 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   LAYOUTS, fetchZplBatchFromMl, validateZpl, splitZplBlocks,
-  distributeZplBlocks, renderChunkToPdf, mergeChunkPdfs,
-  base64ToUint8, uint8ToBase64, DEFAULT_HEADER_PREFS,
+  distributeZplBlocks, renderChunkToPdf,
+  uint8ToBase64, DEFAULT_HEADER_PREFS,
   fetchVariationAttributesMap,
 } from "../_shared/labeltest-render.ts";
+
+// Dispara o finalize em uma invocation isolada (sem competir CPU com o
+// rendering deste worker). Não-bloqueante via waitUntil para não atrasar
+// a resposta do worker.
+async function triggerFinalize(supabaseUrl: string, serviceKey: string, jobId: string) {
+  try {
+    const r = await fetch(`${supabaseUrl}/functions/v1/ml-generate-labels-labeltest-finalize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+      body: JSON.stringify({ job_id: jobId }),
+    });
+    const txt = await r.text().catch(() => '');
+    console.log(`[labeltest-batch] finalize triggered job=${jobId} status=${r.status} body=${txt.slice(0, 200)}`);
+  } catch (e: any) {
+    console.error(`[labeltest-batch] finalize trigger failed job=${jobId}:`, e?.message || e);
+  }
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -186,39 +203,12 @@ serve(async (req) => {
     }
     const rpcRow: any = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
     const allDone: boolean = !!rpcRow?.all_done;
-    const freshBatches: any[] = Array.isArray(rpcRow?.batches) ? rpcRow.batches : [];
 
     if (allDone) {
-      // ─── Merge final ─────────────────────────────────────────────
-      const successPdfs: Uint8Array[] = freshBatches
-        .filter((b: any) => b.status === 'success' && b.pdf_b64)
-        .map((b: any) => base64ToUint8(b.pdf_b64));
-      const totalPages = freshBatches.reduce((s: number, b: any) => s + (b.pages || 0), 0);
-      const totalSuccess = freshBatches.reduce((s: number, b: any) => s + (b.success_count || 0), 0);
-
-      let finalPdfBase64: string | null = null;
-      if (successPdfs.length > 0) {
-        const merged = await mergeChunkPdfs(successPdfs);
-        finalPdfBase64 = uint8ToBase64(merged);
-      }
-
-      // Limpa pdf_b64 dos batches para reduzir tamanho da row
-      const cleanedBatches = freshBatches.map((b: any) => { const { pdf_b64, ...rest } = b; return rest; });
-
-      const totalLabels = rpcRow?.total_labels || 0;
-      const finalStatus = totalSuccess === 0 ? 'erro' : totalSuccess === totalLabels ? 'concluido' : 'parcial';
-      const startedAt = rpcRow?.job_started_at ? new Date(rpcRow.job_started_at).getTime() : t0;
-
-      await supabaseAdmin.from('meli_print_queue_v2').update({
-        batches: cleanedBatches as any,
-        pdf_base64: finalPdfBase64,
-        total_pages: totalPages,
-        status: finalStatus,
-        job_completed_at: new Date().toISOString(),
-        duration_ms: Date.now() - startedAt,
-      } as any).eq('id', jobId);
-
-      console.log(`[labeltest-batch] job=${jobId} FINALIZED status=${finalStatus} success=${totalSuccess}/${totalLabels} pages=${totalPages}`);
+      // Delega merge final ao finalize (CPU isolada). Não bloqueia a resposta.
+      // @ts-ignore - EdgeRuntime global
+      EdgeRuntime.waitUntil(triggerFinalize(supabaseUrl, serviceKey, jobId));
+      console.log(`[labeltest-batch] job=${jobId} all batches done, finalize dispatched`);
     }
 
     return new Response(JSON.stringify({ ok: true, success_count: successCount, errors: errors.length, all_done: allDone }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
