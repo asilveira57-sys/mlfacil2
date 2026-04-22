@@ -203,7 +203,6 @@ serve(async (req) => {
     }
     const rpcRow: any = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
     const allDone: boolean = !!rpcRow?.all_done;
-    const freshBatches: any[] = Array.isArray(rpcRow?.batches) ? rpcRow.batches : [];
 
     if (allDone) {
       // Delega merge final ao finalize (CPU isolada). Não bloqueia a resposta.

@@ -37,8 +37,10 @@ const REPRINT_SUBSTATUSES = new Set([
 ]);
 
 // ─── Background trigger: invoca os workers de batch com concorrência 2 ──
-// Labelary aguenta 2 workers em paralelo (cada um já roda 2 PNGs concorrentes).
-// Lote de 15 etiquetas (3 batches): ~10s + ~10s = ~20s (vs 32s sequencial).
+// Labelary aguenta 2 workers em paralelo. Após despachar todos, faz um
+// SWEEP final: relê o job, re-invoca batches em pending/processing órfãos
+// e dispara o finalize de fallback (caso o último worker tenha falhado
+// ao chamar finalize por timeout de CPU).
 async function triggerBatchWorkers(supabaseUrl: string, serviceKey: string, jobId: string, totalBatches: number) {
   const CONCURRENT_BATCHES = 2;
   console.log(`[labeltest-dispatcher] triggerBatchWorkers job=${jobId} totalBatches=${totalBatches} concurrency=${CONCURRENT_BATCHES}`);
@@ -72,13 +74,53 @@ async function triggerBatchWorkers(supabaseUrl: string, serviceKey: string, jobI
         const idx = cursor++;
         if (idx >= totalBatches) return;
         await invokeBatch(idx);
-        // Pequena folga entre disparos do mesmo runner (rate limit Labelary)
         if (cursor < totalBatches) await sleep(250);
       }
     })());
   }
   await Promise.all(runners);
-  console.log(`[labeltest-dispatcher] all batches dispatched for job=${jobId}`);
+  console.log(`[labeltest-dispatcher] all batches dispatched for job=${jobId} — starting sweep`);
+
+  // ─── SWEEP/RETRY: re-invoca batches que ficaram em pending/processing órfãos
+  // (worker travado por CPU exceeded antes de chamar o RPC). Tenta até 2
+  // rodadas; entre uma e outra dá tempo ao Postgres de propagar o estado.
+  const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+  const MAX_SWEEP_ROUNDS = 2;
+  for (let round = 1; round <= MAX_SWEEP_ROUNDS; round++) {
+    await sleep(1500);
+    const { data: jobNow } = await supabaseAdmin
+      .from('meli_print_queue_v2').select('status, batches').eq('id', jobId).maybeSingle();
+    if (!jobNow) break;
+    if (['concluido', 'parcial', 'erro'].includes(jobNow.status)) {
+      console.log(`[labeltest-dispatcher] sweep round=${round} job=${jobId} already finalized status=${jobNow.status}`);
+      return;
+    }
+    const batches: any[] = Array.isArray(jobNow.batches) ? jobNow.batches : [];
+    const orphan = batches.filter((b: any) => !['success', 'error'].includes(b?.status));
+    console.log(`[labeltest-dispatcher] sweep round=${round} job=${jobId} orphan_batches=${orphan.length}`);
+    if (orphan.length === 0) break;
+    // Re-dispara cada órfão (sequencial para reduzir pressão)
+    for (const b of orphan) {
+      await invokeBatch(b.idx);
+      await sleep(300);
+    }
+  }
+
+  // ─── FINALIZE FALLBACK: força o merge se ainda estiver processando
+  // (cobre o caso em que o último worker concluiu o RPC mas falhou ao
+  // disparar o finalize). O finalize é idempotente.
+  await sleep(1500);
+  try {
+    const r = await fetch(`${supabaseUrl}/functions/v1/ml-generate-labels-labeltest-finalize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+      body: JSON.stringify({ job_id: jobId }),
+    });
+    const txt = await r.text().catch(() => '');
+    console.log(`[labeltest-dispatcher] finalize fallback job=${jobId} status=${r.status} body=${txt.slice(0, 200)}`);
+  } catch (e: any) {
+    console.error(`[labeltest-dispatcher] finalize fallback exception job=${jobId}:`, e?.message || e);
+  }
 }
 
 serve(async (req) => {
