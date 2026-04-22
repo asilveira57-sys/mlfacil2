@@ -8,10 +8,27 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   LAYOUTS, fetchZplBatchFromMl, validateZpl, splitZplBlocks,
-  distributeZplBlocks, renderChunkToPdf, mergeChunkPdfs,
-  base64ToUint8, uint8ToBase64, DEFAULT_HEADER_PREFS,
+  distributeZplBlocks, renderChunkToPdf,
+  uint8ToBase64, DEFAULT_HEADER_PREFS,
   fetchVariationAttributesMap,
 } from "../_shared/labeltest-render.ts";
+
+// Dispara o finalize em uma invocation isolada (sem competir CPU com o
+// rendering deste worker). Não-bloqueante via waitUntil para não atrasar
+// a resposta do worker.
+async function triggerFinalize(supabaseUrl: string, serviceKey: string, jobId: string) {
+  try {
+    const r = await fetch(`${supabaseUrl}/functions/v1/ml-generate-labels-labeltest-finalize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+      body: JSON.stringify({ job_id: jobId }),
+    });
+    const txt = await r.text().catch(() => '');
+    console.log(`[labeltest-batch] finalize triggered job=${jobId} status=${r.status} body=${txt.slice(0, 200)}`);
+  } catch (e: any) {
+    console.error(`[labeltest-batch] finalize trigger failed job=${jobId}:`, e?.message || e);
+  }
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
