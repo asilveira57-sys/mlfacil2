@@ -87,8 +87,27 @@ serve(async (req) => {
         for (const sid of sids) errors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
       } else {
         const allBlocks = splitZplBlocks(validation.cleaned);
-        const { blocksByShipment, errors: distErrors } = distributeZplBlocks(allBlocks, sids);
-        errors.push(...distErrors);
+        // Flex-aware distribution: Flex (self_service) envia 1 bloco (só etiqueta);
+        // Coleta envia 2 blocos (etiqueta + DANFE). Quando o layout não inclui DANFE
+        // (`meli_100x150_no_nf`), tratamos todos como 1 bloco.
+        const flexSet = new Set<string>(
+          sids.filter(sid => shipMap.get(sid)?.logistic_type === 'self_service'),
+        );
+        console.log(`[labeltest-batch] job=${jobId} batch=${batchIdx} dist: total_blocks=${allBlocks.length} flex=${flexSet.size} coleta=${sids.length - flexSet.size} layout=${layout} includeDanfe=${layoutInfo.includeDanfe}`);
+        const { blocksByShipment, errors: distErrors } = distributeZplBlocks(allBlocks, sids, {
+          flexShipmentIds: flexSet,
+          includeDanfe: layoutInfo.includeDanfe,
+        });
+        // distErrors aqui são apenas warnings (DANFE_MISSING) — registramos no log mas
+        // NÃO bloqueamos a etiqueta. Só são propagados como erro real se o shipment
+        // não conseguir ser renderizado depois.
+        for (const e of distErrors) {
+          if (e.reason_code === 'DANFE_MISSING') {
+            log.push({ shipment_id: e.shipment_id, status: 'warning', stage: 'distribute', warning: e.reason_message, reason_code: e.reason_code });
+          } else {
+            errors.push(e);
+          }
+        }
 
         if (blocksByShipment.size > 0) {
           // Header prefs + orders/items quando layout exige cabeçalho

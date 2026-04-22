@@ -163,13 +163,21 @@ serve(async (req) => {
       const validation = validateZpl(batchResult.zpl);
       if (!validation.valid) return respond(false, { error: validation.reason_message }, 502);
       const allBlocks = splitZplBlocks(validation.cleaned);
-      const { blocksByShipment, errors: distErrors } = distributeZplBlocks(allBlocks, validIds);
+      // Flex-aware distribution (Flex envia 1 bloco; Coleta envia 2)
+      const flexSet = new Set<string>(
+        validIds.filter(sid => shipMap.get(sid)?.logistic_type === 'self_service'),
+      );
+      const { blocksByShipment, errors: distErrors } = distributeZplBlocks(allBlocks, validIds, {
+        flexShipmentIds: flexSet,
+        includeDanfe: layoutInfo.includeDanfe,
+      });
+      console.log(`[labeltest-dispatcher] ZPL distribution: total_blocks=${allBlocks.length} flex=${flexSet.size} coleta=${validIds.length - flexSet.size} mapped=${blocksByShipment.size} dist_errors=${distErrors.length}`);
 
       const zplParts: string[] = []; let totalSuccess = 0; let totalPages = 0;
       const perShipmentLog: any[] = [];
       for (const sid of validIds) {
         const blocks = blocksByShipment.get(sid);
-        if (blocks) { zplParts.push(blocks.join('\n')); totalSuccess++; totalPages += blocks.length; perShipmentLog.push({ shipment_id: sid, status: 'ok', zpl_blocks: blocks.length }); }
+        if (blocks) { zplParts.push(blocks.join('\n')); totalSuccess++; totalPages += blocks.length; perShipmentLog.push({ shipment_id: sid, status: 'ok', zpl_blocks: blocks.length, is_flex: flexSet.has(sid) }); }
       }
       const finalZplContent = zplParts.join('\n');
 
