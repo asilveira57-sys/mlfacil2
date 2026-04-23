@@ -158,6 +158,9 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const lastSyncTimeRef = useRef(0);
   const hasAutoSyncedRef = useRef(false);
   const recoveryAbortRef = useRef<AbortController | null>(null);
+  // Identifica o job_id do polling em andamento — evita que dois pollers
+  // (recovery on mount + mutation onSuccess) corram pelo mesmo job.
+  const activePollJobIdRef = useRef<string | null>(null);
 
   // ─── Recovery on mount ─────────────────────────────────────────────
   useEffect(() => {
@@ -177,13 +180,19 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     // Restore UI state
     setActiveJobState(persisted);
     setGenerationProgress({
-      status: 'processing',
+      status: persisted.stalled ? ('recovering_stalled' as any) : 'processing',
       total_labels: persisted.shipmentIds.length,
       processed_labels: 0,
       total_batches: 1,
       completed_batches: 0,
       error_batches: 0,
     });
+
+    // Stalled: aguarda usuário clicar "Retomar verificação".
+    if (persisted.stalled) {
+      logRecovery('poll', { phase: 'stalled-wait-resume', seller_id: sellerId, job_id: persisted.jobId });
+      return;
+    }
 
     // If we already had completed data cached, use it directly
     if (persisted.completedData) {
@@ -192,12 +201,20 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       return;
     }
 
+    // Evita double-poll: se já há um poller ativo para esse job, não inicia outro.
+    if (activePollJobIdRef.current === persisted.jobId) {
+      logRecovery('poll', { phase: 'skip-already-polling', seller_id: sellerId, job_id: persisted.jobId });
+      return;
+    }
+
     // If jobId is still "pending", poll until we get a real ID or timeout
+    recoveryAbortRef.current?.abort();
     const abort = new AbortController();
     recoveryAbortRef.current = abort;
+    activePollJobIdRef.current = persisted.jobId;
     pollJobUntilDone(persisted.jobId, persisted.format, abort.signal);
 
-    return () => { abort.abort(); };
+    return () => { abort.abort(); activePollJobIdRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerId]);
 
