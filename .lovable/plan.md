@@ -1,97 +1,96 @@
 
+Objetivo: corrigir o fluxo de “acesso por e-mail” para que suporte e onboarding não dependam de uma ação errada, e deixar claro quando o problema é entrega real vs. uso do fluxo incorreto.
 
-# Diagnóstico: Por que o Flex falha no Label Teste
+Diagnóstico confirmado
+- Para `wmautoparts@wmautoparts.com.br`, o sistema registrou envio de e-mail de recuperação às `20:27` com status `pending -> sent`.
+- O hook de e-mail também registrou enqueue normal para esse destinatário.
+- Portanto, não há evidência de falha geral do pipeline de envio neste caso específico.
+- O problema principal hoje é de fluxo e semântica:
+  1. `admin-resend-verification` não envia e-mail; ele só gera um link mascarado.
+  2. No admin, a ação “Reenviar verificação” chama essa função e mostra toast como se o e-mail tivesse sido reenviado.
+  3. Usuários importados em massa são criados com `email_confirm: true` e sem senha inicial, então “verificação de e-mail” não é o fluxo correto para primeiro acesso; o fluxo correto é recuperação de senha / link de acesso.
+  4. O sistema não mostra ao suporte qual foi o último e-mail realmente enviado nem qual ação correta usar para cada tipo de usuário.
 
-Verifiquei os jobs reais que o Rodrigo tentou rodar (5 envios Flex, layouts `mlfacil_100x175_header` e `meli_100x150_no_nf`). **Todos falharam com o mesmo erro**:
+O que será implementado
 
-```
-Labelary retornou status 404: ERROR: Requested 1st label but ZPL generated no labels
-blocks_rendered: 1, zpl_blocks_total: 2
-```
+1. Corrigir a lógica de suporte por tipo de usuário
+- Separar claramente os cenários:
+  - Cadastro próprio e não confirmado: reenviar confirmação real.
+  - Usuário importado/admin-criado/confirmado sem senha útil: enviar recuperação / gerar link de acesso.
+  - Usuário confirmado que ainda não conseguiu entrar: oferecer contingência de senha padrão/manual.
+- Parar de tratar todos os casos como “verificação”.
 
-## Causa raiz
+2. Corrigir a função administrativa enganosa
+- Ajustar `admin-resend-verification` para ficar coerente com o que ela realmente faz.
+- Opção A: ela passa a realmente disparar o e-mail correto.
+- Opção B: ela vira explicitamente “gerar link de acesso/verificação”.
+- A UI será alinhada ao comportamento real para nunca mais dizer “reenviado” quando só gerou link.
 
-O Mercado Livre devolve **2 blocos ZPL por pedido Coleta** (etiqueta + DANFE) e **1 bloco por pedido Flex** (só etiqueta — Flex não tem DANFE no ZPL).
+3. Melhorar a UI do admin para suporte operacional
+- Em `/admin/clientes`, trocar as ações por rótulos corretos:
+  - Reenviar confirmação
+  - Enviar recuperação
+  - Copiar link de confirmação
+  - Copiar link de recuperação
+- Exibir status úteis no detalhe do cliente:
+  - e-mail confirmado ou não
+  - onboarding concluído ou não
+  - último e-mail auth enviado
+  - status do último envio
+- Evitar que o suporte escolha a ação errada.
 
-A função `distributeZplBlocks` em `supabase/functions/_shared/labeltest-render.ts` (linhas 264–296) **assume que todo shipment tem 2 blocos**. Quando o batch é todo Flex (ex.: 5 envios → 5 blocos), ela faz `5 / 5 = 1 bloco por shipment` e funciona; mas o `renderChunkToPdf` (linha 416) tem uma trava:
+4. Aproveitar as funções já existentes de diagnóstico/contingência
+- Integrar o diagnóstico de auth para consulta rápida do estado do usuário.
+- Integrar o gerador manual de link de reset como fallback oficial.
+- Manter a política de senha padrão apenas como contingência explícita, não como fluxo principal.
 
-```ts
-if (entry.err || imgs.length < 2 || imgs.length !== blocksTotal) { ... erro ... }
-```
+5. Melhorar transparência sobre entrega
+- Mostrar no admin os eventos recentes do `email_send_log` por usuário/e-mail.
+- Diferenciar:
+  - enviado pelo sistema
+  - link gerado manualmente
+  - nenhuma tentativa recente
+- Isso reduz a sensação de “não enviou” quando, na verdade, o e-mail foi processado e o problema pode estar na caixa do destinatário.
 
-→ **`imgs.length < 2` rejeita todo shipment Flex**, mesmo quando o ZPL veio correto. Resultado: erro `LABELARY_CONVERSION_FAILED` para 100% dos Flex.
+Arquivos que devem ser alterados
+- `src/pages/admin/AdminClientes.tsx`
+- `src/pages/admin/AdminUsers.tsx`
+- `src/hooks/useAdmin.ts`
+- `supabase/functions/admin-resend-verification/index.ts`
+- `supabase/functions/admin-generate-reset-link/index.ts` (se precisar alinhar retorno/mascara)
+- possivelmente um novo helper/função administrativa para “enviar acesso correto” por estado do usuário
 
-Além disso, no caso misto (Flex + Coleta no mesmo lote), o cálculo `allBlocks.length % shipmentIds.length === 0` também quebra — cai no fallback `pares de 2 blocos` e marca os Flex como `DANFE_MISSING`.
+Ajustes de comportamento esperados
+- “Reenviar verificação” só aparece para usuário realmente não confirmado.
+- Usuário importado/Veterano não entra mais no fluxo errado de verificação.
+- Para casos como o da WM Autoparts, o suporte verá que houve envio de recuperação e poderá agir com o fallback correto.
+- O admin deixará de mascarar um “copiar link” como se fosse “e-mail reenviado”.
 
-## Como o módulo Shipping V1 (que funciona) resolve
+Antes/depois do fluxo
+- Antes:
+  - suporte clica “Reenviar verificação”
+  - sistema gera link
+  - toast diz que reenviou e-mail
+  - usuário continua sem receber nada
+- Depois:
+  - sistema detecta o estado da conta
+  - oferece a ação correta
+  - mostra se houve envio real
+  - se não for caso de e-mail, oferece link manual/recuperação de forma explícita
 
-Em `ml-generate-labels/index.ts` (linhas 1015–1030) o V1 monta um `perShipmentSkipDanfe: Set<string>` com os Flex sem NF e o pipeline pula a tentativa de anexar DANFE para esses shipments — gerando só a etiqueta.
-
-## Plano de correção (Label Teste V2)
-
-### 1. `supabase/functions/_shared/labeltest-render.ts`
-
-**a) `distributeZplBlocks` — distribuir blocos por tipo logístico**
-
-Adicionar parâmetro `flexShipmentIds: Set<string>` e calcular dinamicamente:
-- Flex → 1 bloco esperado
-- Coleta → 2 blocos esperados (etiqueta + DANFE)
-- Layout `meli_100x150_no_nf` → 1 bloco para todos (descarta DANFE)
-
-Distribuir sequencialmente respeitando o "tamanho esperado" de cada shipment. Marcar `DANFE_MISSING` apenas para Coleta com 1 bloco quando o layout exigir DANFE.
-
-**b) `renderChunkToPdf` — remover a trava `imgs.length < 2`**
-
-Trocar por: aceitar qualquer shipment cujo `imgs.length === blocksTotal` (1 bloco para Flex, 2+ para Coleta). Mensagem de erro só quando faltar bloco de fato.
-
-**c) `LAYOUTS` — semântica de `includeDanfe`**
-
-Manter como está, mas usar a flag para decidir:
-- `includeDanfe: true` + Flex → renderiza só etiqueta (fallback automático)
-- `includeDanfe: true` + Coleta sem 2º bloco → erro `DANFE_MISSING`
-- `includeDanfe: false` → ignora 2º bloco mesmo se vier
-
-### 2. `supabase/functions/ml-generate-labels-labeltest/index.ts` (dispatcher)
-
-- Carregar `logistic_type` (já carrega) e propagar a relação `sid → isFlex` para o worker via `batches[i].flex_sids: string[]` ou recarregar no worker.
-- No ramo **ZPL inline**, aplicar a mesma `distributeZplBlocks` corrigida.
-
-### 3. `supabase/functions/ml-generate-labels-labeltest-batch/index.ts` (worker)
-
-- Construir `flexSet = new Set(sids onde shipMap.get(sid).logistic_type === 'self_service')`.
-- Passar `flexSet` para `distributeZplBlocks` e para `renderChunkToPdf`.
-
-### 4. `src/lib/labeltestEligibility.ts` (front)
-
-`computeCapabilitiesV2` hoje bloqueia "Cabeçalho + DANFE" quando há **Coleta sem NF**, mas não trata Flex explicitamente. Está OK conforme as regras V1, mas vou adicionar comentário deixando claro: Flex sempre permitido em todos os layouts (DANFE ignorada no backend).
-
-### 5. Testes de aceite
-
-| Cenário | Layout | Esperado |
-|---|---|---|
-| 1 Flex sozinho | `meli_100x150` | PDF 1 página (etiqueta) |
-| 1 Flex sozinho | `mlfacil_100x175_header` | PDF 1 página (etiqueta + cabeçalho, sem DANFE) |
-| 1 Flex sozinho | `meli_100x150_no_nf` | PDF 1 página (etiqueta) |
-| 5 Flex em lote | qualquer | 5 páginas, 0 erros |
-| 3 Flex + 2 Coleta com NF | `mlfacil_100x175_header` | Flex: 1 pág c/ cabeçalho, Coleta: 2 pág (cabeçalho+etiqueta + DANFE) |
-| Coleta sem NF, layout Padrão ML | `meli_100x150` | erro `DANFE_MISSING` (correto) |
-
-### 6. Validação pós-deploy
-
-- Rodar SQL contra `meli_print_queue_v2 WHERE module='labeltest'` filtrando por jobs nos últimos 30min para confirmar 0 erros `LABELARY_CONVERSION_FAILED` em shipments Flex.
-- Verificar logs `[labeltest-batch]` confirmando `success_count` igual ao número de Flex no batch.
-
-## Arquivos que serão alterados
-
-1. `supabase/functions/_shared/labeltest-render.ts` (lógica central — `distributeZplBlocks` + `renderChunkToPdf`)
-2. `supabase/functions/ml-generate-labels-labeltest/index.ts` (ramo ZPL inline)
-3. `supabase/functions/ml-generate-labels-labeltest-batch/index.ts` (worker — passa `flexSet`)
-4. `src/lib/labeltestEligibility.ts` (apenas comentário esclarecendo política Flex)
-
-## Garantias
-
-- **Não toca** no `ml-generate-labels` V1 nem no `shippingLabelRules.ts` (módulo Shipping continua intacto).
-- **Não altera** a tabela `meli_print_queue_v2` nem RPC `labeltest_complete_batch`.
-- Mantém o pipeline assíncrono (job + batches + polling).
-- O erro de build mencionado (`@dnd-kit/core` em `SettingsMenuEditor.tsx`) é independente desse fluxo e será corrigido em separado se persistir após deploy.
-
+Validação
+- Testar 3 cenários:
+  1. usuário novo não confirmado criado por signup
+  2. usuário importado sem senha inicial
+  3. usuário já confirmado com dificuldade de login
+- Confirmar no admin:
+  - ação exibida correta
+  - toast coerente com a ação
+  - log visível de envio real
+- Confirmar no banco/logs:
+  - `email_send_log` registrando `pending/sent` quando houver envio
+  - link mascarado gerado apenas quando a ação for manual
+- Confirmação final esperada:
+  - suporte passa a saber exatamente por que o cliente não entrou
+  - o sistema deixa de depender de um “reenviar verificação” que hoje engana operacionalmente
+  - correção aplicada no fluxo de acesso de novos clientes e de clientes importados
