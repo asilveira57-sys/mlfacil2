@@ -532,6 +532,122 @@ export interface WebhookLogData {
   created_at: string;
 }
 
+// ============================================================
+// Auth diagnostics & email actions (used by Admin support flow)
+// ============================================================
+
+export interface AdminUserAuthStatus {
+  user_id: string;
+  email: string | null;
+  email_confirmed_at: string | null;
+  last_sign_in_at: string | null;
+  has_usable_credential: boolean;
+  recommended_action: 'resend_confirmation' | 'send_recovery' | 'user_can_login';
+  last_auth_email: {
+    template_name: string | null;
+    status: string;
+    created_at: string;
+    error_message: string | null;
+  } | null;
+}
+
+/** Fetch the auth state of a user on demand (used in client details). */
+export function useUserAuthStatus(params: {
+  user_id?: string;
+  email?: string | null;
+  enabled?: boolean;
+}) {
+  const { user_id, email, enabled = true } = params;
+  return useQuery({
+    queryKey: ['admin', 'user-auth-status', user_id, email],
+    enabled: enabled && !!(user_id || email),
+    queryFn: async (): Promise<AdminUserAuthStatus> => {
+      const { data, error } = await supabase.functions.invoke('admin-user-auth-status', {
+        body: { target_user_id: user_id, email },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as AdminUserAuthStatus;
+    },
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Triggers a real auth email (confirmation or recovery) — goes through
+ * the auth-email-hook → email queue → email_send_log.
+ */
+export function useSendAuthEmail() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      target_user_id?: string;
+      email?: string | null;
+      mode?: 'confirmation' | 'recovery' | 'auto';
+    }) => {
+      const { data, error } = await supabase.functions.invoke('admin-send-auth-email', {
+        body: {
+          target_user_id: params.target_user_id,
+          email: params.email,
+          mode: params.mode || 'auto',
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as {
+        success: boolean;
+        effective_mode: 'confirmation' | 'recovery';
+        email: string;
+        message: string;
+      };
+    },
+    onSuccess: (data) => {
+      toast.success(data.message);
+      queryClient.invalidateQueries({ queryKey: ['admin', 'user-auth-status'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'email-send-log'] });
+    },
+    onError: (error: Error) => {
+      toast.error(`Erro ao enviar e-mail: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Generates a masked access link (does NOT send email). Used when admin
+ * wants to copy/paste the link to the customer manually.
+ */
+export function useGenerateAuthLink() {
+  return useMutation({
+    mutationFn: async (params: {
+      target_user_id?: string;
+      email?: string | null;
+      mode?: 'confirmation' | 'recovery' | 'auto';
+    }) => {
+      const { data, error } = await supabase.functions.invoke('admin-resend-verification', {
+        body: {
+          target_user_id: params.target_user_id,
+          email: params.email,
+          mode: params.mode || 'auto',
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data as {
+        success: boolean;
+        effective_mode?: 'confirmation' | 'recovery';
+        email_confirmed?: boolean;
+        verification_link?: string;
+        message: string;
+      };
+    },
+    onError: (error: Error) => {
+      toast.error(`Erro ao gerar link: ${error.message}`);
+    },
+  });
+}
+
 // Webhook Logs (Payments)
 export function useWebhookLogs() {
   return useQuery({
