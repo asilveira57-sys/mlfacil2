@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useAdminClients, useDeleteClient, type AdminClient } from '@/hooks/useAdminClients';
 import { supabase } from '@/integrations/supabase/client';
-import { useAdminTrialManagement } from '@/hooks/useAdmin';
+import { useAdminTrialManagement, useUserAuthStatus, useSendAuthEmail, useGenerateAuthLink } from '@/hooks/useAdmin';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
   Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send, Link2,
-  ArrowUpDown, ArrowUp, ArrowDown, Replace,
+  ArrowUpDown, ArrowUp, ArrowDown, Replace, KeyRound, MailCheck, MailWarning, Loader2, AlertCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -433,41 +433,8 @@ export function AdminClientes() {
                               <Eye className="h-4 w-4 mr-2" /> Ver detalhes
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={async (e) => {
-                              e.stopPropagation();
-                              try {
-                                const { data, error } = await supabase.functions.invoke('admin-resend-verification', {
-                                  body: { target_user_id: client.user_id, email: client.email },
-                                });
-                                if (error) throw error;
-                                if (data?.error) throw new Error(data.error);
-                                toast.success(data?.message || 'E-mail de verificação reenviado');
-                              } catch (err: any) {
-                                toast.error(`Erro: ${err.message}`);
-                              }
-                            }}>
-                              <Send className="h-4 w-4 mr-2" /> Reenviar verificação
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={async (e) => {
-                              e.stopPropagation();
-                              try {
-                                const { data, error } = await supabase.functions.invoke('admin-resend-verification', {
-                                  body: { target_user_id: client.user_id, email: client.email },
-                                });
-                                if (error) throw error;
-                                if (data?.error) throw new Error(data.error);
-                                if (data?.verification_link) {
-                                  await navigator.clipboard.writeText(data.verification_link);
-                                  toast.success('Link de verificação copiado!');
-                                } else {
-                                  toast.info(data?.message || 'Usuário já confirmou o e-mail');
-                                }
-                              } catch (err: any) {
-                                toast.error(`Erro: ${err.message}`);
-                              }
-                            }}>
-                              <Link2 className="h-4 w-4 mr-2" /> Copiar link de verificação
-                            </DropdownMenuItem>
+                            <ClientAuthEmailActions client={client} />
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => {
                               setTrialClient(client);
                               setTrialDays('7');
@@ -693,6 +660,12 @@ export function AdminClientes() {
                   </div>
                 </div>
               </div>
+
+              {/* Auth & Email Status */}
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold flex items-center gap-2"><KeyRound className="h-4 w-4" /> Acesso & E-mail</h4>
+                <ClientAuthStatusPanel client={selectedClient} />
+              </div>
             </div>
           )}
         </DialogContent>
@@ -851,6 +824,177 @@ export function AdminClientes() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Auth email actions menu — context-aware (resend confirmation OR send recovery)
+// ----------------------------------------------------------------------------
+function ClientAuthEmailActions({ client }: { client: AdminClient }) {
+  const sendEmail = useSendAuthEmail();
+  const generateLink = useGenerateAuthLink();
+  const { data: status, isLoading } = useUserAuthStatus({
+    user_id: client.user_id,
+    email: client.email,
+  });
+
+  const isConfirmed = !!status?.email_confirmed_at;
+  // Default to "recovery" until we know — most support cases are confirmed users
+  const recommended: 'confirmation' | 'recovery' =
+    !status || isConfirmed ? 'recovery' : 'confirmation';
+
+  const handleSend = (mode: 'confirmation' | 'recovery') => {
+    sendEmail.mutate({
+      target_user_id: client.user_id,
+      email: client.email,
+      mode,
+    });
+  };
+
+  const handleCopyLink = async (mode: 'confirmation' | 'recovery') => {
+    const data = await generateLink.mutateAsync({
+      target_user_id: client.user_id,
+      email: client.email,
+      mode,
+    });
+    if (data?.verification_link) {
+      await navigator.clipboard.writeText(data.verification_link);
+      toast.success(
+        mode === 'recovery'
+          ? 'Link de recuperação copiado!'
+          : 'Link de confirmação copiado!'
+      );
+    } else {
+      toast.info(data?.message || 'Nenhum link disponível');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <DropdownMenuItem disabled>
+        <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Carregando estado...
+      </DropdownMenuItem>
+    );
+  }
+
+  return (
+    <>
+      {recommended === 'recovery' ? (
+        <>
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleSend('recovery'); }}>
+            <KeyRound className="h-4 w-4 mr-2" /> Enviar e-mail de recuperação
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCopyLink('recovery'); }}>
+            <Link2 className="h-4 w-4 mr-2" /> Copiar link de recuperação
+          </DropdownMenuItem>
+        </>
+      ) : (
+        <>
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleSend('confirmation'); }}>
+            <Send className="h-4 w-4 mr-2" /> Reenviar confirmação
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCopyLink('confirmation'); }}>
+            <Link2 className="h-4 w-4 mr-2" /> Copiar link de confirmação
+          </DropdownMenuItem>
+        </>
+      )}
+    </>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Auth status panel — shown inside the client details dialog
+// ----------------------------------------------------------------------------
+function ClientAuthStatusPanel({ client }: { client: AdminClient }) {
+  const { data: status, isLoading, error } = useUserAuthStatus({
+    user_id: client.user_id,
+    email: client.email,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Carregando estado de acesso...
+      </div>
+    );
+  }
+  if (error || !status) {
+    return (
+      <p className="text-sm text-destructive">
+        Não foi possível carregar o estado de autenticação.
+      </p>
+    );
+  }
+
+  const isConfirmed = !!status.email_confirmed_at;
+  const last = status.last_auth_email;
+
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex items-center gap-2">
+          {isConfirmed ? (
+            <MailCheck className="h-4 w-4 text-green-600" />
+          ) : (
+            <MailWarning className="h-4 w-4 text-yellow-600" />
+          )}
+          <span className="text-muted-foreground">E-mail confirmado:</span>
+          <strong>{isConfirmed ? 'Sim' : 'Não'}</strong>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Último login:</span>{' '}
+          <strong>{status.last_sign_in_at ? formatDateTime(status.last_sign_in_at) : 'Nunca'}</strong>
+        </div>
+      </div>
+
+      <div className="rounded-md border p-2 bg-muted/30">
+        <p className="text-xs font-semibold mb-1 flex items-center gap-1">
+          <AlertCircle className="h-3.5 w-3.5" /> Ação recomendada
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {status.recommended_action === 'resend_confirmation' && (
+            <>Cliente nunca confirmou o e-mail. Use <strong>Reenviar confirmação</strong>.</>
+          )}
+          {status.recommended_action === 'send_recovery' && (
+            <>Cliente confirmado, mas nunca acessou. Use <strong>Enviar recuperação</strong>{' '}
+            para gerar uma senha de primeiro acesso.</>
+          )}
+          {status.recommended_action === 'user_can_login' && (
+            <>Cliente já consegue acessar normalmente. Se houver dificuldade, envie{' '}
+            <strong>recuperação de senha</strong>.</>
+          )}
+        </p>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold mb-1">Último e-mail auth enviado</p>
+        {last ? (
+          <div className="text-xs text-muted-foreground">
+            <span className="font-mono">{last.template_name || 'auth_emails'}</span>{' '}
+            <Badge
+              variant={
+                last.status === 'sent'
+                  ? 'default'
+                  : last.status === 'pending'
+                  ? 'secondary'
+                  : 'destructive'
+              }
+              className="ml-1 text-[10px]"
+            >
+              {last.status}
+            </Badge>{' '}
+            <span>· {formatDateTime(last.created_at)}</span>
+            {last.error_message && (
+              <p className="text-destructive mt-1">{last.error_message}</p>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Nenhum envio recente registrado pelo sistema.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
