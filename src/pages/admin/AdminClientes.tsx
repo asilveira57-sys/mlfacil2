@@ -660,6 +660,12 @@ export function AdminClientes() {
                   </div>
                 </div>
               </div>
+
+              {/* Auth & Email Status */}
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold flex items-center gap-2"><KeyRound className="h-4 w-4" /> Acesso & E-mail</h4>
+                <ClientAuthStatusPanel client={selectedClient} />
+              </div>
             </div>
           )}
         </DialogContent>
