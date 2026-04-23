@@ -5,6 +5,25 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+/**
+ * Generates an access link for a user, depending on their state.
+ *
+ * Body:
+ *  - target_user_id?: string
+ *  - email?: string
+ *  - mode?: "confirmation" | "recovery" | "auto" (default "auto")
+ *  - return_link?: boolean (default true) — include masked link in response
+ *
+ * Behavior:
+ *  - If user is NOT confirmed → generates "signup" link (real confirmation)
+ *  - If user IS confirmed → generates "recovery" link
+ *  - "auto" detects state and picks the correct flow
+ *
+ * IMPORTANT: This function returns a masked link only. It does NOT trigger
+ * an email send. The actual transactional email is sent by Supabase Auth's
+ * native flows (resend / recovery), which are reachable via separate
+ * helpers. Use this when the admin wants a copy-paste link for support.
+ */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -34,48 +53,102 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const { target_user_id, email } = body;
+    const mode: "confirmation" | "recovery" | "auto" = body?.mode || "auto";
+
     if (!target_user_id && !email) {
-      return new Response(JSON.stringify({ error: "target_user_id or email required" }), { status: 400, headers: corsHeaders });
+      return new Response(
+        JSON.stringify({ error: "target_user_id or email required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const adminClient = createClient(supabaseUrl, serviceKey);
 
-    // Find user email if only user_id provided
-    let targetEmail = email;
-    if (!targetEmail && target_user_id) {
-      const { data: profile } = await adminClient
-        .from("profiles")
-        .select("email")
-        .eq("user_id", target_user_id)
-        .maybeSingle();
-      targetEmail = profile?.email;
+    // Find the user (we need email + email_confirmed_at to pick the flow)
+    let targetEmail: string | null = email || null;
+    let targetUser: any = null;
+
+    if (target_user_id) {
+      const { data, error } = await adminClient.auth.admin.getUserById(target_user_id);
+      if (!error && data?.user) {
+        targetUser = data.user;
+        targetEmail = targetEmail || data.user.email;
+      }
     }
+
+    if (!targetUser && targetEmail) {
+      let page = 1;
+      const perPage = 200;
+      const lower = targetEmail.toLowerCase();
+      while (!targetUser) {
+        const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage });
+        if (error) break;
+        const users = data?.users ?? [];
+        targetUser = users.find((u: any) => u.email?.toLowerCase() === lower);
+        if (users.length < perPage) break;
+        page++;
+      }
+    }
+
+    if (!targetEmail && targetUser) targetEmail = targetUser.email;
 
     if (!targetEmail) {
-      return new Response(JSON.stringify({ error: "Email not found for user" }), { status: 404, headers: corsHeaders });
+      return new Response(
+        JSON.stringify({ error: "Email not found for user" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    // Try magiclink first (works for existing users), fallback to signup for new users
-    let linkData, linkError;
+    // Decide effective mode
+    const isConfirmed = !!targetUser?.email_confirmed_at;
+    let effectiveMode: "confirmation" | "recovery";
+    if (mode === "confirmation") {
+      effectiveMode = "confirmation";
+    } else if (mode === "recovery") {
+      effectiveMode = "recovery";
+    } else {
+      // auto
+      effectiveMode = isConfirmed ? "recovery" : "confirmation";
+    }
 
-    ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
-      type: "magiclink",
-      email: targetEmail,
-    }));
+    // Generate the proper link
+    let linkData: any = null;
+    let linkError: any = null;
 
-    // If magiclink fails (user not found), try signup
-    if (linkError) {
+    if (effectiveMode === "recovery") {
       ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
-        type: "signup",
+        type: "recovery",
+        email: targetEmail,
+        options: {
+          redirectTo: `${body.redirectTo || "https://www.mktpfacil.com"}/reset-password`,
+        },
+      }));
+    } else {
+      // confirmation: try magiclink first (existing user), fall back to signup
+      ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+        type: "magiclink",
         email: targetEmail,
       }));
+      if (linkError) {
+        ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+          type: "signup",
+          email: targetEmail,
+        }));
+      }
     }
 
     if (linkError) {
-      // If both fail with "already registered", user is confirmed
-      if (linkError.message?.includes("already confirmed") || linkError.message?.includes("already registered")) {
+      if (
+        linkError.message?.includes("already confirmed") ||
+        linkError.message?.includes("already registered")
+      ) {
         return new Response(
-          JSON.stringify({ success: true, message: "Usuário já confirmou o e-mail" }),
+          JSON.stringify({
+            success: true,
+            effective_mode: effectiveMode,
+            email_confirmed: isConfirmed,
+            message: "Usuário já confirmou o e-mail",
+          }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -86,12 +159,17 @@ Deno.serve(async (req) => {
 
     if (!verificationLink) {
       return new Response(
-        JSON.stringify({ success: true, message: "Verificação processada" }),
+        JSON.stringify({
+          success: true,
+          effective_mode: effectiveMode,
+          email_confirmed: isConfirmed,
+          message: "Link processado, mas nenhum action_link retornado",
+        }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Save the real link in verification_links table and return a masked URL
+    // Save in verification_links and return masked URL
     const { data: record, error: insertError } = await adminClient
       .from("verification_links")
       .insert({ verification_url: verificationLink })
@@ -99,11 +177,16 @@ Deno.serve(async (req) => {
       .single();
 
     if (insertError || !record) {
-      // Fallback: return raw link if insert fails
+      // Fallback: raw link
       return new Response(
         JSON.stringify({
           success: true,
-          message: "Link de verificação gerado.",
+          effective_mode: effectiveMode,
+          email_confirmed: isConfirmed,
+          message:
+            effectiveMode === "recovery"
+              ? "Link de recuperação gerado"
+              : "Link de confirmação gerado",
           verification_link: verificationLink,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -115,7 +198,12 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: "Link de verificação gerado. Use o botão 'Copiar Link' para enviar ao cliente.",
+        effective_mode: effectiveMode,
+        email_confirmed: isConfirmed,
+        message:
+          effectiveMode === "recovery"
+            ? "Link de recuperação gerado. Use 'Copiar Link' para enviar ao cliente."
+            : "Link de confirmação gerado. Use 'Copiar Link' para enviar ao cliente.",
         verification_link: maskedLink,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
