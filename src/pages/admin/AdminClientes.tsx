@@ -21,7 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
   Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send, Link2,
-  ArrowUpDown, ArrowUp, ArrowDown, Replace,
+  ArrowUpDown, ArrowUp, ArrowDown, Replace, KeyRound, MailCheck, MailWarning, Loader2, AlertCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
