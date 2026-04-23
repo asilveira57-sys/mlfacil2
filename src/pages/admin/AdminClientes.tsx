@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useAdminClients, useDeleteClient, type AdminClient } from '@/hooks/useAdminClients';
 import { supabase } from '@/integrations/supabase/client';
-import { useAdminTrialManagement } from '@/hooks/useAdmin';
+import { useAdminTrialManagement, useUserAuthStatus, useSendAuthEmail, useGenerateAuthLink } from '@/hooks/useAdmin';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
