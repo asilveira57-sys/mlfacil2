@@ -717,9 +717,11 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           completed_batches: 0,
           error_batches: 0,
         });
+        // Evita double-poll: aborta qualquer poller anterior e marca o slot.
         recoveryAbortRef.current?.abort();
         const abort = new AbortController();
         recoveryAbortRef.current = abort;
+        activePollJobIdRef.current = data.job_id;
         pollJobUntilDone(data.job_id, variables.format, abort.signal);
         return;
       }
@@ -764,6 +766,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     recoveryAbortRef.current?.abort();
     const abort = new AbortController();
     recoveryAbortRef.current = abort;
+    activePollJobIdRef.current = job.jobId;
     pollJobUntilDone(job.jobId, job.format, abort.signal);
   }, []);
 
