@@ -231,98 +231,104 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
 
     logRecovery('poll', { phase: 'start', seller_id: sellerId, job_id: jobId });
 
-    while (!signal.aborted) {
-      await sleep(JOB_POLL_INTERVAL_MS);
-      if (signal.aborted) return;
+    try {
+      while (!signal.aborted) {
+        await sleep(JOB_POLL_INTERVAL_MS);
+        if (signal.aborted) return;
 
-      attempt++;
-      const elapsed = Date.now() - startedAt;
-      dbg(`[poll] attempt=${attempt}, elapsed=${elapsed}ms, jobId=${jobId}`);
+        attempt++;
+        const elapsed = Date.now() - startedAt;
+        dbg(`[poll] attempt=${attempt}, elapsed=${elapsed}ms, jobId=${jobId}`);
 
-      // For "pending" jobs, we need to re-read localStorage in case the mutation updated it
-      if (jobId === 'pending') {
-        const refreshed = loadActiveJob();
-        if (refreshed && refreshed.jobId !== 'pending') {
-          jobId = refreshed.jobId;
-          logRecovery('poll', { phase: 'pending-resolved', seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
-        } else if (elapsed > JOB_RECOVERY_TIMEOUT_MS) {
-          logRecovery('terminal', { status: 'stalled', reason: 'pending-timeout', seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
-          markActiveJobV2Stalled(true);
-          setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
-          setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
-          return;
-        } else {
-          logRecovery('poll', { phase: 'pending-waiting', seller_id: sellerId, attempt, elapsed_ms: elapsed });
-          continue;
-        }
-      }
-
-      try {
-        const headers = await getAuthHeaders();
-        if (!headers) {
-          dbg('[poll] no auth headers, retrying...');
-          continue;
-        }
-
-        const { data, error } = await supabase.functions.invoke('ml-generate-labels-status-v2', {
-          headers,
-          body: { job_id: jobId },
-        });
-
-        if (error || !data) {
-          notFoundCount++;
-          logRecovery('not_found', { seller_id: sellerId, job_id: jobId, attempt: notFoundCount, max: MAX_NOT_FOUND_ATTEMPTS, elapsed_ms: elapsed });
-
-          // V2: NÃO limpa activeJob no timeout — o job pode existir em meli_print_queue_v2
-          // e estar simplesmente lento. Marca como "stalled" e deixa o usuário decidir
-          // quando retomar (botão "Retomar verificação" na UI).
-          if (notFoundCount >= MAX_NOT_FOUND_ATTEMPTS || elapsed > JOB_RECOVERY_TIMEOUT_MS) {
-            logRecovery('terminal', { status: 'stalled', reason: 'not-found-timeout', seller_id: sellerId, job_id: jobId, not_found: notFoundCount, elapsed_ms: elapsed });
+        // For "pending" jobs, we need to re-read localStorage in case the mutation updated it
+        if (jobId === 'pending') {
+          const refreshed = loadActiveJob();
+          if (refreshed && refreshed.jobId !== 'pending') {
+            jobId = refreshed.jobId;
+            activePollJobIdRef.current = jobId;
+            logRecovery('poll', { phase: 'pending-resolved', seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
+          } else if (elapsed > JOB_RECOVERY_TIMEOUT_MS) {
+            logRecovery('terminal', { status: 'stalled', reason: 'pending-timeout', seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
             markActiveJobV2Stalled(true);
             setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
             setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
             return;
-          }
-          continue;
-        }
-
-        // Reset not-found counter on any successful response
-        notFoundCount = 0;
-
-        const status = data.status as string;
-        dbg(`[poll] status=${status}, processed=${data.processed_labels}/${data.total_labels}`);
-
-        setGenerationProgress({
-          status: isTerminalStatus(status) ? (status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'error') : 'processing',
-          total_labels: data.total_labels || 0,
-          processed_labels: data.processed_labels || 0,
-          total_batches: data.total_batches || 1,
-          completed_batches: data.completed_batches || 0,
-          error_batches: data.error_batches || 0,
-        });
-
-        if (isTerminalStatus(status)) {
-          logRecovery('terminal', { status, seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
-          // V2 grava pdf_base64 (não file_url). Se houver QUALQUER artefato baixável,
-          // dispara o download — mesmo que o usuário tenha navegado durante a geração.
-          const hasArtifact =
-            (typeof data.pdf_base64 === 'string' && data.pdf_base64.length > 100) ||
-            (typeof data.zpl_content === 'string' && data.zpl_content.length > 10) ||
-            !!data.file_url;
-          if (hasArtifact) {
-            handleGenerationComplete(data, format);
           } else {
-            finalizeJob(status as any);
+            logRecovery('poll', { phase: 'pending-waiting', seller_id: sellerId, attempt, elapsed_ms: elapsed });
+            continue;
           }
-          return;
         }
 
-        logRecovery('poll', { phase: 'in-progress', seller_id: sellerId, job_id: jobId, status, processed: data.processed_labels, total: data.total_labels });
-      } catch (err) {
-        console.error('[V2] Poll error:', err);
-        dbg('[poll] transient error, continuing...', err);
-        // Continue polling on transient errors
+        try {
+          const headers = await getAuthHeaders();
+          if (!headers) {
+            dbg('[poll] no auth headers, retrying...');
+            continue;
+          }
+
+          const { data, error } = await supabase.functions.invoke('ml-generate-labels-status-v2', {
+            headers,
+            body: { job_id: jobId },
+          });
+
+          if (error || !data) {
+            notFoundCount++;
+            logRecovery('not_found', { seller_id: sellerId, job_id: jobId, attempt: notFoundCount, max: MAX_NOT_FOUND_ATTEMPTS, elapsed_ms: elapsed });
+
+            // V2: NÃO limpa activeJob no timeout — o job pode existir em meli_print_queue_v2
+            // e estar simplesmente lento. Marca como "stalled" e deixa o usuário decidir
+            // quando retomar (botão "Retomar verificação" na UI).
+            if (notFoundCount >= MAX_NOT_FOUND_ATTEMPTS || elapsed > JOB_RECOVERY_TIMEOUT_MS) {
+              logRecovery('terminal', { status: 'stalled', reason: 'not-found-timeout', seller_id: sellerId, job_id: jobId, not_found: notFoundCount, elapsed_ms: elapsed });
+              markActiveJobV2Stalled(true);
+              setActiveJobState(prev => prev ? { ...prev, stalled: true } : prev);
+              setGenerationProgress(prev => ({ ...prev, status: 'recovering_stalled' as any }));
+              return;
+            }
+            continue;
+          }
+
+          // Reset not-found counter on any successful response
+          notFoundCount = 0;
+
+          const status = data.status as string;
+          dbg(`[poll] status=${status}, processed=${data.processed_labels}/${data.total_labels}`);
+
+          setGenerationProgress({
+            status: isTerminalStatus(status) ? (status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'error') : 'processing',
+            total_labels: data.total_labels || 0,
+            processed_labels: data.processed_labels || 0,
+            total_batches: data.total_batches || 1,
+            completed_batches: data.completed_batches || 0,
+            error_batches: data.error_batches || 0,
+          });
+
+          if (isTerminalStatus(status)) {
+            logRecovery('terminal', { status, seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
+            // V2 grava pdf_base64 (não file_url). Se houver QUALQUER artefato baixável,
+            // dispara o download — mesmo que o usuário tenha navegado durante a geração.
+            const hasArtifact =
+              (typeof data.pdf_base64 === 'string' && data.pdf_base64.length > 100) ||
+              (typeof data.zpl_content === 'string' && data.zpl_content.length > 10) ||
+              !!data.file_url;
+            if (hasArtifact) {
+              handleGenerationComplete(data, format);
+            } else {
+              finalizeJob(status as any);
+            }
+            return;
+          }
+
+          logRecovery('poll', { phase: 'in-progress', seller_id: sellerId, job_id: jobId, status, processed: data.processed_labels, total: data.total_labels });
+        } catch (err) {
+          console.error('[V2] Poll error:', err);
+          dbg('[poll] transient error, continuing...', err);
+          // Continue polling on transient errors
+        }
       }
+    } finally {
+      // Libera o slot de polling — permite resume futuro sem race.
+      if (activePollJobIdRef.current === jobId) activePollJobIdRef.current = null;
     }
   }
 
