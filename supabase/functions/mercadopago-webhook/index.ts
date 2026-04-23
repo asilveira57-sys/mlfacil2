@@ -133,6 +133,130 @@ Deno.serve(async (req) => {
       return new Response("OK", { status: 200 });
     }
 
+    // ─── SUBSCRIPTION AUTHORIZED PAYMENT (recurring billing) ───
+    if (type === "subscription_authorized_payment" && data?.id) {
+      const authPaymentId = data.id;
+
+      // Fetch authorized_payment details from MP
+      const apRes = await fetch(`${MP_API_URL}/authorized_payments/${authPaymentId}`, {
+        headers: { Authorization: `Bearer ${mpAccessToken}` },
+      });
+
+      if (!apRes.ok) {
+        console.error("[Webhook] Failed to fetch authorized_payment:", await apRes.text());
+        return new Response("OK", { status: 200 });
+      }
+
+      const authPayment = await apRes.json();
+      console.log("[Webhook] AuthorizedPayment:", {
+        id: authPayment.id,
+        status: authPayment.status,
+        preapproval_id: authPayment.preapproval_id,
+        payment_id: authPayment.payment?.id,
+      });
+
+      // We need the preapproval to get external_reference
+      const preapprovalId = authPayment.preapproval_id;
+      if (!preapprovalId) {
+        console.error("[Webhook] authorized_payment missing preapproval_id");
+        return new Response("OK", { status: 200 });
+      }
+
+      const paRes = await fetch(`${MP_API_URL}/preapproval/${preapprovalId}`, {
+        headers: { Authorization: `Bearer ${mpAccessToken}` },
+      });
+
+      if (!paRes.ok) {
+        console.error("[Webhook] Failed to fetch preapproval for auth_payment:", await paRes.text());
+        return new Response("OK", { status: 200 });
+      }
+
+      const preapproval = await paRes.json();
+      const parsed = parseExternalRef(preapproval.external_reference);
+      if (!parsed) {
+        console.error("[Webhook] Invalid external_reference on preapproval:", preapproval.external_reference);
+        return new Response("OK", { status: 200 });
+      }
+
+      const realPaymentId = String(authPayment.payment?.id || authPaymentId);
+      const amount = authPayment.transaction_amount || preapproval.auto_recurring?.transaction_amount || 0;
+
+      // Record payment (idempotent)
+      await supabase.from("tenant_payments").upsert({
+        tenant_id: parsed.tenantId,
+        provider: "mercadopago",
+        payment_id: realPaymentId,
+        external_reference: preapproval.external_reference,
+        amount_brl: amount,
+        currency: authPayment.currency_id || "BRL",
+        status: authPayment.status,
+        paid_at: authPayment.status === "approved" ? new Date().toISOString() : null,
+        raw: { authorized_payment: authPayment, preapproval },
+      }, { onConflict: "provider,payment_id" });
+
+      if (authPayment.status === "approved") {
+        // Check existing entitlement
+        const { data: existingEnt } = await supabase
+          .from("tenant_entitlements")
+          .select("id")
+          .eq("tenant_id", parsed.tenantId)
+          .eq("entitlement_type", parsed.entitlementType)
+          .in("status", ["active", "past_due", "canceled"])
+          .limit(1)
+          .maybeSingle();
+
+        if (existingEnt) {
+          // Renew
+          const { data: result, error } = await supabase.rpc("rpc_renew_entitlement", {
+            p_tenant_id: parsed.tenantId,
+            p_entitlement_type: parsed.entitlementType,
+            p_payment_id: realPaymentId,
+            p_external_reference: preapproval.external_reference,
+          });
+          console.log("[Webhook] Recurring renewal:", result, error);
+        } else {
+          // Activate (first recurring charge without prior preapproval webhook)
+          const { data: result, error } = await supabase.rpc("rpc_activate_entitlement", {
+            p_tenant_id: parsed.tenantId,
+            p_entitlement_type: parsed.entitlementType,
+            p_tier_code: parsed.tierCode,
+            p_addon_code: parsed.addonCode,
+            p_offer_code: parsed.offerCode,
+            p_payment_id: realPaymentId,
+            p_external_reference: preapproval.external_reference,
+            p_auto_renew: true,
+          });
+          console.log("[Webhook] Recurring activation:", result, error);
+        }
+
+        await auditLog(supabase, {
+          level: "info", area: "billing", action: "subscription_authorized_payment_approved",
+          userId: parsed.userId, success: true,
+          message: `Cobrança recorrente aprovada: ${preapproval.external_reference}`,
+          meta: {
+            authorized_payment_id: authPaymentId,
+            payment_id: realPaymentId,
+            preapproval_id: preapprovalId,
+            amount,
+            type: parsed.entitlementType,
+          },
+        });
+      } else if (authPayment.status === "rejected") {
+        await auditLog(supabase, {
+          level: "warn", area: "billing", action: "subscription_authorized_payment_rejected",
+          userId: parsed.userId, success: false,
+          message: `Cobrança recorrente rejeitada: ${preapproval.external_reference}`,
+          meta: {
+            authorized_payment_id: authPaymentId,
+            preapproval_id: preapprovalId,
+            status_detail: authPayment.status_detail,
+          },
+        });
+      }
+
+      return new Response("OK", { status: 200 });
+    }
+
     // ─── PAYMENT notifications (one-time / preference) ───
     if (type === "payment" && data?.id) {
       const paymentId = data.id;
