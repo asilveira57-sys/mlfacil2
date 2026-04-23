@@ -433,41 +433,8 @@ export function AdminClientes() {
                               <Eye className="h-4 w-4 mr-2" /> Ver detalhes
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={async (e) => {
-                              e.stopPropagation();
-                              try {
-                                const { data, error } = await supabase.functions.invoke('admin-resend-verification', {
-                                  body: { target_user_id: client.user_id, email: client.email },
-                                });
-                                if (error) throw error;
-                                if (data?.error) throw new Error(data.error);
-                                toast.success(data?.message || 'E-mail de verificação reenviado');
-                              } catch (err: any) {
-                                toast.error(`Erro: ${err.message}`);
-                              }
-                            }}>
-                              <Send className="h-4 w-4 mr-2" /> Reenviar verificação
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={async (e) => {
-                              e.stopPropagation();
-                              try {
-                                const { data, error } = await supabase.functions.invoke('admin-resend-verification', {
-                                  body: { target_user_id: client.user_id, email: client.email },
-                                });
-                                if (error) throw error;
-                                if (data?.error) throw new Error(data.error);
-                                if (data?.verification_link) {
-                                  await navigator.clipboard.writeText(data.verification_link);
-                                  toast.success('Link de verificação copiado!');
-                                } else {
-                                  toast.info(data?.message || 'Usuário já confirmou o e-mail');
-                                }
-                              } catch (err: any) {
-                                toast.error(`Erro: ${err.message}`);
-                              }
-                            }}>
-                              <Link2 className="h-4 w-4 mr-2" /> Copiar link de verificação
-                            </DropdownMenuItem>
+                            <ClientAuthEmailActions client={client} />
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => {
                               setTrialClient(client);
                               setTrialDays('7');
