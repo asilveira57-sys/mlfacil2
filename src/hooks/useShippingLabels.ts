@@ -263,6 +263,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   });
   const hasActiveJobV1 = !!activeJobV1State;
   const [isStalledV1, setIsStalledV1] = useState<boolean>(() => !!loadActiveJob()?.stalled);
+  // Tick para forçar re-execução do useEffect de recovery (botão "Retomar verificação").
+  const [recoveryResumeTick, setRecoveryResumeTick] = useState(0);
   const [diagnosticInfo, setDiagnosticInfo] = useState<DiagnosticInfo>({
     lastOrderDate: null,
     missingShipments30d: 0,
@@ -1173,9 +1175,16 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   // confirmado (completed|partial|error|failed|cancelled); timeout mínimo 120s
   // antes de marcar stalled (mantém activeJob preservado).
   useEffect(() => {
-    if (!sellerId || jobPollingRef.current) return;
+    if (!sellerId) return;
+    if (jobPollingRef.current) return;
     const activeJob = loadActiveJob();
     if (!activeJob || activeJob.sellerId !== sellerId) return;
+    // Se está stalled, só dispara polling quando o usuário pedir resume (resumeTick muda).
+    if (activeJob.stalled && recoveryResumeTick === 0) {
+      setActiveJobV1State(activeJob);
+      setIsStalledV1(true);
+      return;
+    }
 
     jobPollingRef.current = true;
     const startedAt = Date.now();
@@ -1358,7 +1367,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       aborted = true;
       jobPollingRef.current = false;
     };
-  }, [sellerId, toast]);
+  }, [sellerId, toast, recoveryResumeTick]);
 
   // Retomar verificação manual após estado stalled (V1).
   const resumeStalledRecoveryV1 = useCallback(() => {
@@ -1368,10 +1377,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     markActiveJobStalled(false);
     setIsStalledV1(false);
     setActiveJobV1State({ ...job, stalled: false });
-    // Força re-mount do effect de recovery alterando ref
     jobPollingRef.current = false;
-    // Trigger via leve mudança de estado
     setIsJobGenerating(true);
+    // Bump tick para re-disparar o useEffect de recovery (única forma confiável).
+    setRecoveryResumeTick(t => t + 1);
   }, []);
 
   const cancelStalledRecoveryV1 = useCallback(() => {
