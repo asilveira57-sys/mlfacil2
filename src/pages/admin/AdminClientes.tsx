@@ -22,6 +22,7 @@ import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
   Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send, Link2,
   ArrowUpDown, ArrowUp, ArrowDown, Replace, KeyRound, MailCheck, MailWarning, Loader2, AlertCircle,
+  Wallet, Repeat,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -53,7 +54,7 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan, setEntitlementPeriod } = useAdminTrialManagement();
 
   const PLAN_TIERS = [
     { id: 'a0000000-0000-0000-0000-000000000001', name: 'ZPL Básico' },
@@ -110,6 +111,13 @@ export function AdminClientes() {
   const [planOpen, setPlanOpen] = useState(false);
   const [planClient, setPlanClient] = useState<AdminClient | null>(null);
   const [selectedTierId, setSelectedTierId] = useState('');
+
+  // Entitlement (paid period) edit dialog
+  const [entOpen, setEntOpen] = useState(false);
+  const [entClient, setEntClient] = useState<AdminClient | null>(null);
+  const [entEndDate, setEntEndDate] = useState('');
+  const [entAutoRenew, setEntAutoRenew] = useState(true);
+  const [entStatus, setEntStatus] = useState<'active' | 'expired' | 'cancelled' | 'paused'>('active');
 
   const filtered = useMemo(() => {
     if (!clients) return [];
@@ -309,6 +317,9 @@ export function AdminClientes() {
               <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('trial')}>
                 <div className="flex items-center">Trial <SortIcon columnKey="trial" /></div>
               </TableHead>
+              <TableHead>
+                <div className="flex items-center">Plano Pago</div>
+              </TableHead>
               <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('profile_created_at')}>
                 <div className="flex items-center">Cadastro <SortIcon columnKey="profile_created_at" /></div>
               </TableHead>
@@ -324,7 +335,7 @@ export function AdminClientes() {
           <TableBody>
             {paginatedClients.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                   Nenhum cliente encontrado
                 </TableCell>
               </TableRow>
@@ -402,6 +413,37 @@ export function AdminClientes() {
                         )}
                       </TableCell>
                       <TableCell>
+                        {client.entitlement_id ? (
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-medium">
+                              {client.entitlement_period_end ? formatDate(client.entitlement_period_end) : '—'}
+                            </p>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <Badge
+                                variant={client.entitlement_status === 'active' ? 'default' : 'secondary'}
+                                className="text-[10px] px-1 py-0 h-4"
+                              >
+                                {client.entitlement_status || '—'}
+                              </Badge>
+                              {client.entitlement_auto_renew ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                                  <Repeat className="h-2.5 w-2.5" /> auto
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">manual</span>
+                              )}
+                            </div>
+                            {client.entitlement_tier_name && (
+                              <p className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                                {client.entitlement_tier_name}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <span className="text-xs text-muted-foreground">{formatDate(client.profile_created_at)}</span>
                       </TableCell>
                       <TableCell>
@@ -453,6 +495,23 @@ export function AdminClientes() {
                             <DropdownMenuItem onClick={() => { setPlanClient(client); setSelectedTierId(''); setPlanOpen(true); }}>
                               <Replace className="h-4 w-4 mr-2" /> Alterar Plano
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={!client.entitlement_id}
+                              onClick={() => {
+                                if (!client.entitlement_id) return;
+                                setEntClient(client);
+                                setEntEndDate(
+                                  client.entitlement_period_end
+                                    ? format(new Date(client.entitlement_period_end), 'yyyy-MM-dd')
+                                    : format(new Date(), 'yyyy-MM-dd')
+                                );
+                                setEntAutoRenew(!!client.entitlement_auto_renew);
+                                setEntStatus((client.entitlement_status as any) || 'active');
+                                setEntOpen(true);
+                              }}
+                            >
+                              <Wallet className="h-4 w-4 mr-2" /> Editar período pago
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {client.payment_status === 'blocked' ? (
                               <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: false, reason: 'Desbloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
@@ -501,6 +560,7 @@ export function AdminClientes() {
                             {acc.is_active ? 'Ativa' : 'Inativa'}
                           </Badge>
                         </TableCell>
+                        <TableCell />
                         <TableCell />
                         <TableCell>
                           <span className="text-xs text-muted-foreground">
@@ -643,6 +703,23 @@ export function AdminClientes() {
                   <div><span className="text-muted-foreground">Onboarding:</span> {selectedClient.onboarding_status || '—'}</div>
                   <div><span className="text-muted-foreground">Plano:</span> {selectedClient.plan_name || (selectedClient.selected_plan_id ? selectedClient.selected_plan_id.slice(0, 8) + '...' : '—')}</div>
                 </div>
+              </div>
+
+              {/* Paid plan / entitlement */}
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold flex items-center gap-2"><Wallet className="h-4 w-4" /> Plano Pago (Entitlement)</h4>
+                {selectedClient.entitlement_id ? (
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div><span className="text-muted-foreground">Status:</span> <strong>{selectedClient.entitlement_status || '—'}</strong></div>
+                    <div><span className="text-muted-foreground">Renovação:</span> <strong>{selectedClient.entitlement_auto_renew ? 'Automática' : 'Manual'}</strong></div>
+                    <div><span className="text-muted-foreground">Início:</span> {formatDate(selectedClient.entitlement_period_start)}</div>
+                    <div><span className="text-muted-foreground">Válido até:</span> <strong>{formatDate(selectedClient.entitlement_period_end)}</strong></div>
+                    <div><span className="text-muted-foreground">Tier:</span> {selectedClient.entitlement_tier_name || '—'}</div>
+                    <div><span className="text-muted-foreground">Origem:</span> {selectedClient.entitlement_source || '—'}</div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Nenhum plano pago ativo. O acesso está controlado apenas pelo trial.</p>
+                )}
               </div>
 
               {/* Roles & Meta */}
@@ -820,6 +897,94 @@ export function AdminClientes() {
               }}
             >
               {changeUserPlan.isPending ? 'Alterando...' : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Entitlement (Paid Period) Edit Dialog */}
+      <Dialog open={entOpen} onOpenChange={setEntOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Período do Plano Pago</DialogTitle>
+            <DialogDescription>
+              Ajuste manualmente o término e a renovação do plano pago de{' '}
+              <strong>{entClient?.full_name || entClient?.email}</strong>.
+              {entClient?.entitlement_tier_name && (
+                <> Plano: <Badge variant="secondary" className="ml-1">{entClient.entitlement_tier_name}</Badge></>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {entClient?.entitlement_period_end && (
+              <p className="text-sm text-muted-foreground">
+                Período atual termina em: <strong>{formatDate(entClient.entitlement_period_end)}</strong>
+              </p>
+            )}
+            <div>
+              <label className="text-sm font-medium">Nova data de término</label>
+              <Input
+                type="date"
+                value={entEndDate}
+                onChange={(e) => setEntEndDate(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Status</label>
+              <Select value={entStatus} onValueChange={(v) => setEntStatus(v as any)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Ativo</SelectItem>
+                  <SelectItem value="paused">Pausado</SelectItem>
+                  <SelectItem value="cancelled">Cancelado</SelectItem>
+                  <SelectItem value="expired">Expirado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="ent-auto-renew"
+                type="checkbox"
+                checked={entAutoRenew}
+                onChange={(e) => setEntAutoRenew(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="ent-auto-renew" className="text-sm font-medium">
+                Renovação automática
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Esta alteração afeta diretamente o acesso do cliente. Toda mudança fica registrada no log de auditoria.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEntOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!entEndDate || setEntitlementPeriod.isPending}
+              onClick={() => {
+                if (!entClient?.entitlement_id || !entEndDate) return;
+                setEntitlementPeriod.mutate(
+                  {
+                    entitlementId: entClient.entitlement_id,
+                    newPeriodEnd: new Date(entEndDate + 'T23:59:59').toISOString(),
+                    autoRenew: entAutoRenew,
+                    status: entStatus,
+                    reason: 'Ajuste manual via Admin Clientes',
+                  },
+                  {
+                    onSuccess: () => {
+                      setEntOpen(false);
+                      setEntClient(null);
+                      refetch();
+                    },
+                  }
+                );
+              }}
+            >
+              {setEntitlementPeriod.isPending ? 'Salvando...' : 'Confirmar'}
             </Button>
           </DialogFooter>
         </DialogContent>
