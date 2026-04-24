@@ -317,6 +317,9 @@ export function AdminClientes() {
               <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('trial')}>
                 <div className="flex items-center">Trial <SortIcon columnKey="trial" /></div>
               </TableHead>
+              <TableHead>
+                <div className="flex items-center">Plano Pago</div>
+              </TableHead>
               <TableHead className="cursor-pointer select-none hover:bg-muted/80" onClick={() => handleSort('profile_created_at')}>
                 <div className="flex items-center">Cadastro <SortIcon columnKey="profile_created_at" /></div>
               </TableHead>
