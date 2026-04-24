@@ -901,6 +901,94 @@ export function AdminClientes() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Entitlement (Paid Period) Edit Dialog */}
+      <Dialog open={entOpen} onOpenChange={setEntOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Período do Plano Pago</DialogTitle>
+            <DialogDescription>
+              Ajuste manualmente o término e a renovação do plano pago de{' '}
+              <strong>{entClient?.full_name || entClient?.email}</strong>.
+              {entClient?.entitlement_tier_name && (
+                <> Plano: <Badge variant="secondary" className="ml-1">{entClient.entitlement_tier_name}</Badge></>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {entClient?.entitlement_period_end && (
+              <p className="text-sm text-muted-foreground">
+                Período atual termina em: <strong>{formatDate(entClient.entitlement_period_end)}</strong>
+              </p>
+            )}
+            <div>
+              <label className="text-sm font-medium">Nova data de término</label>
+              <Input
+                type="date"
+                value={entEndDate}
+                onChange={(e) => setEntEndDate(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Status</label>
+              <Select value={entStatus} onValueChange={(v) => setEntStatus(v as any)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Ativo</SelectItem>
+                  <SelectItem value="paused">Pausado</SelectItem>
+                  <SelectItem value="cancelled">Cancelado</SelectItem>
+                  <SelectItem value="expired">Expirado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="ent-auto-renew"
+                type="checkbox"
+                checked={entAutoRenew}
+                onChange={(e) => setEntAutoRenew(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="ent-auto-renew" className="text-sm font-medium">
+                Renovação automática
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Esta alteração afeta diretamente o acesso do cliente. Toda mudança fica registrada no log de auditoria.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEntOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!entEndDate || setEntitlementPeriod.isPending}
+              onClick={() => {
+                if (!entClient?.entitlement_id || !entEndDate) return;
+                setEntitlementPeriod.mutate(
+                  {
+                    entitlementId: entClient.entitlement_id,
+                    newPeriodEnd: new Date(entEndDate + 'T23:59:59').toISOString(),
+                    autoRenew: entAutoRenew,
+                    status: entStatus,
+                    reason: 'Ajuste manual via Admin Clientes',
+                  },
+                  {
+                    onSuccess: () => {
+                      setEntOpen(false);
+                      setEntClient(null);
+                      refetch();
+                    },
+                  }
+                );
+              }}
+            >
+              {setEntitlementPeriod.isPending ? 'Salvando...' : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
