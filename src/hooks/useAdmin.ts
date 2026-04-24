@@ -274,8 +274,45 @@ export function useAdminTrialManagement() {
     },
   });
 
-  return { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan };
+  const setEntitlementPeriod = useMutation({
+    mutationFn: async ({
+      entitlementId,
+      newPeriodEnd,
+      autoRenew,
+      status,
+      reason,
+    }: {
+      entitlementId: string;
+      newPeriodEnd: string;
+      autoRenew?: boolean | null;
+      status?: string | null;
+      reason?: string;
+    }) => {
+      const { data, error } = await supabase.rpc('admin_set_entitlement_period' as any, {
+        p_entitlement_id: entitlementId,
+        p_new_period_end: newPeriodEnd,
+        p_auto_renew: autoRenew ?? null,
+        p_status: status ?? null,
+        p_reason: reason || null,
+      });
+      if (error) throw error;
+      const result = data as unknown as { success: boolean; error?: string };
+      if (!result.success) throw new Error(result.error);
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'clients'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      toast.success('Período do plano atualizado');
+    },
+    onError: (error) => {
+      toast.error(`Erro ao atualizar período: ${error.message}`);
+    },
+  });
+
+  return { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan, setEntitlementPeriod };
 }
+
 
 // Onboarding Cards
 export function useOnboardingCards() {
