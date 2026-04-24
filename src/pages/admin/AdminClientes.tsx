@@ -544,6 +544,7 @@ export function AdminClientes() {
                           </Badge>
                         </TableCell>
                         <TableCell />
+                        <TableCell />
                         <TableCell>
                           <span className="text-xs text-muted-foreground">
                             {acc.created_at ? formatDate(acc.created_at) : '—'}
