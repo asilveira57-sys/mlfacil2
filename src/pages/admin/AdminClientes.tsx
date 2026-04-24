@@ -495,6 +495,23 @@ export function AdminClientes() {
                             <DropdownMenuItem onClick={() => { setPlanClient(client); setSelectedTierId(''); setPlanOpen(true); }}>
                               <Replace className="h-4 w-4 mr-2" /> Alterar Plano
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={!client.entitlement_id}
+                              onClick={() => {
+                                if (!client.entitlement_id) return;
+                                setEntClient(client);
+                                setEntEndDate(
+                                  client.entitlement_period_end
+                                    ? format(new Date(client.entitlement_period_end), 'yyyy-MM-dd')
+                                    : format(new Date(), 'yyyy-MM-dd')
+                                );
+                                setEntAutoRenew(!!client.entitlement_auto_renew);
+                                setEntStatus((client.entitlement_status as any) || 'active');
+                                setEntOpen(true);
+                              }}
+                            >
+                              <Wallet className="h-4 w-4 mr-2" /> Editar período pago
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {client.payment_status === 'blocked' ? (
                               <DropdownMenuItem onClick={() => setBlocked.mutate({ userId: client.user_id, blocked: false, reason: 'Desbloqueio via Admin Clientes' }, { onSuccess: () => refetch() })}>
