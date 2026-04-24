@@ -1,96 +1,56 @@
+## Diagnóstico — engenharia@megatools.com.br
 
-Objetivo: corrigir o fluxo de “acesso por e-mail” para que suporte e onboarding não dependam de uma ação errada, e deixar claro quando o problema é entrega real vs. uso do fluxo incorreto.
+Esse cliente tem **dois registros distintos** no sistema, e a tag VETERANO foi aplicada no registro errado.
 
-Diagnóstico confirmado
-- Para `wmautoparts@wmautoparts.com.br`, o sistema registrou envio de e-mail de recuperação às `20:27` com status `pending -> sent`.
-- O hook de e-mail também registrou enqueue normal para esse destinatário.
-- Portanto, não há evidência de falha geral do pipeline de envio neste caso específico.
-- O problema principal hoje é de fluxo e semântica:
-  1. `admin-resend-verification` não envia e-mail; ele só gera um link mascarado.
-  2. No admin, a ação “Reenviar verificação” chama essa função e mostra toast como se o e-mail tivesse sido reenviado.
-  3. Usuários importados em massa são criados com `email_confirm: true` e sem senha inicial, então “verificação de e-mail” não é o fluxo correto para primeiro acesso; o fluxo correto é recuperação de senha / link de acesso.
-  4. O sistema não mostra ao suporte qual foi o último e-mail realmente enviado nem qual ação correta usar para cada tipo de usuário.
+### Registro 1 — antigo (importação Veterano)
+- `auth.users.id`: `cddaf599-9d2b-4c47-a315-e8af2ebdf4ab`
+- E-mail: **detilliengenharia@gmail.com**
+- Criado em: 26/03/2026
+- Nunca logou (`last_sign_in_at = NULL`)
+- Profile: `full_name = DETILLI ENGENHARIA`, **tag = VETERANO** ✅
 
-O que será implementado
+### Registro 2 — atual (uso real)
+- `auth.users.id`: `eaced208-d2fa-45a8-a140-342a96ca19b9`
+- E-mail: **engenharia@megatools.com.br**
+- Criado em: 08/04/2026
+- Confirmado e logado (último login: 23/04/2026 17:34)
+- Profile: `full_name = Detilli Engenharia`, **tag = NULL** ❌
+- Detalhe crítico: este profile está com `user_id = NULL` (órfão do auth user real)
 
-1. Corrigir a lógica de suporte por tipo de usuário
-- Separar claramente os cenários:
-  - Cadastro próprio e não confirmado: reenviar confirmação real.
-  - Usuário importado/admin-criado/confirmado sem senha útil: enviar recuperação / gerar link de acesso.
-  - Usuário confirmado que ainda não conseguiu entrar: oferecer contingência de senha padrão/manual.
-- Parar de tratar todos os casos como “verificação”.
+### Causa raiz
+Quando a importação inicial de Veteranos foi feita, o e-mail cadastrado para esse cliente era `detilliengenharia@gmail.com` (Gmail). Depois, o cliente fez um **novo cadastro próprio** usando o e-mail corporativo `engenharia@megatools.com.br`. Esse novo signup criou:
+1. Um auth user novo (`eaced208…`) — o que ele realmente usa hoje.
+2. Um profile novo, mas com `user_id` em branco (não foi vinculado ao auth user).
 
-2. Corrigir a função administrativa enganosa
-- Ajustar `admin-resend-verification` para ficar coerente com o que ela realmente faz.
-- Opção A: ela passa a realmente disparar o e-mail correto.
-- Opção B: ela vira explicitamente “gerar link de acesso/verificação”.
-- A UI será alinhada ao comportamento real para nunca mais dizer “reenviado” quando só gerou link.
+A tag VETERANO ficou no profile antigo (Gmail), que nunca foi usado. Por isso, ao tentar comprar o Plano Veterano logado como `engenharia@megatools.com.br`, ele não passa na regra de elegibilidade — o sistema olha a tag do profile do usuário logado, e ele está sem tag.
 
-3. Melhorar a UI do admin para suporte operacional
-- Em `/admin/clientes`, trocar as ações por rótulos corretos:
-  - Reenviar confirmação
-  - Enviar recuperação
-  - Copiar link de confirmação
-  - Copiar link de recuperação
-- Exibir status úteis no detalhe do cliente:
-  - e-mail confirmado ou não
-  - onboarding concluído ou não
-  - último e-mail auth enviado
-  - status do último envio
-- Evitar que o suporte escolha a ação errada.
+Importante: ter a tag é condição **necessária mas não suficiente**. A política Veterano exige também `tenant_entitlements` válida para liberar os benefícios após o pagamento. Hoje ele tem zero pagamentos e zero entitlements registrados.
 
-4. Aproveitar as funções já existentes de diagnóstico/contingência
-- Integrar o diagnóstico de auth para consulta rápida do estado do usuário.
-- Integrar o gerador manual de link de reset como fallback oficial.
-- Manter a política de senha padrão apenas como contingência explícita, não como fluxo principal.
+## Correção proposta
 
-5. Melhorar transparência sobre entrega
-- Mostrar no admin os eventos recentes do `email_send_log` por usuário/e-mail.
-- Diferenciar:
-  - enviado pelo sistema
-  - link gerado manualmente
-  - nenhuma tentativa recente
-- Isso reduz a sensação de “não enviou” quando, na verdade, o e-mail foi processado e o problema pode estar na caixa do destinatário.
+1. **Vincular o profile ativo ao auth user correto**
+   - Atualizar a linha de `profiles` cujo `email = engenharia@megatools.com.br` para `user_id = eaced208-d2fa-45a8-a140-342a96ca19b9`.
+   - Aplicar `tag = 'VETERANO'` nesse mesmo registro.
 
-Arquivos que devem ser alterados
-- `src/pages/admin/AdminClientes.tsx`
-- `src/pages/admin/AdminUsers.tsx`
-- `src/hooks/useAdmin.ts`
-- `supabase/functions/admin-resend-verification/index.ts`
-- `supabase/functions/admin-generate-reset-link/index.ts` (se precisar alinhar retorno/mascara)
-- possivelmente um novo helper/função administrativa para “enviar acesso correto” por estado do usuário
+2. **Limpar o registro antigo (Gmail) para evitar conflito futuro**
+   - Verificar se o auth user `cddaf599…` (detilliengenharia@gmail.com) tem qualquer atividade (entitlements, payments, ml_accounts, etc.).
+   - Se estiver totalmente vazio (esperado, dado que nunca logou), removê-lo via fluxo padrão `admin-delete-user` para não poluir a base.
+   - Se tiver algum vínculo, apenas remover a tag VETERANO desse registro e deixar registrado em `audit_logs`.
 
-Ajustes de comportamento esperados
-- “Reenviar verificação” só aparece para usuário realmente não confirmado.
-- Usuário importado/Veterano não entra mais no fluxo errado de verificação.
-- Para casos como o da WM Autoparts, o suporte verá que houve envio de recuperação e poderá agir com o fallback correto.
-- O admin deixará de mascarar um “copiar link” como se fosse “e-mail reenviado”.
+3. **Registrar a operação em `audit_logs`**
+   - Ação: `veterano_tag_migration`
+   - Descrição: migração da tag VETERANO do profile órfão (Gmail) para o profile ativo (corporativo), com referência aos dois user_ids.
 
-Antes/depois do fluxo
-- Antes:
-  - suporte clica “Reenviar verificação”
-  - sistema gera link
-  - toast diz que reenviou e-mail
-  - usuário continua sem receber nada
-- Depois:
-  - sistema detecta o estado da conta
-  - oferece a ação correta
-  - mostra se houve envio real
-  - se não for caso de e-mail, oferece link manual/recuperação de forma explícita
+4. **Não tocar em `tenant_entitlements`**
+   - O cliente ainda precisa pagar o Plano Veterano normalmente. A tag apenas libera a visibilidade da oferta e a elegibilidade do checkout. A ativação do entitlement continua sendo feita pelo webhook do Mercado Pago após o pagamento aprovado.
 
-Validação
-- Testar 3 cenários:
-  1. usuário novo não confirmado criado por signup
-  2. usuário importado sem senha inicial
-  3. usuário já confirmado com dificuldade de login
-- Confirmar no admin:
-  - ação exibida correta
-  - toast coerente com a ação
-  - log visível de envio real
-- Confirmar no banco/logs:
-  - `email_send_log` registrando `pending/sent` quando houver envio
-  - link mascarado gerado apenas quando a ação for manual
-- Confirmação final esperada:
-  - suporte passa a saber exatamente por que o cliente não entrou
-  - o sistema deixa de depender de um “reenviar verificação” que hoje engana operacionalmente
-  - correção aplicada no fluxo de acesso de novos clientes e de clientes importados
+## Resultado esperado
+
+Após a correção, ao logar com `engenharia@megatools.com.br`, o cliente:
+- Vê o card do Plano Veterano marcado como "Recomendado" (como na imagem que você enviou).
+- Consegue clicar em "Escolher plano" e prosseguir até o checkout do Mercado Pago.
+- Após pagamento aprovado, o webhook ativa o `tenant_entitlements` automaticamente (handler já corrigido recentemente para `subscription_authorized_payment`).
+
+## Observação para o futuro
+
+Esse caso evidencia uma fragilidade no fluxo de importação de Veteranos: quando o cliente importado se cadastra depois com um e-mail diferente do importado, a tag fica órfã. Se você quiser, posso propor em separado uma melhoria no painel admin de Veteranos para detectar e mesclar perfis duplicados por nome/CPF antes que o cliente perceba o problema.
