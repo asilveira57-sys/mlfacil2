@@ -413,6 +413,37 @@ export function AdminClientes() {
                         )}
                       </TableCell>
                       <TableCell>
+                        {client.entitlement_id ? (
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-medium">
+                              {client.entitlement_period_end ? formatDate(client.entitlement_period_end) : '—'}
+                            </p>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <Badge
+                                variant={client.entitlement_status === 'active' ? 'default' : 'secondary'}
+                                className="text-[10px] px-1 py-0 h-4"
+                              >
+                                {client.entitlement_status || '—'}
+                              </Badge>
+                              {client.entitlement_auto_renew ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                                  <Repeat className="h-2.5 w-2.5" /> auto
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">manual</span>
+                              )}
+                            </div>
+                            {client.entitlement_tier_name && (
+                              <p className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                                {client.entitlement_tier_name}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <span className="text-xs text-muted-foreground">{formatDate(client.profile_created_at)}</span>
                       </TableCell>
                       <TableCell>
