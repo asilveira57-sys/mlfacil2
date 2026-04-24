@@ -705,6 +705,23 @@ export function AdminClientes() {
                 </div>
               </div>
 
+              {/* Paid plan / entitlement */}
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold flex items-center gap-2"><Wallet className="h-4 w-4" /> Plano Pago (Entitlement)</h4>
+                {selectedClient.entitlement_id ? (
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div><span className="text-muted-foreground">Status:</span> <strong>{selectedClient.entitlement_status || '—'}</strong></div>
+                    <div><span className="text-muted-foreground">Renovação:</span> <strong>{selectedClient.entitlement_auto_renew ? 'Automática' : 'Manual'}</strong></div>
+                    <div><span className="text-muted-foreground">Início:</span> {formatDate(selectedClient.entitlement_period_start)}</div>
+                    <div><span className="text-muted-foreground">Válido até:</span> <strong>{formatDate(selectedClient.entitlement_period_end)}</strong></div>
+                    <div><span className="text-muted-foreground">Tier:</span> {selectedClient.entitlement_tier_name || '—'}</div>
+                    <div><span className="text-muted-foreground">Origem:</span> {selectedClient.entitlement_source || '—'}</div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Nenhum plano pago ativo. O acesso está controlado apenas pelo trial.</p>
+                )}
+              </div>
+
               {/* Roles & Meta */}
               <div className="space-y-2">
                 <h4 className="text-sm font-semibold flex items-center gap-2"><Shield className="h-4 w-4" /> Roles & Meta</h4>
