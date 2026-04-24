@@ -21288,6 +21288,13 @@ export type Database = {
           company_state: string
           cpf: string
           email: string
+          entitlement_auto_renew: boolean
+          entitlement_id: string
+          entitlement_period_end: string
+          entitlement_period_start: string
+          entitlement_source: string
+          entitlement_status: string
+          entitlement_tier_name: string
           full_name: string
           last_activity_at: string
           last_sign_in_at: string
@@ -21317,6 +21324,16 @@ export type Database = {
           p_reason?: string
           p_target_user_id: string
           p_trial_days?: number
+        }
+        Returns: Json
+      }
+      admin_set_entitlement_period: {
+        Args: {
+          p_auto_renew?: boolean
+          p_entitlement_id: string
+          p_new_period_end: string
+          p_reason?: string
+          p_status?: string
         }
         Returns: Json
       }
