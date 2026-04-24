@@ -41,6 +41,14 @@ export interface AdminClient {
   roles: string[];
   tag: string | null;
   plan_name: string | null;
+  // entitlement (paid plan period)
+  entitlement_id: string | null;
+  entitlement_status: string | null;
+  entitlement_period_start: string | null;
+  entitlement_period_end: string | null;
+  entitlement_auto_renew: boolean | null;
+  entitlement_tier_name: string | null;
+  entitlement_source: string | null;
 }
 
 export function useAdminClients() {
