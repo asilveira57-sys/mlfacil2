@@ -22,6 +22,7 @@ import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
   Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send, Link2,
   ArrowUpDown, ArrowUp, ArrowDown, Replace, KeyRound, MailCheck, MailWarning, Loader2, AlertCircle,
+  Wallet, Repeat,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -53,7 +54,7 @@ function daysRemaining(trialEnd: string | null) {
 export function AdminClientes() {
   const { data: clients, isLoading, refetch } = useAdminClients();
   const deleteClient = useDeleteClient();
-  const { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan } = useAdminTrialManagement();
+  const { adjustTrial, resetTrial, setTrialEndDate, setBlocked, resetOnboarding, changeUserPlan, setEntitlementPeriod } = useAdminTrialManagement();
 
   const PLAN_TIERS = [
     { id: 'a0000000-0000-0000-0000-000000000001', name: 'ZPL Básico' },
@@ -110,6 +111,13 @@ export function AdminClientes() {
   const [planOpen, setPlanOpen] = useState(false);
   const [planClient, setPlanClient] = useState<AdminClient | null>(null);
   const [selectedTierId, setSelectedTierId] = useState('');
+
+  // Entitlement (paid period) edit dialog
+  const [entOpen, setEntOpen] = useState(false);
+  const [entClient, setEntClient] = useState<AdminClient | null>(null);
+  const [entEndDate, setEntEndDate] = useState('');
+  const [entAutoRenew, setEntAutoRenew] = useState(true);
+  const [entStatus, setEntStatus] = useState<'active' | 'expired' | 'cancelled' | 'paused'>('active');
 
   const filtered = useMemo(() => {
     if (!clients) return [];
