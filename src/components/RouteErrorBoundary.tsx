@@ -9,7 +9,41 @@ interface State {
 }
 
 const AUTO_RECOVER_KEY = 'route_error_auto_recover_at';
-const AUTO_RECOVER_COOLDOWN_MS = 60_000; // 1 min — evita loop de reload
+const AUTO_RECOVER_COOLDOWN_MS = 15_000; // 15s — evita loop, mas permite recuperação rápida
+
+/**
+ * Limpa caches do navegador (Service Worker + Cache API) que possam estar servindo
+ * uma versão antiga do app. Ideal antes de um reload por ChunkLoadError.
+ */
+async function clearStaleClientCaches(): Promise<void> {
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch { /* ignore */ }
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * Recarrega a página forçando bypass de cache via query string com timestamp.
+ * Isso garante que o navegador busque um index.html novo, com referências
+ * aos chunks atuais.
+ */
+function hardReloadWithCacheBust() {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('_v', String(Date.now()));
+    window.location.replace(url.toString());
+  } catch {
+    window.location.reload();
+  }
+}
 
 /**
  * ErrorBoundary global para rotas. Evita "tela branca" quando:
