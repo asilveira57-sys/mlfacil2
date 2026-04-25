@@ -96,8 +96,9 @@ export class RouteErrorBoundary extends React.Component<
     } catch { /* ignore */ }
 
     this.setState({ autoRecovering: true });
-    this.autoRecoverTimer = window.setTimeout(() => {
-      window.location.reload();
+    this.autoRecoverTimer = window.setTimeout(async () => {
+      await clearStaleClientCaches();
+      hardReloadWithCacheBust();
     }, 1500);
   }
 
@@ -107,14 +108,15 @@ export class RouteErrorBoundary extends React.Component<
     }
   }
 
-  private handleReload = () => {
+  private handleReload = async () => {
     try {
       sessionStorage.removeItem('lazy_module_reloaded');
       sessionStorage.removeItem(AUTO_RECOVER_KEY);
     } catch {
       // ignore
     }
-    window.location.reload();
+    await clearStaleClientCaches();
+    hardReloadWithCacheBust();
   };
 
   render() {
