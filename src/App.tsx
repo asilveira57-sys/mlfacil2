@@ -59,12 +59,35 @@ const lazyRetry = (factory: () => Promise<any>) =>
                   factory()
                     .then((mod) => { clearLazyReloadFlag(); resolve(mod); })
                     .catch((err) => {
-                      // All retries failed — force full page reload once.
+                      // All retries failed — force full page reload once with cache-busting.
                       // If the flag is already set, propagate the error so the
                       // RouteErrorBoundary can render a recovery UI (avoids blank screen).
                       if (!sessionStorage.getItem('lazy_module_reloaded')) {
                         try { sessionStorage.setItem('lazy_module_reloaded', '1'); } catch { /* ignore */ }
-                        window.location.reload();
+                        // Limpa Service Worker / Cache API antes do reload para garantir
+                        // que o navegador busque o index.html mais recente.
+                        const doReload = () => {
+                          try {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set('_v', String(Date.now()));
+                            window.location.replace(url.toString());
+                          } catch {
+                            window.location.reload();
+                          }
+                        };
+                        (async () => {
+                          try {
+                            if ('caches' in window) {
+                              const keys = await caches.keys();
+                              await Promise.all(keys.map((k) => caches.delete(k)));
+                            }
+                            if ('serviceWorker' in navigator) {
+                              const regs = await navigator.serviceWorker.getRegistrations();
+                              await Promise.all(regs.map((r) => r.unregister()));
+                            }
+                          } catch { /* ignore */ }
+                          doReload();
+                        })();
                       } else {
                         clearLazyReloadFlag();
                         reject(err);
