@@ -73,9 +73,16 @@ export class RouteErrorBoundary extends React.Component<
     console.error('[RouteErrorBoundary] caught', error, info?.componentStack);
 
     const msg = error?.message || '';
+    const name = error?.name || '';
     const isTransient = /chunk|loading|dynamically imported|failed to fetch|networkerror/i.test(msg);
+    // Erros típicos quando uma extensão (Google Translate, Grammarly, etc.)
+    // muda o DOM por fora do React. Recuperamos com reload + flag para mostrar
+    // mensagem clara sobre o que aconteceu.
+    const isDomMutationByExtension =
+      /removeChild|insertBefore|not a child of this node|failed to execute .* on 'node'/i.test(msg)
+      || name === 'NotFoundError';
 
-    if (!isTransient) return;
+    if (!isTransient && !isDomMutationByExtension) return;
 
     // Verifica cooldown — se acabamos de tentar auto-recover, não tenta de novo.
     let lastRecoverAt = 0;
