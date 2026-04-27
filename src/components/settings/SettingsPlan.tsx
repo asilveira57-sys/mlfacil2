@@ -512,11 +512,23 @@ const SettingsPlan = () => {
                             <MessageCircle className="h-4 w-4 mr-2" />
                             Fale conosco
                           </Button>
+                        ) : !selectedOffer ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button className="w-full" variant="outline" disabled>
+                                <Lock className="h-4 w-4 mr-2" />
+                                Indisponível
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Sem oferta configurada para este plano. Contate o suporte.</p>
+                            </TooltipContent>
+                          </Tooltip>
                         ) : (
                           <Button
                             className="w-full"
                             variant={isRecommended ? "default" : "outline"}
-                            disabled={checkoutLoading || !selectedOffer}
+                            disabled={checkoutLoading}
                             onClick={() => handleChoosePlan(tier)}
                           >
                             {checkoutLoading ? "Processando..." : t('settings:plan.choose_plan')}
