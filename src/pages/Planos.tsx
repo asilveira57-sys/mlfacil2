@@ -53,7 +53,7 @@ const Planos = () => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from('profiles').select('tag').eq('id', user.id).single();
+      const { data } = await supabase.from('profiles').select('tag').eq('user_id', user.id).maybeSingle();
       setUserTag(data?.tag ?? null);
 
       // If veterano, fetch hidden offers

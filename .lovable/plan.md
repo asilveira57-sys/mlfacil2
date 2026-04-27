@@ -1,44 +1,54 @@
-Diagnóstico encontrado:
 
-- O cliente 373 Autoparts existe no cadastro como `373autoparts@gmail.com`, com tag `VETERANO`.
-- A conta do Mercado Livre dele está conectada e saudável: status `connected`, token renovado hoje, último OK de API hoje, sem erro registrado.
-- Portanto, o bloqueio não parece ser pagamento, plano, token do Mercado Livre ou cadastro do cliente.
-- A tela enviada é a tela genérica do nosso `RouteErrorBoundary` (“Não foi possível abrir esta página”). Na imagem aparece o pop-up do Google Translate ativo, e o `index.html` atual ainda está com `<html lang="en">`, mesmo o app sendo majoritariamente português. Isso faz o Chrome tentar traduzir a página automaticamente. Em apps React, o Google Translate pode alterar o DOM por fora do React e causar erros do tipo `removeChild/insertBefore/Node`, derrubando a tela. Isso também explica por que alguns clientes conseguem em janela anônima: extensões/tradução/cache geralmente não atuam igual no anônimo.
+## Diagnóstico — engenharia@megatools.com.br
 
-Plano de correção:
+Confirmei via banco:
+- Perfil: tag = `VETERANO` ✅ (migrada em 24/04 a partir do antigo cadastro Gmail)
+- `tenant_members`: owner do tenant `0cf61d63-…` ✅
+- `user_access_state`: `payment_status='trial'`, `trial_status='active'` (até 29/04), ML conectado como owner
+- `tenant_subscription` / `tenant_entitlements` / `tenant_payments`: **vazios** — ele nunca conseguiu efetivar o checkout
+- Tier `veterano` existe e está ativo; 3 ofertas (mensal R$44,90 / trimestral R$120 / semestral R$216) existem, todas com `is_active=true` mas `is_visible=false` e sem `mp_product_ref`
 
-1. Bloquear tradução automática do navegador no app
-   - Alterar o HTML base para português do Brasil.
-   - Adicionar metadados e atributos `notranslate` para impedir que o Google Translate modifique o DOM do sistema.
-   - Manter o seletor de idioma interno do app como forma segura de tradução.
+## Causa raiz do bloqueio
 
-2. Sincronizar o idioma real do app com o documento
-   - Atualizar `document.documentElement.lang` conforme o idioma escolhido no app (`pt-BR`, `en`, `es`).
-   - Isso evita que o navegador interprete o sistema como inglês quando o cliente está em português.
+A tela `/settings → Plano` (`SettingsPlan.tsx`) lista os tiers vindos do `useTierOffersCatalog` (edge `billing-public-plans`) **sem nenhum tratamento Veterano**:
 
-3. Melhorar a tela de recuperação para esse caso específico
-   - Detectar erros típicos de DOM alterado por tradutor/extensão, como `removeChild`, `insertBefore`, `Node`, `not a child`.
-   - Mostrar uma mensagem mais clara: “Detectamos interferência de tradução automática/extensão. Recarregue com a tradução desativada.”
-   - O botão de recarregar continuará limpando cache e forçando uma versão nova.
+1. A edge function só retorna ofertas com `is_visible=true`. Como as 3 ofertas Veteranas são invisíveis, o tier Veterano chega com `offers: []`.
+2. `SettingsPlan.tsx` mostra o card mesmo assim (não filtra), mas:
+   - `getSelectedOffer(tier)` retorna `null`
+   - O botão "Escolher plano" chama `checkout(undefined)` → falha silenciosa
+3. `SettingsPlan.tsx` não diferencia veterano de não-veterano: o tier Veterano aparece para **todos** os usuários (vazamento), e para o próprio veterano não há como contratar.
 
-4. Fortalecer a recuperação global
-   - Garantir que a proteção de erro cubra também falhas fora das rotas, quando possível, não só o conteúdo interno da página.
-   - Manter a recuperação de cache/chunks já implementada, pois ela resolve o outro cenário que já havíamos discutido.
+A página pública `/planos` (`Planos.tsx`) já trata o caso (busca ofertas escondidas e injeta), mas a tela de Settings — caminho mais natural para um cliente já logado — não. Foi ali que o megatools tentou.
 
-5. Validar após implementação
-   - Rodar checagem/build.
-   - Confirmar que não há erro de TypeScript.
-   - Depois será necessário publicar a versão para o domínio usado pelos clientes.
+Bônus: `billing-checkout` já lida bem com offers sem `mp_product_ref` (cria preapproval ad-hoc), então uma vez que a oferta chegue, o checkout funciona.
 
-Arquivos previstos:
+## Plano de correção
 
-- `index.html`
-- `src/lib/i18n/index.ts` ou um pequeno utilitário de idioma
-- `src/components/RouteErrorBoundary.tsx`
-- possivelmente `src/App.tsx` para posicionar melhor a proteção global de erro
+### 1. `SettingsPlan.tsx` — espelhar a lógica veterana de `Planos.tsx`
+- Buscar `profiles.tag` do usuário logado.
+- Se `tag === 'VETERANO'`: buscar ofertas Veteranas (`plan_offers` por `tier_id` veterano, `is_active=true`) e injetar em `tier.offers` para o tier `code='veterano'`.
+- Se não for veterano: filtrar `tiers.filter(t => t.code !== 'veterano')` para esconder o tier no Settings (vazamento atual).
 
-Resultado esperado:
+### 2. `Planos.tsx` — endurecer lookup do perfil
+Linha 56 usa `.eq('id', user.id)`. Funciona por coincidência (na maioria dos perfis `id == user_id`), mas é frágil. Trocar para `.eq('user_id', user.id)` para evitar quebrar usuários onde os IDs divergem.
 
-- O cliente 373 Autoparts e outros clientes deixam de cair nessa tela por causa da tradução automática/cache do navegador.
-- Quando houver interferência externa, a tela passa a orientar corretamente em vez de parecer um erro genérico do sistema.
-- O app continua multilíngue pelo seletor interno, sem depender do Google Translate do Chrome.
+### 3. UX defensiva em `SettingsPlan.tsx`
+- Desabilitar o botão "Escolher plano" quando `getSelectedOffer(tier)` for `null`, com label "Indisponível" + tooltip "Sem oferta configurada para este plano". Evita silenciar futuras inconsistências.
+
+### 4. (Opcional, recomendado) toast no `useOfferCheckout`
+Quando `offer.id` for falsy, mostrar `toast.error("Oferta indisponível. Contate o suporte.")` em vez de chamar a edge function com payload inválido.
+
+### 5. Validação manual após deploy
+- Logar como megatools, ir em **Configurações → Plano**, verificar que o card Veterano aparece com as 3 opções (Mensal/Trimestral/Semestral) e o botão funciona.
+- Logar com qualquer usuário não-veterano e confirmar que o tier Veterano **não aparece**.
+- Concluir um checkout de teste (mensal R$44,90) para validar a criação de preapproval ad-hoc (sem `mp_product_ref`) e gerar o registro em `tenant_subscription` via webhook.
+
+## Arquivos afetados
+- `src/components/settings/SettingsPlan.tsx` (lógica veterano + UX defensiva)
+- `src/pages/Planos.tsx` (corrigir `eq('id'…)` → `eq('user_id'…)`)
+- `src/hooks/useTierOffers.ts` (toast quando offer ausente)
+
+## Notas
+- Não tocar na edge function `billing-public-plans`: manter ofertas veteranas invisíveis no catálogo público é o comportamento desejado (memória `veterano-tier-policy`).
+- Não exige migração de banco — as ofertas já existem.
+- Após o checkout aprovado, o webhook MP populará `tenant_subscription` e `tenant_entitlements`, liberando definitivamente o acesso (hoje ele está rodando em trial até 29/04).
