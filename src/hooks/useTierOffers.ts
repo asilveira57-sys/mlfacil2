@@ -78,6 +78,10 @@ export function useOfferCheckout() {
   const [loading, setLoading] = useState(false);
 
   const checkout = useCallback(async (offerId: string) => {
+    if (!offerId) {
+      toast.error('Oferta indisponível', { description: 'Esta oferta não está disponível. Contate o suporte.' });
+      return null;
+    }
     try {
       setLoading(true);
 
