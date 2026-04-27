@@ -89,7 +89,48 @@ const SettingsPlan = () => {
   const [selectedModes, setSelectedModes] = useState<Record<string, BillingMode>>({});
   const [selectedOfferIds, setSelectedOfferIds] = useState<Record<string, string>>({});
 
-  const tiers = catalog?.tiers ?? [];
+  // Veterano support: invisible tier with hidden offers, only available for users with VETERANO tag
+  const [userTag, setUserTag] = useState<string | null>(null);
+  const [veteranoOffers, setVeteranoOffers] = useState<TierOffer[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('tag')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      setUserTag(profile?.tag ?? null);
+
+      if (profile?.tag === 'VETERANO') {
+        const { data: offers } = await supabase
+          .from('plan_offers')
+          .select('id, offer_code, billing_mode, period_months, price_brl, badge_text, is_campaign, mp_product_ref')
+          .eq('tier_id', 'f1e2d3c4-b5a6-7890-abcd-ef1234567890')
+          .eq('is_active', true)
+          .order('period_months');
+        if (offers && !cancelled) {
+          setVeteranoOffers(offers.map((o: any) => ({ ...o, price_brl: Number(o.price_brl) })) as TierOffer[]);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const isVeterano = userTag === 'VETERANO';
+
+  const tiers = (() => {
+    const base = catalog?.tiers ?? [];
+    if (isVeterano) {
+      return base.map((t) => (t.code === 'veterano' ? { ...t, offers: veteranoOffers } : t));
+    }
+    // Hide veterano tier from non-veteran users
+    return base.filter((t) => t.code !== 'veterano');
+  })();
   const trialDaysRemaining = flags?.trial_days_remaining ?? 0;
   const trialEndAt = flags?.trial_end_at;
 
