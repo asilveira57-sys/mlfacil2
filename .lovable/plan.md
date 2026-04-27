@@ -1,56 +1,44 @@
-## Diagnóstico — engenharia@megatools.com.br
+Diagnóstico encontrado:
 
-Esse cliente tem **dois registros distintos** no sistema, e a tag VETERANO foi aplicada no registro errado.
+- O cliente 373 Autoparts existe no cadastro como `373autoparts@gmail.com`, com tag `VETERANO`.
+- A conta do Mercado Livre dele está conectada e saudável: status `connected`, token renovado hoje, último OK de API hoje, sem erro registrado.
+- Portanto, o bloqueio não parece ser pagamento, plano, token do Mercado Livre ou cadastro do cliente.
+- A tela enviada é a tela genérica do nosso `RouteErrorBoundary` (“Não foi possível abrir esta página”). Na imagem aparece o pop-up do Google Translate ativo, e o `index.html` atual ainda está com `<html lang="en">`, mesmo o app sendo majoritariamente português. Isso faz o Chrome tentar traduzir a página automaticamente. Em apps React, o Google Translate pode alterar o DOM por fora do React e causar erros do tipo `removeChild/insertBefore/Node`, derrubando a tela. Isso também explica por que alguns clientes conseguem em janela anônima: extensões/tradução/cache geralmente não atuam igual no anônimo.
 
-### Registro 1 — antigo (importação Veterano)
-- `auth.users.id`: `cddaf599-9d2b-4c47-a315-e8af2ebdf4ab`
-- E-mail: **detilliengenharia@gmail.com**
-- Criado em: 26/03/2026
-- Nunca logou (`last_sign_in_at = NULL`)
-- Profile: `full_name = DETILLI ENGENHARIA`, **tag = VETERANO** ✅
+Plano de correção:
 
-### Registro 2 — atual (uso real)
-- `auth.users.id`: `eaced208-d2fa-45a8-a140-342a96ca19b9`
-- E-mail: **engenharia@megatools.com.br**
-- Criado em: 08/04/2026
-- Confirmado e logado (último login: 23/04/2026 17:34)
-- Profile: `full_name = Detilli Engenharia`, **tag = NULL** ❌
-- Detalhe crítico: este profile está com `user_id = NULL` (órfão do auth user real)
+1. Bloquear tradução automática do navegador no app
+   - Alterar o HTML base para português do Brasil.
+   - Adicionar metadados e atributos `notranslate` para impedir que o Google Translate modifique o DOM do sistema.
+   - Manter o seletor de idioma interno do app como forma segura de tradução.
 
-### Causa raiz
-Quando a importação inicial de Veteranos foi feita, o e-mail cadastrado para esse cliente era `detilliengenharia@gmail.com` (Gmail). Depois, o cliente fez um **novo cadastro próprio** usando o e-mail corporativo `engenharia@megatools.com.br`. Esse novo signup criou:
-1. Um auth user novo (`eaced208…`) — o que ele realmente usa hoje.
-2. Um profile novo, mas com `user_id` em branco (não foi vinculado ao auth user).
+2. Sincronizar o idioma real do app com o documento
+   - Atualizar `document.documentElement.lang` conforme o idioma escolhido no app (`pt-BR`, `en`, `es`).
+   - Isso evita que o navegador interprete o sistema como inglês quando o cliente está em português.
 
-A tag VETERANO ficou no profile antigo (Gmail), que nunca foi usado. Por isso, ao tentar comprar o Plano Veterano logado como `engenharia@megatools.com.br`, ele não passa na regra de elegibilidade — o sistema olha a tag do profile do usuário logado, e ele está sem tag.
+3. Melhorar a tela de recuperação para esse caso específico
+   - Detectar erros típicos de DOM alterado por tradutor/extensão, como `removeChild`, `insertBefore`, `Node`, `not a child`.
+   - Mostrar uma mensagem mais clara: “Detectamos interferência de tradução automática/extensão. Recarregue com a tradução desativada.”
+   - O botão de recarregar continuará limpando cache e forçando uma versão nova.
 
-Importante: ter a tag é condição **necessária mas não suficiente**. A política Veterano exige também `tenant_entitlements` válida para liberar os benefícios após o pagamento. Hoje ele tem zero pagamentos e zero entitlements registrados.
+4. Fortalecer a recuperação global
+   - Garantir que a proteção de erro cubra também falhas fora das rotas, quando possível, não só o conteúdo interno da página.
+   - Manter a recuperação de cache/chunks já implementada, pois ela resolve o outro cenário que já havíamos discutido.
 
-## Correção proposta
+5. Validar após implementação
+   - Rodar checagem/build.
+   - Confirmar que não há erro de TypeScript.
+   - Depois será necessário publicar a versão para o domínio usado pelos clientes.
 
-1. **Vincular o profile ativo ao auth user correto**
-   - Atualizar a linha de `profiles` cujo `email = engenharia@megatools.com.br` para `user_id = eaced208-d2fa-45a8-a140-342a96ca19b9`.
-   - Aplicar `tag = 'VETERANO'` nesse mesmo registro.
+Arquivos previstos:
 
-2. **Limpar o registro antigo (Gmail) para evitar conflito futuro**
-   - Verificar se o auth user `cddaf599…` (detilliengenharia@gmail.com) tem qualquer atividade (entitlements, payments, ml_accounts, etc.).
-   - Se estiver totalmente vazio (esperado, dado que nunca logou), removê-lo via fluxo padrão `admin-delete-user` para não poluir a base.
-   - Se tiver algum vínculo, apenas remover a tag VETERANO desse registro e deixar registrado em `audit_logs`.
+- `index.html`
+- `src/lib/i18n/index.ts` ou um pequeno utilitário de idioma
+- `src/components/RouteErrorBoundary.tsx`
+- possivelmente `src/App.tsx` para posicionar melhor a proteção global de erro
 
-3. **Registrar a operação em `audit_logs`**
-   - Ação: `veterano_tag_migration`
-   - Descrição: migração da tag VETERANO do profile órfão (Gmail) para o profile ativo (corporativo), com referência aos dois user_ids.
+Resultado esperado:
 
-4. **Não tocar em `tenant_entitlements`**
-   - O cliente ainda precisa pagar o Plano Veterano normalmente. A tag apenas libera a visibilidade da oferta e a elegibilidade do checkout. A ativação do entitlement continua sendo feita pelo webhook do Mercado Pago após o pagamento aprovado.
-
-## Resultado esperado
-
-Após a correção, ao logar com `engenharia@megatools.com.br`, o cliente:
-- Vê o card do Plano Veterano marcado como "Recomendado" (como na imagem que você enviou).
-- Consegue clicar em "Escolher plano" e prosseguir até o checkout do Mercado Pago.
-- Após pagamento aprovado, o webhook ativa o `tenant_entitlements` automaticamente (handler já corrigido recentemente para `subscription_authorized_payment`).
-
-## Observação para o futuro
-
-Esse caso evidencia uma fragilidade no fluxo de importação de Veteranos: quando o cliente importado se cadastra depois com um e-mail diferente do importado, a tag fica órfã. Se você quiser, posso propor em separado uma melhoria no painel admin de Veteranos para detectar e mesclar perfis duplicados por nome/CPF antes que o cliente perceba o problema.
+- O cliente 373 Autoparts e outros clientes deixam de cair nessa tela por causa da tradução automática/cache do navegador.
+- Quando houver interferência externa, a tela passa a orientar corretamente em vez de parecer um erro genérico do sistema.
+- O app continua multilíngue pelo seletor interno, sem depender do Google Translate do Chrome.
