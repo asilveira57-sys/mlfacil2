@@ -73,9 +73,16 @@ export class RouteErrorBoundary extends React.Component<
     console.error('[RouteErrorBoundary] caught', error, info?.componentStack);
 
     const msg = error?.message || '';
+    const name = error?.name || '';
     const isTransient = /chunk|loading|dynamically imported|failed to fetch|networkerror/i.test(msg);
+    // Erros típicos quando uma extensão (Google Translate, Grammarly, etc.)
+    // muda o DOM por fora do React. Recuperamos com reload + flag para mostrar
+    // mensagem clara sobre o que aconteceu.
+    const isDomMutationByExtension =
+      /removeChild|insertBefore|not a child of this node|failed to execute .* on 'node'/i.test(msg)
+      || name === 'NotFoundError';
 
-    if (!isTransient) return;
+    if (!isTransient && !isDomMutationByExtension) return;
 
     // Verifica cooldown — se acabamos de tentar auto-recover, não tenta de novo.
     let lastRecoverAt = 0;
@@ -144,6 +151,20 @@ export class RouteErrorBoundary extends React.Component<
       );
     }
 
+    const isExtensionInterference =
+      /removeChild|insertBefore|not a child of this node|failed to execute .* on 'node'/i.test(msg)
+      || this.state.error?.name === 'NotFoundError';
+
+    let title = 'Não foi possível abrir esta página';
+    let description = 'Ocorreu um erro inesperado. Recarregue a página para tentar novamente.';
+    if (isExtensionInterference) {
+      title = 'Tradução automática ou extensão interferindo';
+      description =
+        'Detectamos que a tradução automática do navegador (ou uma extensão) está alterando o sistema e impedindo o carregamento. Desative a tradução desta página e recarregue. Se preferir, use o seletor de idioma do próprio sistema.';
+    } else if (isChunk) {
+      description = 'O sistema foi atualizado ou sua conexão oscilou. Recarregue para carregar a versão mais recente.';
+    }
+
     return (
       <div className="min-h-[60vh] flex items-center justify-center p-6">
         <div className="max-w-md w-full bg-card border rounded-lg p-6 text-center space-y-4">
@@ -153,12 +174,8 @@ export class RouteErrorBoundary extends React.Component<
             </div>
           </div>
           <div>
-            <h2 className="text-lg font-semibold">Não foi possível abrir esta página</h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              {isChunk
-                ? 'O sistema foi atualizado ou sua conexão oscilou. Recarregue para carregar a versão mais recente.'
-                : 'Ocorreu um erro inesperado. Recarregue a página para tentar novamente.'}
-            </p>
+            <h2 className="text-lg font-semibold">{title}</h2>
+            <p className="text-sm text-muted-foreground mt-1">{description}</p>
           </div>
           <details className="text-xs text-muted-foreground text-left bg-muted rounded p-2">
             <summary className="cursor-pointer">Detalhes técnicos</summary>

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR" translate="no">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,6 +8,12 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
+    <!-- Bloquear tradução automática do navegador (Google Translate).
+         Tradutores reescrevem o DOM por fora do React e quebram a árvore de
+         componentes (erros típicos: removeChild / insertBefore / NotFoundError),
+         derrubando o app na tela "Não foi possível abrir esta página". -->
+    <meta name="google" content="notranslate" />
+    <meta http-equiv="Content-Language" content="pt-BR" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico?v=3" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png?v=3" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=3" />
@@ -43,8 +49,8 @@
     </script>
   </head>
 
-  <body>
-    <div id="root"></div>
+  <body class="notranslate" translate="no">
+    <div id="root" class="notranslate" translate="no"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

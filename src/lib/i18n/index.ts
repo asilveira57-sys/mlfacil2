@@ -162,6 +162,24 @@ i18n
     },
   });
 
+// Mantém <html lang="..."> sincronizado com o idioma ativo do app.
+// Importante para SEO, acessibilidade e — principalmente — para o navegador
+// não tentar traduzir automaticamente um app pt-BR achando que é "en".
+function syncDocumentLang(lng: string) {
+  if (typeof document === 'undefined') return;
+  try {
+    const normalized = SUPPORTED_LANGUAGES.includes(lng as SupportedLanguage)
+      ? lng
+      : 'pt-BR';
+    document.documentElement.setAttribute('lang', normalized);
+    // Reforça o bloqueio de tradução automática.
+    document.documentElement.setAttribute('translate', 'no');
+  } catch { /* ignore */ }
+}
+
+syncDocumentLang(i18n.language);
+i18n.on('languageChanged', syncDocumentLang);
+
 // Map navigator language to supported language
 export function mapBrowserLanguage(browserLang: string): SupportedLanguage {
   const lang = browserLang.toLowerCase();
