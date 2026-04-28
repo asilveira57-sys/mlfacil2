@@ -1,0 +1,1 @@
+UPDATE plan_offers SET price_brl = price_brl / 100.0 WHERE tier_id = (SELECT id FROM plan_tiers WHERE code = 'veterano') AND price_brl >= 1000;
