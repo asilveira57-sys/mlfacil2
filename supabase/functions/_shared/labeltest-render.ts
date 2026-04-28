@@ -17,7 +17,7 @@ export const HEADER_H_MM = 25;
 
 export const LAYOUTS: Record<string, { widthMm: number; heightMm: number; includeHeader: boolean; includeDanfe: boolean }> = {
   'meli_100x150':           { widthMm: 100, heightMm: 150, includeHeader: false, includeDanfe: true },
-  'meli_100x150_no_nf':     { widthMm: 100, heightMm: 150, includeHeader: false, includeDanfe: false },
+  'meli_100x150_no_nf':     { widthMm: 100, heightMm: 175, includeHeader: true,  includeDanfe: false },
   'mlfacil_100x175_header': { widthMm: 100, heightMm: 175, includeHeader: true,  includeDanfe: true },
 };
 
