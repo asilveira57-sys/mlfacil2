@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,13 +26,15 @@ import {
   Eye,
   CheckCircle,
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { useWebhookLogs, type WebhookLogData } from '@/hooks/useAdmin';
 import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/edgeFunctionClient';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { toast } from 'sonner';
 
 interface SubscriptionData {
   id: string;
@@ -63,7 +65,9 @@ interface PaymentData {
 }
 
 export function AdminPayments() {
+  const queryClient = useQueryClient();
   const { data: webhooks, isLoading: webhooksLoading } = useWebhookLogs();
+  const [reconciling, setReconciling] = useState(false);
 
   const { data: billingActivity, isLoading: billingLoading } = useQuery({
     queryKey: ['admin', 'billing-activity'],
@@ -89,6 +93,27 @@ export function AdminPayments() {
     open: false,
     data: null,
   });
+
+  const handleReconcile = async (sinceDays: number) => {
+    setReconciling(true);
+    try {
+      const result = await invokeEdgeFunction<any>('billing-admin', {
+        body: { action: 'reconcile', since_days: sinceDays },
+      });
+      if (!result.success) throw new Error(result.error || 'Falha na sincronização');
+      const r = result.data?.result || {};
+      toast.success('Sincronização concluída', {
+        description: `Buscados: ${r.fetched ?? 0} • Ativados: ${r.activated ?? 0} • Renovados: ${r.renewed ?? 0} • Duplicados: ${r.skipped_duplicate ?? 0} • Não vinculados: ${r.unresolved ?? 0}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'billing-activity'] });
+    } catch (err) {
+      toast.error('Erro ao sincronizar', {
+        description: err instanceof Error ? err.message : 'Erro desconhecido',
+      });
+    } finally {
+      setReconciling(false);
+    }
+  };
 
   const getPaymentStatusBadge = (status: string) => {
     switch (status) {
@@ -118,11 +143,35 @@ export function AdminPayments() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Pagamentos</h1>
-        <p className="text-muted-foreground">
-          Gerencie pagamentos, assinaturas e webhooks
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Pagamentos</h1>
+          <p className="text-muted-foreground">
+            Gerencie pagamentos, assinaturas e webhooks
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleReconcile(7)}
+            disabled={reconciling}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${reconciling ? 'animate-spin' : ''}`} />
+            Sincronizar 7 dias
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => handleReconcile(30)}
+            disabled={reconciling}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${reconciling ? 'animate-spin' : ''}`} />
+            Sincronizar 30 dias
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="subscriptions">

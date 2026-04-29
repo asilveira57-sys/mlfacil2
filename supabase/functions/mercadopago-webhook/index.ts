@@ -1,35 +1,24 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { auditLog } from '../_shared/audit-log.ts';
+import { auditLog } from "../_shared/audit-log.ts";
 
 const MP_API_URL = "https://api.mercadopago.com";
 
-// Parse external_reference: "entity_code:offer_code:tenant_id:user_id"
-function parseExternalRef(ref: string) {
-  const parts = (ref || "").split(":");
-  if (parts.length < 4) return null;
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
-  const entityCode = parts[0];
-  const offerCode = parts[1];
-  const tenantId = parts[2];
-  const userId = parts[3];
-
-  let entitlementType: "tier" | "addon" = "tier";
-  let tierCode: string | null = null;
-  let addonCode: string | null = null;
-
-  if (entityCode.startsWith("addon_")) {
-    entitlementType = "addon";
-    addonCode = entityCode.replace("addon_", "");
-  } else {
-    tierCode = entityCode;
-  }
-
-  return { entitlementType, tierCode, addonCode, offerCode, tenantId, userId };
-}
-
+/**
+ * Tolerant Mercado Pago webhook receiver.
+ *
+ * Accepts ALL real MP payloads:
+ *   - Body { type|topic, data:{ id }, action, resource }
+ *   - Querystring ?type=payment&id=xxx or ?topic=preapproval&id=xxx
+ * Always responds 200 to avoid breaking MP retries; failures are logged internally.
+ */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200 });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -37,343 +26,215 @@ Deno.serve(async (req) => {
   const mpAccessToken = Deno.env.get("MERCADOPAGO_ACCESS_TOKEN");
   const supabase = createClient(supabaseUrl, supabaseKey);
 
+  const url = new URL(req.url);
+  const qs = Object.fromEntries(url.searchParams.entries());
+  let body: any = {};
   try {
-    const body = await req.json();
-    console.log("[Webhook] Received:", JSON.stringify(body));
+    if (req.method !== "GET") body = await req.json();
+  } catch {
+    body = {};
+  }
 
-    const { type, data } = body;
+  console.log("[Webhook] qs:", JSON.stringify(qs), "body:", JSON.stringify(body));
 
-    // ─── PREAPPROVAL (subscription) notifications ───
-    if (type === "subscription_preapproval" && data?.id) {
-      const preapprovalId = data.id;
+  // Normalize event kind + id from any MP payload variant
+  const kind: string =
+    body?.type ?? body?.topic ?? qs.type ?? qs.topic ?? "";
+  const eventId: string =
+    body?.data?.id ?? body?.id ?? qs.id ?? qs["data.id"] ?? "";
+  const action: string = body?.action ?? "";
 
-      const mpRes = await fetch(`${MP_API_URL}/preapproval/${preapprovalId}`, {
-        headers: { Authorization: `Bearer ${mpAccessToken}` },
-      });
+  // Optional: parse resource URL like "/v1/payments/123" to extract id
+  let resourceId = "";
+  if (!eventId && typeof body?.resource === "string") {
+    const m = body.resource.match(/(\d+)$/);
+    if (m) resourceId = m[1];
+  }
+  const finalId = String(eventId || resourceId || "");
 
-      if (!mpRes.ok) {
-        console.error("[Webhook] Failed to fetch preapproval:", await mpRes.text());
-        return new Response("OK", { status: 200 });
-      }
+  if (!mpAccessToken) {
+    console.error("[Webhook] Missing MERCADOPAGO_ACCESS_TOKEN");
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
 
-      const preapproval = await mpRes.json();
-      console.log("[Webhook] Preapproval:", {
-        id: preapproval.id, status: preapproval.status,
-        external_reference: preapproval.external_reference,
-      });
+  if (!finalId) {
+    console.warn("[Webhook] No id resolved from payload, ignoring.");
+    return new Response("OK", { status: 200, headers: corsHeaders });
+  }
 
-      const parsed = parseExternalRef(preapproval.external_reference);
-      if (!parsed) {
-        console.error("[Webhook] Invalid external_reference:", preapproval.external_reference);
-        return new Response("OK", { status: 200 });
-      }
-
-      if (preapproval.status === "authorized") {
-        // Activate entitlement
-        const { data: result, error } = await supabase.rpc("rpc_activate_entitlement", {
-          p_tenant_id: parsed.tenantId,
-          p_entitlement_type: parsed.entitlementType,
-          p_tier_code: parsed.tierCode,
-          p_addon_code: parsed.addonCode,
-          p_offer_code: parsed.offerCode,
-          p_payment_id: preapprovalId,
-          p_external_reference: preapproval.external_reference,
-          p_auto_renew: true,
+  try {
+    // ─── PAYMENT (one-time / preference) ────────────────────────────
+    if (
+      kind === "payment" ||
+      action.startsWith("payment.") ||
+      kind === "collection" ||
+      kind === "merchant_order"
+    ) {
+      // For merchant_order, fetch the order then process all included payments
+      if (kind === "merchant_order") {
+        const moRes = await fetch(`${MP_API_URL}/merchant_orders/${finalId}`, {
+          headers: { Authorization: `Bearer ${mpAccessToken}` },
         });
-
-        if (error) {
-          console.error("[Webhook] rpc_activate_entitlement error:", error);
-        } else {
-          console.log("[Webhook] Entitlement activated:", result);
+        if (!moRes.ok) {
+          console.error("[Webhook] merchant_order fetch failed:", await moRes.text());
+          return new Response("OK", { status: 200, headers: corsHeaders });
         }
-
-        // Record payment
-        await supabase.from("tenant_payments").insert({
-          tenant_id: parsed.tenantId,
-          provider: "mercadopago",
-          payment_id: preapprovalId,
-          external_reference: preapproval.external_reference,
-          amount_brl: preapproval.auto_recurring?.transaction_amount || 0,
-          status: "approved",
-          paid_at: new Date().toISOString(),
-          raw: preapproval,
-        });
-
-      } else if (preapproval.status === "cancelled") {
-        await supabase
-          .from("tenant_entitlements")
-          .update({ status: "canceled", updated_at: new Date().toISOString() })
-          .eq("tenant_id", parsed.tenantId)
-          .eq("last_payment_id", preapprovalId)
-          .in("status", ["active", "past_due"]);
-
-        await auditLog(supabase, {
-          level: "warn", area: "billing", action: "subscription_canceled",
-          userId: parsed.userId, success: true,
-          message: `Assinatura cancelada para tenant ${parsed.tenantId}`,
-          meta: { tenant_id: parsed.tenantId, preapproval_id: preapprovalId, type: parsed.entitlementType },
-        });
-
-      } else if (preapproval.status === "paused") {
-        await supabase
-          .from("tenant_entitlements")
-          .update({ status: "past_due", updated_at: new Date().toISOString() })
-          .eq("tenant_id", parsed.tenantId)
-          .eq("entitlement_type", parsed.entitlementType)
-          .in("status", ["active"]);
-
-        await auditLog(supabase, {
-          level: "warn", area: "billing", action: "subscription_paused",
-          userId: parsed.userId, success: true,
-          message: `Assinatura pausada para tenant ${parsed.tenantId}`,
-          meta: { tenant_id: parsed.tenantId, preapproval_id: preapprovalId },
-        });
+        const mo = await moRes.json();
+        for (const p of mo.payments || []) {
+          await processPayment(supabase, mpAccessToken, String(p.id));
+        }
+        return new Response("OK", { status: 200, headers: corsHeaders });
       }
 
-      return new Response("OK", { status: 200 });
+      await processPayment(supabase, mpAccessToken, finalId);
+      return new Response("OK", { status: 200, headers: corsHeaders });
     }
 
-    // ─── SUBSCRIPTION AUTHORIZED PAYMENT (recurring billing) ───
-    if (type === "subscription_authorized_payment" && data?.id) {
-      const authPaymentId = data.id;
-
-      // Fetch authorized_payment details from MP
-      const apRes = await fetch(`${MP_API_URL}/authorized_payments/${authPaymentId}`, {
-        headers: { Authorization: `Bearer ${mpAccessToken}` },
-      });
-
-      if (!apRes.ok) {
-        console.error("[Webhook] Failed to fetch authorized_payment:", await apRes.text());
-        return new Response("OK", { status: 200 });
-      }
-
-      const authPayment = await apRes.json();
-      console.log("[Webhook] AuthorizedPayment:", {
-        id: authPayment.id,
-        status: authPayment.status,
-        preapproval_id: authPayment.preapproval_id,
-        payment_id: authPayment.payment?.id,
-      });
-
-      // We need the preapproval to get external_reference
-      const preapprovalId = authPayment.preapproval_id;
-      if (!preapprovalId) {
-        console.error("[Webhook] authorized_payment missing preapproval_id");
-        return new Response("OK", { status: 200 });
-      }
-
-      const paRes = await fetch(`${MP_API_URL}/preapproval/${preapprovalId}`, {
-        headers: { Authorization: `Bearer ${mpAccessToken}` },
-      });
-
-      if (!paRes.ok) {
-        console.error("[Webhook] Failed to fetch preapproval for auth_payment:", await paRes.text());
-        return new Response("OK", { status: 200 });
-      }
-
-      const preapproval = await paRes.json();
-      const parsed = parseExternalRef(preapproval.external_reference);
-      if (!parsed) {
-        console.error("[Webhook] Invalid external_reference on preapproval:", preapproval.external_reference);
-        return new Response("OK", { status: 200 });
-      }
-
-      const realPaymentId = String(authPayment.payment?.id || authPaymentId);
-      const amount = authPayment.transaction_amount || preapproval.auto_recurring?.transaction_amount || 0;
-
-      // Record payment (idempotent)
-      await supabase.from("tenant_payments").upsert({
-        tenant_id: parsed.tenantId,
-        provider: "mercadopago",
-        payment_id: realPaymentId,
-        external_reference: preapproval.external_reference,
-        amount_brl: amount,
-        currency: authPayment.currency_id || "BRL",
-        status: authPayment.status,
-        paid_at: authPayment.status === "approved" ? new Date().toISOString() : null,
-        raw: { authorized_payment: authPayment, preapproval },
-      }, { onConflict: "provider,payment_id" });
-
-      if (authPayment.status === "approved") {
-        // Check existing entitlement
-        const { data: existingEnt } = await supabase
-          .from("tenant_entitlements")
-          .select("id")
-          .eq("tenant_id", parsed.tenantId)
-          .eq("entitlement_type", parsed.entitlementType)
-          .in("status", ["active", "past_due", "canceled"])
-          .limit(1)
-          .maybeSingle();
-
-        if (existingEnt) {
-          // Renew
-          const { data: result, error } = await supabase.rpc("rpc_renew_entitlement", {
-            p_tenant_id: parsed.tenantId,
-            p_entitlement_type: parsed.entitlementType,
-            p_payment_id: realPaymentId,
-            p_external_reference: preapproval.external_reference,
-          });
-          console.log("[Webhook] Recurring renewal:", result, error);
-        } else {
-          // Activate (first recurring charge without prior preapproval webhook)
-          const { data: result, error } = await supabase.rpc("rpc_activate_entitlement", {
-            p_tenant_id: parsed.tenantId,
-            p_entitlement_type: parsed.entitlementType,
-            p_tier_code: parsed.tierCode,
-            p_addon_code: parsed.addonCode,
-            p_offer_code: parsed.offerCode,
-            p_payment_id: realPaymentId,
-            p_external_reference: preapproval.external_reference,
-            p_auto_renew: true,
-          });
-          console.log("[Webhook] Recurring activation:", result, error);
-        }
-
-        await auditLog(supabase, {
-          level: "info", area: "billing", action: "subscription_authorized_payment_approved",
-          userId: parsed.userId, success: true,
-          message: `Cobrança recorrente aprovada: ${preapproval.external_reference}`,
-          meta: {
-            authorized_payment_id: authPaymentId,
-            payment_id: realPaymentId,
-            preapproval_id: preapprovalId,
-            amount,
-            type: parsed.entitlementType,
-          },
-        });
-      } else if (authPayment.status === "rejected") {
-        await auditLog(supabase, {
-          level: "warn", area: "billing", action: "subscription_authorized_payment_rejected",
-          userId: parsed.userId, success: false,
-          message: `Cobrança recorrente rejeitada: ${preapproval.external_reference}`,
-          meta: {
-            authorized_payment_id: authPaymentId,
-            preapproval_id: preapprovalId,
-            status_detail: authPayment.status_detail,
-          },
-        });
-      }
-
-      return new Response("OK", { status: 200 });
+    // ─── PREAPPROVAL (subscription created/updated) ─────────────────
+    if (kind === "subscription_preapproval" || kind === "preapproval") {
+      await processPreapproval(supabase, mpAccessToken, finalId);
+      return new Response("OK", { status: 200, headers: corsHeaders });
     }
 
-    // ─── PAYMENT notifications (one-time / preference) ───
-    if (type === "payment" && data?.id) {
-      const paymentId = data.id;
-
-      const mpRes = await fetch(`${MP_API_URL}/v1/payments/${paymentId}`, {
-        headers: { Authorization: `Bearer ${mpAccessToken}` },
-      });
-
-      if (!mpRes.ok) {
-        console.error("[Webhook] Failed to fetch payment:", await mpRes.text());
-        return new Response("OK", { status: 200 });
-      }
-
-      const payment = await mpRes.json();
-      console.log("[Webhook] Payment:", {
-        id: payment.id, status: payment.status,
-        external_reference: payment.external_reference,
-      });
-
-      const parsed = parseExternalRef(payment.external_reference);
-      if (!parsed) {
-        console.error("[Webhook] Invalid external_reference:", payment.external_reference);
-        return new Response("OK", { status: 200 });
-      }
-
-      // Record payment regardless of status
-      await supabase.from("tenant_payments").upsert({
-        tenant_id: parsed.tenantId,
-        provider: "mercadopago",
-        payment_id: String(payment.id),
-        external_reference: payment.external_reference,
-        amount_brl: payment.transaction_amount || 0,
-        currency: payment.currency_id || "BRL",
-        status: payment.status,
-        paid_at: payment.status === "approved" ? new Date().toISOString() : null,
-        raw: payment,
-      }, { onConflict: "provider,payment_id" });
-
-      if (payment.status === "approved") {
-        // Check if this is a renewal (existing active entitlement with same type)
-        const { data: existingEnt } = await supabase
-          .from("tenant_entitlements")
-          .select("id")
-          .eq("tenant_id", parsed.tenantId)
-          .eq("entitlement_type", parsed.entitlementType)
-          .in("status", ["active", "past_due"])
-          .limit(1)
-          .single();
-
-        if (existingEnt) {
-          // Renew existing
-          const { data: result, error } = await supabase.rpc("rpc_renew_entitlement", {
-            p_tenant_id: parsed.tenantId,
-            p_entitlement_type: parsed.entitlementType,
-            p_payment_id: String(payment.id),
-            p_external_reference: payment.external_reference,
-          });
-          console.log("[Webhook] Entitlement renewed:", result, error);
-        } else {
-          // Activate new
-          const { data: result, error } = await supabase.rpc("rpc_activate_entitlement", {
-            p_tenant_id: parsed.tenantId,
-            p_entitlement_type: parsed.entitlementType,
-            p_tier_code: parsed.tierCode,
-            p_addon_code: parsed.addonCode,
-            p_offer_code: parsed.offerCode,
-            p_payment_id: String(payment.id),
-            p_external_reference: payment.external_reference,
-            p_auto_renew: false,
-          });
-          console.log("[Webhook] Entitlement activated:", result, error);
-        }
-
-        await auditLog(supabase, {
-          level: "info", area: "billing", action: "payment_approved",
-          userId: parsed.userId, success: true,
-          message: `Pagamento aprovado: ${payment.external_reference}`,
-          meta: { payment_id: payment.id, amount: payment.transaction_amount, type: parsed.entitlementType },
-        });
-
-        // Schedule historical import for tier activations
-        if (parsed.entitlementType === "tier") {
-          try {
-            const { data: accounts } = await supabase
-              .from("meli_accounts")
-              .select("meli_user_id")
-              .eq("tenant_id", parsed.tenantId)
-              .eq("status", "active");
-
-            for (const acc of accounts || []) {
-              await supabase.rpc("rpc_create_sync_job", {
-                p_tenant_id: parsed.tenantId,
-                p_module: "costs_orders_import",
-                p_scope: "last_12m",
-                p_metadata: { seller_id: acc.meli_user_id, trigger: "payment_confirmed" },
-              });
-            }
-          } catch (e) {
-            console.error("[Webhook] Error scheduling historical import:", e);
-          }
-        }
-
-      } else if (payment.status === "rejected") {
-        await auditLog(supabase, {
-          level: "warn", area: "billing", action: "payment_rejected",
-          userId: parsed.userId, success: false,
-          message: `Pagamento rejeitado: ${payment.external_reference}`,
-          meta: { payment_id: payment.id, status_detail: payment.status_detail },
-        });
-      }
-
-      return new Response("OK", { status: 200 });
+    // ─── SUBSCRIPTION CHARGE (recurring billing) ────────────────────
+    if (
+      kind === "subscription_authorized_payment" ||
+      kind === "authorized_payment"
+    ) {
+      await processAuthorizedPayment(supabase, mpAccessToken, finalId);
+      return new Response("OK", { status: 200, headers: corsHeaders });
     }
 
-    return new Response("OK", { status: 200 });
+    console.log("[Webhook] Unhandled kind:", kind);
+    return new Response("OK", { status: 200, headers: corsHeaders });
   } catch (err) {
-    console.error("[Webhook] Error:", err);
-    return new Response("OK", { status: 200 });
+    console.error("[Webhook] Unhandled error:", err);
+    await auditLog(supabase, {
+      level: "error",
+      area: "billing",
+      action: "webhook_error",
+      success: false,
+      message: `Webhook error: ${err instanceof Error ? err.message : String(err)}`,
+      meta: { kind, finalId, body, qs },
+    });
+    return new Response("OK", { status: 200, headers: corsHeaders });
   }
 });
+
+async function processPayment(supabase: any, token: string, paymentId: string) {
+  const res = await fetch(`${MP_API_URL}/v1/payments/${paymentId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    console.error(`[Webhook] payment ${paymentId} fetch failed:`, await res.text());
+    return;
+  }
+  const payment = await res.json();
+  console.log("[Webhook] payment", payment.id, payment.status, payment.external_reference);
+
+  const result = await supabase.rpc("rpc_process_mp_payment", {
+    p_payment_id: String(payment.id),
+    p_external_reference: payment.external_reference || null,
+    p_amount_brl: payment.transaction_amount ?? 0,
+    p_currency: payment.currency_id || "BRL",
+    p_status: payment.status || "unknown",
+    p_status_detail: payment.status_detail || null,
+    p_payer_email: payment.payer?.email || null,
+    p_paid_at: payment.date_approved || null,
+    p_raw: payment,
+    p_auto_renew: false,
+  });
+
+  await auditLog(supabase, {
+    level: result.error ? "error" : "info",
+    area: "billing",
+    action: "webhook_payment_processed",
+    success: !result.error,
+    message: `Payment ${payment.id} ${payment.status}`,
+    meta: { payment_id: payment.id, status: payment.status, result: result.data, error: result.error?.message },
+  });
+}
+
+async function processPreapproval(supabase: any, token: string, preapprovalId: string) {
+  const res = await fetch(`${MP_API_URL}/preapproval/${preapprovalId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    console.error(`[Webhook] preapproval ${preapprovalId} fetch failed:`, await res.text());
+    return;
+  }
+  const pa = await res.json();
+  console.log("[Webhook] preapproval", pa.id, pa.status, pa.external_reference);
+
+  // Status: pending|authorized|paused|cancelled
+  // For authorized preapprovals, charges arrive via subscription_authorized_payment. Just record state.
+  if (pa.status === "cancelled" || pa.status === "paused") {
+    await supabase
+      .from("tenant_entitlements")
+      .update({
+        status: pa.status === "cancelled" ? "canceled" : "past_due",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("last_external_reference", pa.external_reference)
+      .in("status", ["active", "past_due"]);
+
+    await auditLog(supabase, {
+      level: "warn",
+      area: "billing",
+      action: `subscription_${pa.status}`,
+      success: true,
+      message: `Subscription ${pa.status}`,
+      meta: { preapproval_id: pa.id, external_reference: pa.external_reference },
+    });
+  }
+}
+
+async function processAuthorizedPayment(supabase: any, token: string, authPaymentId: string) {
+  const res = await fetch(`${MP_API_URL}/authorized_payments/${authPaymentId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    console.error(`[Webhook] auth_payment ${authPaymentId} fetch failed:`, await res.text());
+    return;
+  }
+  const ap = await res.json();
+  const realPaymentId = String(ap.payment?.id || authPaymentId);
+
+  // Get external_reference from the parent preapproval
+  let externalRef: string | null = null;
+  let payerEmail: string | null = null;
+  if (ap.preapproval_id) {
+    const paRes = await fetch(`${MP_API_URL}/preapproval/${ap.preapproval_id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (paRes.ok) {
+      const pa = await paRes.json();
+      externalRef = pa.external_reference || null;
+      payerEmail = pa.payer_email || null;
+    }
+  }
+
+  console.log("[Webhook] authorized_payment", ap.id, ap.status, "->", realPaymentId, "ref:", externalRef);
+
+  const result = await supabase.rpc("rpc_process_mp_payment", {
+    p_payment_id: realPaymentId,
+    p_external_reference: externalRef,
+    p_amount_brl: ap.transaction_amount ?? 0,
+    p_currency: ap.currency_id || "BRL",
+    p_status: ap.status || "unknown",
+    p_status_detail: ap.status_detail || null,
+    p_payer_email: payerEmail,
+    p_paid_at: ap.payment?.date_approved || null,
+    p_raw: { authorized_payment: ap },
+    p_auto_renew: true,
+  });
+
+  await auditLog(supabase, {
+    level: result.error ? "error" : "info",
+    area: "billing",
+    action: "webhook_subscription_charge",
+    success: !result.error,
+    message: `Recurring charge ${realPaymentId} ${ap.status}`,
+    meta: { authorized_payment_id: ap.id, payment_id: realPaymentId, result: result.data, error: result.error?.message },
+  });
+}

@@ -266,6 +266,62 @@ serve(async (req) => {
       );
     }
 
+    // POST: Reconcile Mercado Pago payments (call billing-reconcile-payments)
+    if (req.method === "POST" && action === "reconcile") {
+      const sinceDays = Number(body?.since_days) || 7;
+      const reconcileRes = await fetch(`${supabaseUrl}/functions/v1/billing-reconcile-payments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseServiceKey}`,
+          apikey: supabaseServiceKey,
+          "x-cron-key": Deno.env.get("CRON_KEY") || "",
+        },
+        body: JSON.stringify({ since_days: sinceDays }),
+      });
+      const text = await reconcileRes.text();
+      let json: any = null;
+      try { json = JSON.parse(text); } catch { json = { raw: text }; }
+
+      return new Response(
+        JSON.stringify({ success: reconcileRes.ok, status: reconcileRes.status, result: json }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // POST: List unresolved payments (recorded but no entitlement linked)
+    if (req.method === "POST" && action === "list-unresolved") {
+      const { data: rows, error } = await supabase
+        .from("tenant_payments")
+        .select("id, tenant_id, payment_id, external_reference, amount_brl, status, paid_at, created_at, raw")
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (error) throw error;
+
+      const tenantIds = Array.from(new Set((rows || []).map((r: any) => r.tenant_id).filter(Boolean)));
+      const linkedSet = new Set<string>();
+      if (tenantIds.length > 0) {
+        const { data: ents } = await supabase
+          .from("tenant_entitlements")
+          .select("tenant_id, last_payment_id")
+          .in("tenant_id", tenantIds);
+        for (const e of ents || []) {
+          if (e.last_payment_id) linkedSet.add(`${e.tenant_id}:${e.last_payment_id}`);
+        }
+      }
+
+      const unresolved = (rows || []).filter((r: any) => {
+        if (!r.tenant_id || r.tenant_id === "00000000-0000-0000-0000-000000000000") return true;
+        return !linkedSet.has(`${r.tenant_id}:${r.payment_id}`);
+      });
+
+      return new Response(
+        JSON.stringify({ unresolved }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ error: "Unknown action" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
