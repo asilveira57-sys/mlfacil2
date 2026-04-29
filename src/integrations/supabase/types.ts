@@ -21844,6 +21844,21 @@ export type Database = {
         Args: { p_account_id: string; p_tenant_id: string }
         Returns: Json
       }
+      rpc_process_mp_payment: {
+        Args: {
+          p_amount_brl: number
+          p_auto_renew?: boolean
+          p_currency: string
+          p_external_reference: string
+          p_paid_at: string
+          p_payer_email: string
+          p_payment_id: string
+          p_raw: Json
+          p_status: string
+          p_status_detail: string
+        }
+        Returns: Json
+      }
       rpc_renew_entitlement: {
         Args: {
           p_entitlement_type: string
@@ -21855,6 +21870,14 @@ export type Database = {
       }
       rpc_require_billing_after_payment: {
         Args: { p_tenant_id: string }
+        Returns: Json
+      }
+      rpc_resolve_tenant_for_mp: {
+        Args: {
+          p_amount: number
+          p_external_reference: string
+          p_payer_email: string
+        }
         Returns: Json
       }
       rpc_start_tenant_trial: { Args: { p_tenant_id: string }; Returns: Json }
