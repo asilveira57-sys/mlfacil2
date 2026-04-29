@@ -1,54 +1,143 @@
+Plano de ação urgente para pagamentos
 
-## Diagnóstico — engenharia@megatools.com.br
+Identifiquei sinais fortes de que o problema não é um caso isolado de cliente, e sim uma falha estrutural no reconhecimento automático:
 
-Confirmei via banco:
-- Perfil: tag = `VETERANO` ✅ (migrada em 24/04 a partir do antigo cadastro Gmail)
-- `tenant_members`: owner do tenant `0cf61d63-…` ✅
-- `user_access_state`: `payment_status='trial'`, `trial_status='active'` (até 29/04), ML conectado como owner
-- `tenant_subscription` / `tenant_entitlements` / `tenant_payments`: **vazios** — ele nunca conseguiu efetivar o checkout
-- Tier `veterano` existe e está ativo; 3 ofertas (mensal R$44,90 / trimestral R$120 / semestral R$216) existem, todas com `is_active=true` mas `is_visible=false` e sem `mp_product_ref`
+1. Há checkouts recentes criados para clientes que aparecem nos seus comprovantes, mas não há registros correspondentes em `tenant_payments` nem lançamentos automáticos em `tenant_entitlements`.
+2. Não aparecem chamadas recentes do webhook de pagamento no backend, enquanto outros webhooks do sistema estão chegando normalmente.
+3. O fluxo atual depende quase 100% do webhook. Quando o Mercado Pago não chama, chama com formato diferente, ou o processamento falha silenciosamente, o sistema não tem uma reconciliação automática de segurança.
+4. O sistema tem uma função periódica de billing explicitamente bloqueada/desativada, então hoje não existe um “segundo motor” para buscar pagamentos aprovados e corrigir lançamentos pendentes.
+5. Já há histórico anterior de recuperação manual por falha de webhook, o que confirma o padrão.
 
-## Causa raiz do bloqueio
+Casos já encontrados nos dados
 
-A tela `/settings → Plano` (`SettingsPlan.tsx`) lista os tiers vindos do `useTierOffersCatalog` (edge `billing-public-plans`) **sem nenhum tratamento Veterano**:
+- 373 AUTOPARTS: há checkout em 28/04 para plano recorrente `51-300 / rec_1m`; o valor líquido do comprovante é compatível com pagamento bruto de R$ 44,90.
+- POLICARPO PEÇAS: há checkout em 28/04 para `ZPL Básico / rec_1m`; o valor líquido de R$ 17,01 é compatível com pagamento bruto de R$ 17,90.
+- Megatools / Detilli Engenharia: há múltiplos checkouts de Veterano semestral recentes.
+- LaserUP já foi provisionado manualmente, mas o lançamento ficou com `entitlement_type = plan`, enquanto o motor automático trabalha com `tier`; isso precisa ser normalizado para evitar inconsistência futura.
+- O comprovante “Bruno Fernando Leme” ainda precisa ser reconciliado via API do Mercado Pago porque não encontrei perfil direto com esse nome no cadastro. O vínculo provavelmente virá pelo payer/email/payment_id retornado pela API.
 
-1. A edge function só retorna ofertas com `is_visible=true`. Como as 3 ofertas Veteranas são invisíveis, o tier Veterano chega com `offers: []`.
-2. `SettingsPlan.tsx` mostra o card mesmo assim (não filtra), mas:
-   - `getSelectedOffer(tier)` retorna `null`
-   - O botão "Escolher plano" chama `checkout(undefined)` → falha silenciosa
-3. `SettingsPlan.tsx` não diferencia veterano de não-veterano: o tier Veterano aparece para **todos** os usuários (vazamento), e para o próprio veterano não há como contratar.
+O que vou implementar após sua aprovação
 
-A página pública `/planos` (`Planos.tsx`) já trata o caso (busca ofertas escondidas e injeta), mas a tela de Settings — caminho mais natural para um cliente já logado — não. Foi ali que o megatools tentou.
+1. Corrigir o webhook de pagamento para aceitar todos os formatos do Mercado Pago
 
-Bônus: `billing-checkout` já lida bem com offers sem `mp_product_ref` (cria preapproval ad-hoc), então uma vez que a oferta chegue, o checkout funciona.
+Hoje o backend espera formatos específicos como:
 
-## Plano de correção
+```text
+type = payment
+type = subscription_preapproval
+type = subscription_authorized_payment
+```
 
-### 1. `SettingsPlan.tsx` — espelhar a lógica veterana de `Planos.tsx`
-- Buscar `profiles.tag` do usuário logado.
-- Se `tag === 'VETERANO'`: buscar ofertas Veteranas (`plan_offers` por `tier_id` veterano, `is_active=true`) e injetar em `tier.offers` para o tier `code='veterano'`.
-- Se não for veterano: filtrar `tiers.filter(t => t.code !== 'veterano')` para esconder o tier no Settings (vazamento atual).
+Vou tornar o webhook tolerante aos formatos reais do Mercado Pago, incluindo:
 
-### 2. `Planos.tsx` — endurecer lookup do perfil
-Linha 56 usa `.eq('id', user.id)`. Funciona por coincidência (na maioria dos perfis `id == user_id`), mas é frágil. Trocar para `.eq('user_id', user.id)` para evitar quebrar usuários onde os IDs divergem.
+```text
+action = payment.created / payment.updated
+topic = payment / preapproval / authorized_payment
+data.id
+id em query string
+resource/url de evento
+```
 
-### 3. UX defensiva em `SettingsPlan.tsx`
-- Desabilitar o botão "Escolher plano" quando `getSelectedOffer(tier)` for `null`, com label "Indisponível" + tooltip "Sem oferta configurada para este plano". Evita silenciar futuras inconsistências.
+Também vou parar de “engolir” erros de processamento sem rastreabilidade: o webhook continuará respondendo OK quando necessário para não quebrar retries do Mercado Pago, mas vai gravar logs internos claros do motivo da falha.
 
-### 4. (Opcional, recomendado) toast no `useOfferCheckout`
-Quando `offer.id` for falsy, mostrar `toast.error("Oferta indisponível. Contate o suporte.")` em vez de chamar a edge function com payload inválido.
+2. Criar um processamento idempotente e transacional de pagamentos
 
-### 5. Validação manual após deploy
-- Logar como megatools, ir em **Configurações → Plano**, verificar que o card Veterano aparece com as 3 opções (Mensal/Trimestral/Semestral) e o botão funciona.
-- Logar com qualquer usuário não-veterano e confirmar que o tier Veterano **não aparece**.
-- Concluir um checkout de teste (mensal R$44,90) para validar a criação de preapproval ad-hoc (sem `mp_product_ref`) e gerar o registro em `tenant_subscription` via webhook.
+Vou centralizar a regra em uma função segura do banco, para garantir que:
 
-## Arquivos afetados
-- `src/components/settings/SettingsPlan.tsx` (lógica veterano + UX defensiva)
-- `src/pages/Planos.tsx` (corrigir `eq('id'…)` → `eq('user_id'…)`)
-- `src/hooks/useTierOffers.ts` (toast quando offer ausente)
+- o mesmo pagamento nunca lance período duas vezes;
+- pagamento avulso lance exatamente o período comprado;
+- assinatura lance/renove automaticamente a partir do pagamento aprovado;
+- renovação some período a partir do maior valor entre “agora” e “fim atual”, evitando perda de dias;
+- estorno/cancelamento marque o pagamento corretamente e não gere novo período;
+- pagamento rejeitado/pending fique registrado, mas não ative acesso.
 
-## Notas
-- Não tocar na edge function `billing-public-plans`: manter ofertas veteranas invisíveis no catálogo público é o comportamento desejado (memória `veterano-tier-policy`).
-- Não exige migração de banco — as ofertas já existem.
-- Após o checkout aprovado, o webhook MP populará `tenant_subscription` e `tenant_entitlements`, liberando definitivamente o acesso (hoje ele está rodando em trial até 29/04).
+Fluxo proposto:
+
+```text
+Pagamento aprovado recebido
+  -> grava/atualiza tenant_payments com chave única provider + payment_id
+  -> resolve external_reference / checkout / oferta
+  -> identifica tenant + cliente + plano/oferta
+  -> ativa ou renova tenant_entitlements
+  -> atualiza estado de acesso do usuário
+  -> registra log humano no admin
+```
+
+3. Adicionar uma reconciliação automática de segurança
+
+Além do webhook, vou criar um reconciliador administrativo para buscar pagamentos aprovados direto no Mercado Pago e processar o que não entrou pelo webhook.
+
+Ele vai:
+
+- buscar pagamentos recentes por período;
+- buscar assinaturas/preapprovals e authorized payments;
+- cruzar com checkouts criados no sistema;
+- cruzar por `external_reference`, valor, data, payer/email e provider_id;
+- processar automaticamente os casos de alta confiança;
+- listar casos ambíguos para revisão, sem travar os casos claros.
+
+Isso resolve o problema principal: mesmo se o webhook falhar de novo, o sistema terá uma recuperação automática.
+
+4. Rodar backfill dos pagamentos recentes
+
+Depois da correção, vou executar a reconciliação desde 27/04 até agora para capturar os três pagamentos informados.
+
+Objetivo do backfill:
+
+- localizar o pagamento bruto correspondente aos comprovantes;
+- registrar em `tenant_payments`;
+- lançar o período correto no cliente correto;
+- deixar auditável no painel admin.
+
+Casos esperados:
+
+```text
+373 AUTOPARTS      -> provável 51-300 mensal, R$ 44,90 bruto
+POLICARPO PEÇAS    -> provável ZPL Básico mensal, R$ 17,90 bruto
+Bruno Fernando Leme -> identificar via API Mercado Pago/payer e vincular ao checkout correto
+Megatools           -> validar se houve pagamento efetivo do Veterano semestral antes de provisionar
+```
+
+Não vou lançar período “no chute” apenas pelo valor líquido do print. Vou usar a API do Mercado Pago para confirmar pagamento aprovado, payer e referência.
+
+5. Ajustar o painel `/admin/pagamentos`
+
+Como você está usando essa tela para suporte, vou reforçar o painel com:
+
+- botão “Sincronizar Mercado Pago agora”;
+- lista de pagamentos aprovados sem entitlement vinculado;
+- status claro: Pago e lançado / Pago pendente de vínculo / Rejeitado / Estornado;
+- identificação humana do cliente: nome e e-mail, não UUID;
+- último erro de webhook/reconciliação quando existir.
+
+6. Normalizar inconsistências existentes
+
+Vou corrigir registros manuais recentes que ficaram fora do padrão do motor automático, especialmente:
+
+- LaserUP com `entitlement_type = plan` para compatibilidade com o padrão `tier`, se necessário após validar os checks de acesso;
+- pagamentos manuais sem `external_reference` padronizado;
+- entitlements ativos sem `offer_id` quando a oferta puder ser resolvida com segurança.
+
+Validações finais
+
+Ao final, vou verificar:
+
+- webhook aceita payload real e payload legado;
+- pagamento avulso ativa período correto;
+- assinatura recorrente renova sem duplicar;
+- reenvio do mesmo webhook não duplica período;
+- pagamento rejeitado/estornado não ativa acesso;
+- admin consegue sincronizar e ver pendências;
+- os clientes recentes aparecem com período lançado corretamente.
+
+Arquivos/áreas que serão alteradas
+
+- `supabase/functions/mercadopago-webhook/index.ts`
+- nova função backend de reconciliação, provavelmente `billing-reconcile-payments`
+- função/RPC segura no banco para processar pagamento de forma idempotente
+- painel admin de pagamentos (`/admin/pagamentos`)
+- possivelmente pequenos ajustes nos tipos/hooks de billing para exibir o status corretamente
+
+Resultado esperado
+
+Depois da implementação, cada pagamento aprovado do Mercado Pago deve cair automaticamente no sistema, lançar o período correto e ficar visível no admin. Se o webhook falhar, a reconciliação recupera sem gerar demanda manual recorrente.
