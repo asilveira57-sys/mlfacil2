@@ -177,3 +177,5 @@ project_id = "rfckrbqwdsejicjlxqdv"
     verify_jwt = false
   [functions.process-email-queue]
     verify_jwt = true
+  [functions.billing-reconcile-payments]
+    verify_jwt = false
