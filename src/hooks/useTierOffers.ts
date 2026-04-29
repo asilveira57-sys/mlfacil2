@@ -77,7 +77,7 @@ export function useTierOffersCatalog() {
 export function useOfferCheckout() {
   const [loading, setLoading] = useState(false);
 
-  const checkout = useCallback(async (offerId: string) => {
+  const checkout = useCallback(async (offerId: string, payerEmail?: string) => {
     if (!offerId) {
       toast.error('Oferta indisponível', { description: 'Esta oferta não está disponível. Contate o suporte.' });
       return null;
@@ -90,6 +90,7 @@ export function useOfferCheckout() {
           offer_id: offerId,
           success_url: `${window.location.origin}/auth?payment=success`,
           failure_url: `${window.location.origin}/planos?payment=failure`,
+          ...(payerEmail ? { payer_email: payerEmail } : {}),
         },
       });
 
