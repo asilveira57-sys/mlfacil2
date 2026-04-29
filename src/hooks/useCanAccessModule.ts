@@ -36,23 +36,50 @@ export function useCanAccessModule() {
         return { planCode: 'trial-full-access', planGroup: 'full', allowedModuleKeys: new Set(), hasPlanModuleConfig: false };
       }
 
-      // 1. Try user_plan_assignments first (active assignment)
+      // 1. PRIORITY: active paid entitlement (source of truth for paid customers).
+      // Resolves the tenant via tenant_members, then reads the active 'tier' entitlement.
       let planId: string | null = null;
 
-      const { data: assignment } = await (supabase as any)
-        .from('user_plan_assignments')
-        .select('plan_tier_id')
+      const { data: membership } = await supabase
+        .from('tenant_members')
+        .select('tenant_id')
         .eq('user_id', userId)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (assignment?.plan_tier_id) {
-        planId = assignment.plan_tier_id;
+      if (membership?.tenant_id) {
+        const { data: ent } = await (supabase as any)
+          .from('tenant_entitlements')
+          .select('tier_id, current_period_end')
+          .eq('tenant_id', membership.tenant_id)
+          .eq('entitlement_type', 'tier')
+          .eq('status', 'active')
+          .order('current_period_end', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (ent?.tier_id) {
+          planId = ent.tier_id as string;
+        }
       }
 
-      // 2. Fallback to user_access_state.selected_plan_id
+      // 2. Try user_plan_assignments (admin-assigned plans)
+      if (!planId) {
+        const { data: assignment } = await (supabase as any)
+          .from('user_plan_assignments')
+          .select('plan_tier_id')
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (assignment?.plan_tier_id) {
+          planId = assignment.plan_tier_id;
+        }
+      }
+
+      // 3. Fallback to user_access_state.selected_plan_id
       if (!planId) {
         const { data: accessState } = await supabase
           .from('user_access_state')
