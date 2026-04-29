@@ -143,11 +143,35 @@ export function AdminPayments() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Pagamentos</h1>
-        <p className="text-muted-foreground">
-          Gerencie pagamentos, assinaturas e webhooks
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Pagamentos</h1>
+          <p className="text-muted-foreground">
+            Gerencie pagamentos, assinaturas e webhooks
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleReconcile(7)}
+            disabled={reconciling}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${reconciling ? 'animate-spin' : ''}`} />
+            Sincronizar 7 dias
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => handleReconcile(30)}
+            disabled={reconciling}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${reconciling ? 'animate-spin' : ''}`} />
+            Sincronizar 30 dias
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="subscriptions">
