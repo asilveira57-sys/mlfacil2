@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,13 +26,15 @@ import {
   Eye,
   CheckCircle,
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { useWebhookLogs, type WebhookLogData } from '@/hooks/useAdmin';
 import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/edgeFunctionClient';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { toast } from 'sonner';
 
 interface SubscriptionData {
   id: string;
@@ -63,7 +65,9 @@ interface PaymentData {
 }
 
 export function AdminPayments() {
+  const queryClient = useQueryClient();
   const { data: webhooks, isLoading: webhooksLoading } = useWebhookLogs();
+  const [reconciling, setReconciling] = useState(false);
 
   const { data: billingActivity, isLoading: billingLoading } = useQuery({
     queryKey: ['admin', 'billing-activity'],
@@ -89,6 +93,27 @@ export function AdminPayments() {
     open: false,
     data: null,
   });
+
+  const handleReconcile = async (sinceDays: number) => {
+    setReconciling(true);
+    try {
+      const result = await invokeEdgeFunction<any>('billing-admin', {
+        body: { action: 'reconcile', since_days: sinceDays },
+      });
+      if (!result.success) throw new Error(result.error || 'Falha na sincronização');
+      const r = result.data?.result || {};
+      toast.success('Sincronização concluída', {
+        description: `Buscados: ${r.fetched ?? 0} • Ativados: ${r.activated ?? 0} • Renovados: ${r.renewed ?? 0} • Duplicados: ${r.skipped_duplicate ?? 0} • Não vinculados: ${r.unresolved ?? 0}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'billing-activity'] });
+    } catch (err) {
+      toast.error('Erro ao sincronizar', {
+        description: err instanceof Error ? err.message : 'Erro desconhecido',
+      });
+    } finally {
+      setReconciling(false);
+    }
+  };
 
   const getPaymentStatusBadge = (status: string) => {
     switch (status) {
