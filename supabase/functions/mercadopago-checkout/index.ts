@@ -127,9 +127,8 @@ Deno.serve(async (req) => {
           currency_id: "BRL",
           unit_price: finalPrice / 100,
         }],
-        payer: {
-          email: userEmail,
-        },
+        // Do NOT lock payer to login email — allows paying with any MP account.
+        // payer omitted intentionally.
         back_urls: {
           success: `${return_url || "https://mlfacil2.lovable.app"}/settings?tab=subscription&status=success`,
           failure: `${return_url || "https://mlfacil2.lovable.app"}/settings?tab=subscription&status=failure`,

@@ -33,7 +33,11 @@ serve(async (req) => {
       });
     }
 
-    const { offer_id, success_url, failure_url } = await req.json();
+    const { offer_id, success_url, failure_url, payer_email: payerEmailOverride } = await req.json();
+    // Allow user to inform a different MP account email (case where login email != MP email)
+    const effectivePayerEmail = (typeof payerEmailOverride === 'string' && payerEmailOverride.includes('@'))
+      ? payerEmailOverride.trim().toLowerCase()
+      : null;
 
     if (!offer_id) {
       return new Response(JSON.stringify({ error: "offer_id is required" }), {
@@ -126,9 +130,10 @@ serve(async (req) => {
       // ─── RECURRING: preapproval ───
       if (offer.mp_product_ref) {
         // Use existing MP plan
+        // MP requires payer_email on preapproval. Use override if provided, otherwise login email.
         const preapprovalBody = {
           preapproval_plan_id: offer.mp_product_ref,
-          payer_email: user.email,
+          payer_email: effectivePayerEmail || user.email,
           external_reference: externalRef,
           back_url: success_url || `${baseUrl}/auth?payment=success`,
           notification_url: `${supabaseUrl}/functions/v1/mercadopago-webhook`,
@@ -160,7 +165,7 @@ serve(async (req) => {
           auto_recurring: autoRecurring,
           external_reference: externalRef,
           back_url: success_url || `${baseUrl}/auth?payment=success`,
-          payer_email: user.email,
+          payer_email: effectivePayerEmail || user.email,
           notification_url: `${supabaseUrl}/functions/v1/mercadopago-webhook`,
         };
 
@@ -187,7 +192,10 @@ serve(async (req) => {
       }
     } else {
       // ─── ONE-TIME: preference ───
-      const preferenceBody = {
+      // IMPORTANT: do NOT send payer.email on preferences. It can lock the buyer
+      // to that MP account and block users whose MP login email differs from the
+      // app login email. Only include if the user explicitly provided an override.
+      const preferenceBody: any = {
         items: [{
           title: offerName,
           description: `${offerName} - ${offer.period_months} mês(es)`,
@@ -195,7 +203,6 @@ serve(async (req) => {
           currency_id: "BRL",
           unit_price: Number(offer.price_brl),
         }],
-        payer: { email: user.email },
         back_urls: {
           success: success_url || `${baseUrl}/auth?payment=success`,
           failure: failure_url || `${baseUrl}/planos?payment=failure`,
@@ -205,6 +212,9 @@ serve(async (req) => {
         external_reference: externalRef,
         notification_url: `${supabaseUrl}/functions/v1/mercadopago-webhook`,
       };
+      if (effectivePayerEmail) {
+        preferenceBody.payer = { email: effectivePayerEmail };
+      }
 
       const mpRes = await fetch("https://api.mercadopago.com/checkout/preferences", {
         method: "POST",
