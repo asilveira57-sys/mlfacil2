@@ -148,14 +148,16 @@ serve(async (req) => {
     let body: any;
     try { body = await req.json(); } catch { return respond(false, { error: 'Invalid JSON body' }, 400); }
 
-    const { seller_id, shipment_ids, format, layout = 'meli_100x150' } = body;
-    if (!seller_id || !shipment_ids?.length) return respond(false, { error: 'seller_id and shipment_ids required' }, 400);
+    const { seller_id, shipment_ids: rawShipmentIds, format, layout = 'meli_100x150' } = body;
+    if (!seller_id || !rawShipmentIds?.length) return respond(false, { error: 'seller_id and shipment_ids required' }, 400);
     if (!['pdf', 'zpl'].includes(format)) return respond(false, { error: 'format must be pdf or zpl' }, 400);
     if (!LAYOUTS[layout]) return respond(false, { error: 'Invalid layout' }, 400);
+    // CRÍTICO: deduplicar — vendas de carrinho enviam o mesmo shipment_id em múltiplos order_ids
+    const shipment_ids = [...new Set((rawShipmentIds as string[]).filter(Boolean))];
     if (shipment_ids.length > MAX_LABELS) return respond(false, { error: `Máximo de ${MAX_LABELS} etiquetas por geração` }, 400);
 
     const layoutInfo = LAYOUTS[layout];
-    console.log(`[labeltest-dispatcher] seller=${seller_id} format=${format} layout=${layout} shipments=${shipment_ids.length}`);
+    console.log(`[labeltest-dispatcher] seller=${seller_id} format=${format} layout=${layout} shipments=${shipment_ids.length} (raw=${rawShipmentIds.length})`);
 
     // ML account
     const { data: mlAccount } = await supabaseAdmin
