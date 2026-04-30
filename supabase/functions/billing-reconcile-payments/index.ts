@@ -36,12 +36,13 @@ Deno.serve(async (req) => {
   // Auth
   const cronKey = Deno.env.get("CRON_KEY");
   const headerCronKey = req.headers.get("x-cron-key");
-  let isAuthed = !!(cronKey && headerCronKey === cronKey);
+  const auth = req.headers.get("Authorization");
+  const bearer = auth?.startsWith("Bearer ") ? auth.replace("Bearer ", "") : null;
+  let isAuthed = !!(cronKey && headerCronKey === cronKey) || bearer === serviceKey;
 
   if (!isAuthed) {
-    const auth = req.headers.get("Authorization");
-    if (auth?.startsWith("Bearer ")) {
-      const { data } = await supabase.auth.getUser(auth.replace("Bearer ", ""));
+    if (bearer) {
+      const { data } = await supabase.auth.getUser(bearer);
       const email = (data?.user?.email || "").toLowerCase();
       isAuthed = ADMIN_EMAILS.includes(email);
     }
