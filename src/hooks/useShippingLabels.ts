@@ -1048,6 +1048,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           .filter(Boolean) as string[];
       }
 
+      // CRÍTICO: deduplicar shipment_ids — vendas de carrinho compartilham o mesmo shipment_id
+      // entre vários order_ids. Sem isso, o ML pode retornar etiquetas duplicadas.
+      shipmentIds = [...new Set(shipmentIds)];
+
       if (shipmentIds.length === 0) {
         throw new Error('Nenhum envio válido selecionado');
       }

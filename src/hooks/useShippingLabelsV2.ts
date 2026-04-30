@@ -636,6 +636,9 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         if (selectedIds.size === 0) throw new Error('Nenhum envio selecionado');
         shipmentIds = orders.filter((o: ShippingOrder) => selectedIds.has(o.id)).map((o: ShippingOrder) => o.shipment_id).filter(Boolean) as string[];
       }
+      // CRÍTICO: deduplicar shipment_ids — vendas de carrinho compartilham o mesmo shipment_id
+      // entre vários order_ids. Sem isso, o ML retorna 2+ etiquetas para o mesmo envio.
+      shipmentIds = [...new Set(shipmentIds)];
       if (shipmentIds.length === 0) throw new Error('Nenhum envio válido selecionado');
 
       setGenerationProgress({ status: 'processing', total_labels: shipmentIds.length, processed_labels: 0, total_batches: 1, completed_batches: 0, error_batches: 0 });
