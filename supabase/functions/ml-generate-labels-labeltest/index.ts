@@ -10,7 +10,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
-  LAYOUTS, hashCode, validateZpl, splitZplBlocks, distributeZplBlocks,
+  LAYOUTS, hashCode, validateZpl, splitZplBlocks, distributeZplBlocks, distributeZplBlocksSafe,
   fetchZplBatchFromMl, sleep,
 } from "../_shared/labeltest-render.ts";
 
