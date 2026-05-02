@@ -320,22 +320,62 @@ serve(async (req) => {
       // Só salva PDF se houve QUALQUER sucesso. Erros parciais são reportados via perShipmentLog.
       if (totalSuccess > 0) { finalPdfBase64 = uint8ToBase64(await resultPdf.save()); }
     } else {
-      // ZPL pipeline
+      // ZPL pipeline com VALIDAÇÃO de contagem + fallback per-shipment
       const url = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${validIds.join(',')}&response_type=zpl2`;
+      let zplRaw: string | null = null;
       for (let a = 1; a <= MAX_RETRIES; a++) {
         try {
           const r = await fetch(url, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
           if ((r.status === 429 || r.status >= 500) && a < MAX_RETRIES) { await sleep(getBackoff(a)); continue; }
-          if (!r.ok) throw new Error(`ML API ${r.status}`);
+          if (!r.ok) { console.error(`[V2-ZPL] batch HTTP ${r.status}`); break; }
           const buf = await r.arrayBuffer();
-          finalZplContent = isZipFile(buf) ? await extractZplFromZip(buf) : new TextDecoder('utf-8').decode(buf);
-          totalSuccess = validIds.length;
-          for (const sid of validIds) perShipmentLog.push({ shipment_id: sid, status: 'ok' });
+          zplRaw = isZipFile(buf) ? await extractZplFromZip(buf) : new TextDecoder('utf-8').decode(buf);
           break;
         } catch (e: any) {
-          if (a >= MAX_RETRIES) { for (const sid of validIds) perShipmentLog.push({ shipment_id: sid, status: 'error', error: e.message }); }
+          if (a >= MAX_RETRIES) console.error(`[V2-ZPL] batch err: ${e?.message}`);
           else await sleep(getBackoff(a));
         }
+      }
+
+      // Conta blocos ^XA reais (NUNCA confiar cegamente em validIds.length)
+      const blocksMatch = zplRaw ? zplRaw.match(/\^XA[\s\S]*?\^XZ/gi) : null;
+      const blocksCount = blocksMatch?.length || 0;
+      console.log(`[V2-ZPL] batch retornou ${blocksCount} blocos para ${validIds.length} shipments`);
+
+      // Heurística: ML retorna 1 bloco por Flex e 2 por Coleta. Se contagem bate
+      // com 1 bloco/shipment ou múltiplos shipments com ratio inteiro, aceitamos.
+      const acceptableCount = blocksCount === validIds.length || (blocksCount > 0 && blocksCount % validIds.length === 0);
+
+      if (zplRaw && acceptableCount) {
+        finalZplContent = zplRaw;
+        totalSuccess = validIds.length;
+        for (const sid of validIds) perShipmentLog.push({ shipment_id: sid, status: 'ok' });
+      } else {
+        // FALLBACK per-shipment determinístico — garante que NUNCA perdemos etiqueta
+        console.warn(`[V2-ZPL] batch insuficiente (${blocksCount}/${validIds.length}), fallback per-shipment`);
+        const parts: string[] = [];
+        for (const sid of validIds) {
+          const single = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${sid}&response_type=zpl2`;
+          let ok = false;
+          for (let a = 1; a <= 5; a++) {
+            try {
+              const r = await fetch(single, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
+              if ((r.status === 429 || r.status >= 500 || r.status === 404) && a < 5) { await sleep(getBackoff(a)); continue; }
+              if (!r.ok) break;
+              const buf = await r.arrayBuffer();
+              const txt = isZipFile(buf) ? await extractZplFromZip(buf) : new TextDecoder('utf-8').decode(buf);
+              const blocks = txt.match(/\^XA[\s\S]*?\^XZ/gi);
+              if (blocks && blocks.length > 0) { parts.push(blocks.join('\n')); ok = true; }
+              break;
+            } catch { if (a < 5) await sleep(getBackoff(a)); }
+          }
+          if (ok) { totalSuccess++; perShipmentLog.push({ shipment_id: sid, status: 'ok' }); }
+          else {
+            perShipmentLog.push({ shipment_id: sid, status: 'error', reason_code: 'ZPL_PER_SHIPMENT_FAILED', error: 'Falha ao baixar ZPL individual' });
+            console.error(`[labels:fail] sid=${sid} seller=${seller_id} reason=ZPL_PER_SHIPMENT_FAILED`);
+          }
+        }
+        finalZplContent = parts.length > 0 ? parts.join('\n') : null;
       }
     }
 
