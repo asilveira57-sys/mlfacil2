@@ -141,51 +141,47 @@ serve(async (req) => {
       }
     }
 
-    {
+    if (blocksByShipment.size > 0) {
+      // Header prefs + orders/items quando layout exige cabeçalho
+      let headerPrefs = { ...DEFAULT_HEADER_PREFS };
+      const ordersMap = new Map<string, any>();
+      const orderItemsMap = new Map<string, any[]>();
+      if (layoutInfo.includeHeader) {
+        const { data: hp } = await supabaseAdmin.from('meli_label_header_preferences').select('*').eq('user_id', job.user_id).eq('seller_id', job.seller_id).maybeSingle();
+        if (hp) headerPrefs = { ...DEFAULT_HEADER_PREFS, ...hp };
+        headerPrefs.show_variation_attrs = true;
+        const orderIds = sids.map(sid => shipMap.get(sid)?.order_id).filter(Boolean);
+        if (orderIds.length > 0) {
+          const { data: orders } = await supabaseAdmin.from('meli_orders_cache').select('order_id, buyer_name, order_comment').eq('seller_id', job.seller_id).in('order_id', orderIds);
+          for (const o of (orders || [])) ordersMap.set(o.order_id, o);
+          const { data: items } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, item_id, variation_id, title, title_short, sku, quantity, variation_attributes').eq('seller_id', job.seller_id).in('order_id', orderIds);
 
-        if (blocksByShipment.size > 0) {
-          // Header prefs + orders/items quando layout exige cabeçalho
-          let headerPrefs = { ...DEFAULT_HEADER_PREFS };
-          const ordersMap = new Map<string, any>();
-          const orderItemsMap = new Map<string, any[]>();
-          if (layoutInfo.includeHeader) {
-            const { data: hp } = await supabaseAdmin.from('meli_label_header_preferences').select('*').eq('user_id', job.user_id).eq('seller_id', job.seller_id).maybeSingle();
-            if (hp) headerPrefs = { ...DEFAULT_HEADER_PREFS, ...hp };
-            headerPrefs.show_variation_attrs = true;
-            const orderIds = sids.map(sid => shipMap.get(sid)?.order_id).filter(Boolean);
-            if (orderIds.length > 0) {
-              const { data: orders } = await supabaseAdmin.from('meli_orders_cache').select('order_id, buyer_name, order_comment').eq('seller_id', job.seller_id).in('order_id', orderIds);
-              for (const o of (orders || [])) ordersMap.set(o.order_id, o);
-              const { data: items } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, item_id, variation_id, title, title_short, sku, quantity, variation_attributes').eq('seller_id', job.seller_id).in('order_id', orderIds);
+          // ── Enriquecimento on-the-fly: cache de variation_attributes está vazio
+          // para a maioria dos pedidos. Buscamos /items?attributes=variations da ML
+          // e mesclamos antes de renderizar (corrige variação ausente no cabeçalho).
+          const itemsForEnrich = (items || [])
+            .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
+            .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
+          const variationMap = itemsForEnrich.length > 0
+            ? await fetchVariationAttributesMap(itemsForEnrich, mlAccount.access_token)
+            : new Map<string, { name: string; value_name: string }[]>();
 
-              // ── Enriquecimento on-the-fly: cache de variation_attributes está vazio
-              // para a maioria dos pedidos. Buscamos /items?attributes=variations da ML
-              // e mesclamos antes de renderizar (corrige variação ausente no cabeçalho).
-              const itemsForEnrich = (items || [])
-                .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
-                .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
-              const variationMap = itemsForEnrich.length > 0
-                ? await fetchVariationAttributesMap(itemsForEnrich, mlAccount.access_token)
-                : new Map<string, { name: string; value_name: string }[]>();
-
-              for (const it of (items || [])) {
-                if (it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0)) {
-                  const enriched = variationMap.get(`${it.item_id}|${it.variation_id}`);
-                  if (enriched && enriched.length > 0) it.variation_attributes = enriched as any;
-                }
-                const arr = orderItemsMap.get(it.order_id) || []; arr.push(it); orderItemsMap.set(it.order_id, arr);
-              }
+          for (const it of (items || [])) {
+            if (it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0)) {
+              const enriched = variationMap.get(`${it.item_id}|${it.variation_id}`);
+              if (enriched && enriched.length > 0) it.variation_attributes = enriched as any;
             }
+            const arr = orderItemsMap.get(it.order_id) || []; arr.push(it); orderItemsMap.set(it.order_id, arr);
           }
-
-          const result = await renderChunkToPdf({
-            shipmentIds: sids, zplBlocksByShipment: blocksByShipment, layout,
-            shipMap, ordersMap, orderItemsMap, headerPrefs,
-          });
-          pdfBytes = result.pdfBytes; successCount = result.successCount; pages = result.pages;
-          errors.push(...result.errors); log.push(...result.log);
         }
       }
+
+      const result = await renderChunkToPdf({
+        shipmentIds: sids, zplBlocksByShipment: blocksByShipment, layout,
+        shipMap, ordersMap, orderItemsMap, headerPrefs,
+      });
+      pdfBytes = result.pdfBytes; successCount = result.successCount; pages = result.pages;
+      errors.push(...result.errors); log.push(...result.log);
     }
 
     const batchPdfB64 = pdfBytes ? uint8ToBase64(pdfBytes) : null;
