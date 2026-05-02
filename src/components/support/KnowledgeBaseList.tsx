@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Sparkles,
 } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -152,7 +153,7 @@ export function KnowledgeBaseList({ onOpenChat }: KnowledgeBaseListProps) {
           <ScrollArea className="h-[400px] pr-4">
             <div 
               className="prose prose-sm dark:prose-invert max-w-none"
-              dangerouslySetInnerHTML={{ __html: selectedArticle.content }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selectedArticle.content) }}
             />
           </ScrollArea>
           
