@@ -8,7 +8,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   LAYOUTS, fetchZplBatchFromMl, validateZpl, splitZplBlocks,
-  distributeZplBlocks, renderChunkToPdf,
+  distributeZplBlocks, distributeZplBlocksSafe, renderChunkToPdf,
   uint8ToBase64, DEFAULT_HEADER_PREFS,
   fetchVariationAttributesMap,
 } from "../_shared/labeltest-render.ts";
