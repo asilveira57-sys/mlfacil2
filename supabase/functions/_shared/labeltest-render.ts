@@ -437,14 +437,18 @@ export function distributeZplBlocks(
     return { blocksByShipment, rawBySid, errors };
   }
 
-  // Caso C: ML mandou 2 blocos por shipment (ignora flexSet, comportamento legado).
+  // Caso C: ML mandou N blocos por shipment de forma uniforme.
+  // IMPORTANTE: Flex PODE ter 1 OU 2 blocos (1 se sem NF; 2 se com NF/DANFE).
+  // Nunca descartamos blocos retornados pela ML — se vieram, devem ser impressos.
+  // O `includeDanfe=false` (layout "só etiquetas") é o ÚNICO caso em que recortamos para 1.
   if (allBlocks.length % shipmentIds.length === 0) {
     const blocksPerShipment = allBlocks.length / shipmentIds.length;
     for (let i = 0; i < shipmentIds.length; i++) {
       const sid = shipmentIds[i];
       const blocks = allBlocks.slice(i * blocksPerShipment, (i + 1) * blocksPerShipment);
-      // Para Flex, só nos interessa o 1º bloco (etiqueta) — DANFE não se aplica
-      const finalBlocks = flexSet.has(sid) ? [blocks[0]] : (includeDanfe ? blocks : [blocks[0]]);
+      // Só recorta quando o layout explicitamente NÃO inclui DANFE (labels-only).
+      // Para Flex+NF, mantemos os 2 blocos (etiqueta + DANFE) — não descartar!
+      const finalBlocks = includeDanfe ? blocks : [blocks[0]];
       blocksByShipment.set(sid, finalBlocks); rawBySid.set(sid, finalBlocks.join('\n'));
     }
     return { blocksByShipment, rawBySid, errors };
