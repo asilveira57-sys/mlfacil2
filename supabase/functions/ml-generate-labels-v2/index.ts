@@ -256,59 +256,69 @@ serve(async (req) => {
         const sid = validIds[idx];
         const pdfBytes = await fetchSinglePdf(sid, mlAccount.access_token);
         if (!pdfBytes) {
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Download failed' });
-          // BLOCK ALL
-          break;
+          perShipmentLog.push({ shipment_id: sid, status: 'error', reason_code: 'PDF_DOWNLOAD_FAILED', error: 'Download failed após 5 tentativas' });
+          console.error(`[labels:fail] sid=${sid} seller=${seller_id} reason=PDF_DOWNLOAD_FAILED`);
+          continue; // CONTINUE — nunca abortar o lote inteiro por 1 falha
         }
         let src: Awaited<ReturnType<typeof PDFDocument.load>>;
         try { src = await PDFDocument.load(pdfBytes); } catch (e) {
-          perShipmentLog.push({ shipment_id: sid, status: 'error', error: 'Invalid PDF' });
-          break;
+          perShipmentLog.push({ shipment_id: sid, status: 'error', reason_code: 'PDF_INVALID', error: 'PDF inválido' });
+          console.error(`[labels:fail] sid=${sid} seller=${seller_id} reason=PDF_INVALID`);
+          continue;
         }
         const pc = src.getPageCount();
-        if (pc === 0) { perShipmentLog.push({ shipment_id: sid, status: 'error', error: '0 pages' }); break; }
+        if (pc === 0) {
+          perShipmentLog.push({ shipment_id: sid, status: 'error', reason_code: 'PDF_EMPTY', error: 'PDF com 0 páginas' });
+          console.error(`[labels:fail] sid=${sid} seller=${seller_id} reason=PDF_EMPTY`);
+          continue;
+        }
 
         let pagesAdded = 0;
-        if (isHeader) {
-          const srcPage = src.getPage(0);
-          const { width: ow, height: oh } = srcPage.getSize();
-          const embedded = await resultPdf.embedPage(srcPage);
-          const hLines = headerDataMap.get(sid) || [];
-          if (hLines.length > 0) {
-            const lh = prefs.font_size * HEADER_LINE_HEIGHT_FACTOR;
-            const ch = HEADER_PADDING_TOP + (hLines.length * lh) + SEPARATOR_LINE_Y_OFFSET + 6;
-            const hh = Math.max(HEADER_MIN_HEIGHT_PT, ch);
-            const nh = oh + hh;
-            const np = resultPdf.addPage([ow, nh]);
-            np.drawPage(embedded, { x: 0, y: 0, width: ow, height: oh });
-            let ty = nh - HEADER_PADDING_TOP - prefs.font_size;
-            for (const line of hLines) { np.drawText(line.text, { x: 8, y: ty, size: line.bold ? prefs.font_size + 1 : prefs.font_size, font: line.bold ? fontBold! : font!, color: rgb(0, 0, 0) }); ty -= lh; }
-            const hby = oh + SEPARATOR_LINE_Y_OFFSET - 1;
-            np.drawRectangle({ x: 3, y: hby, width: ow - 6, height: nh - hby - 2, borderColor: rgb(0.15, 0.15, 0.15), borderWidth: 1.0, color: undefined });
-            np.drawLine({ start: { x: 4, y: oh + SEPARATOR_LINE_Y_OFFSET }, end: { x: ow - 4, y: oh + SEPARATOR_LINE_Y_OFFSET }, thickness: 1.2, color: rgb(0.2, 0.2, 0.2) });
+        try {
+          if (isHeader) {
+            const srcPage = src.getPage(0);
+            const { width: ow, height: oh } = srcPage.getSize();
+            const embedded = await resultPdf.embedPage(srcPage);
+            const hLines = headerDataMap.get(sid) || [];
+            if (hLines.length > 0) {
+              const lh = prefs.font_size * HEADER_LINE_HEIGHT_FACTOR;
+              const ch = HEADER_PADDING_TOP + (hLines.length * lh) + SEPARATOR_LINE_Y_OFFSET + 6;
+              const hh = Math.max(HEADER_MIN_HEIGHT_PT, ch);
+              const nh = oh + hh;
+              const np = resultPdf.addPage([ow, nh]);
+              np.drawPage(embedded, { x: 0, y: 0, width: ow, height: oh });
+              let ty = nh - HEADER_PADDING_TOP - prefs.font_size;
+              for (const line of hLines) { np.drawText(line.text, { x: 8, y: ty, size: line.bold ? prefs.font_size + 1 : prefs.font_size, font: line.bold ? fontBold! : font!, color: rgb(0, 0, 0) }); ty -= lh; }
+              const hby = oh + SEPARATOR_LINE_Y_OFFSET - 1;
+              np.drawRectangle({ x: 3, y: hby, width: ow - 6, height: nh - hby - 2, borderColor: rgb(0.15, 0.15, 0.15), borderWidth: 1.0, color: undefined });
+              np.drawLine({ start: { x: 4, y: oh + SEPARATOR_LINE_Y_OFFSET }, end: { x: ow - 4, y: oh + SEPARATOR_LINE_Y_OFFSET }, thickness: 1.2, color: rgb(0.2, 0.2, 0.2) });
+            } else {
+              const np = resultPdf.addPage([ow, oh]);
+              np.drawPage(embedded, { x: 0, y: 0, width: ow, height: oh });
+            }
+            pagesAdded++;
+            const shouldSkip = skipDanfe || perShipmentSkipDanfe.has(sid);
+            if (!shouldSkip && pc > 1) { const [dp] = await resultPdf.copyPages(src, [1]); resultPdf.addPage(dp); pagesAdded++; }
           } else {
-            const np = resultPdf.addPage([ow, oh]);
-            np.drawPage(embedded, { x: 0, y: 0, width: ow, height: oh });
+            // Standard: label + DANFE
+            const [lp] = await resultPdf.copyPages(src, [0]);
+            resultPdf.addPage(lp);
+            pagesAdded++;
+            if (pc > 1) { const [dp] = await resultPdf.copyPages(src, [1]); resultPdf.addPage(dp); pagesAdded++; }
           }
-          pagesAdded++;
-          const shouldSkip = skipDanfe || perShipmentSkipDanfe.has(sid);
-          if (!shouldSkip && pc > 1) { const [dp] = await resultPdf.copyPages(src, [1]); resultPdf.addPage(dp); pagesAdded++; }
-        } else {
-          // Standard: label + DANFE
-          const [lp] = await resultPdf.copyPages(src, [0]);
-          resultPdf.addPage(lp);
-          pagesAdded++;
-          if (pc > 1) { const [dp] = await resultPdf.copyPages(src, [1]); resultPdf.addPage(dp); pagesAdded++; }
+          totalSuccess++;
+          totalPages += pagesAdded;
+          perShipmentLog.push({ shipment_id: sid, status: 'ok', pages: pagesAdded });
+        } catch (e: any) {
+          perShipmentLog.push({ shipment_id: sid, status: 'error', reason_code: 'PDF_RENDER_FAILED', error: e?.message || 'Falha ao renderizar' });
+          console.error(`[labels:fail] sid=${sid} seller=${seller_id} reason=PDF_RENDER_FAILED msg=${e?.message}`);
+          continue;
         }
-        totalSuccess++;
-        totalPages += pagesAdded;
-        perShipmentLog.push({ shipment_id: sid, status: 'ok', pages: pagesAdded });
         if (idx < validIds.length - 1) await sleep(50);
       }
 
-      const hasErrors = perShipmentLog.some(l => l.status === 'error');
-      if (hasErrors) { totalSuccess = 0; totalPages = 0; }
-      else if (totalSuccess > 0) { finalPdfBase64 = uint8ToBase64(await resultPdf.save()); }
+      // Só salva PDF se houve QUALQUER sucesso. Erros parciais são reportados via perShipmentLog.
+      if (totalSuccess > 0) { finalPdfBase64 = uint8ToBase64(await resultPdf.save()); }
     } else {
       // ZPL pipeline
       const url = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${validIds.join(',')}&response_type=zpl2`;
