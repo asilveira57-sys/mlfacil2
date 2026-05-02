@@ -72,13 +72,15 @@ function buildHeaderLines(prefs: typeof DEFAULT_HEADER_PREFS, order: any, items:
 }
 
 async function fetchSinglePdf(shipmentId: string, token: string): Promise<Uint8Array | null> {
-  for (let a = 1; a <= 3; a++) {
+  // 5 retries, tratando 404 como transiente (ML às vezes responde 404 enquanto
+  // a etiqueta ainda está sendo gerada do lado deles).
+  for (let a = 1; a <= 5; a++) {
     try {
       const r = await fetch(`https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`, { headers: { Authorization: `Bearer ${token}` } });
-      if ((r.status === 429 || r.status >= 500) && a < 3) { await sleep(getBackoff(a)); continue; }
-      if (!r.ok) return null;
+      if ((r.status === 429 || r.status >= 500 || r.status === 404) && a < 5) { await sleep(getBackoff(a)); continue; }
+      if (!r.ok) { console.error(`[V2] sid=${shipmentId} HTTP ${r.status} (final)`); return null; }
       return new Uint8Array(await r.arrayBuffer());
-    } catch { if (a < 3) await sleep(getBackoff(a)); }
+    } catch (e: any) { console.error(`[V2] sid=${shipmentId} fetch err attempt=${a}: ${e?.message}`); if (a < 5) await sleep(getBackoff(a)); }
   }
   return null;
 }
