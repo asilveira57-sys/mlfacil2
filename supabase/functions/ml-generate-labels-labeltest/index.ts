@@ -10,7 +10,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
-  LAYOUTS, hashCode, validateZpl, splitZplBlocks, distributeZplBlocks,
+  LAYOUTS, hashCode, validateZpl, splitZplBlocks, distributeZplBlocks, distributeZplBlocksSafe,
   fetchZplBatchFromMl, sleep,
 } from "../_shared/labeltest-render.ts";
 
@@ -199,29 +199,65 @@ serve(async (req) => {
     // ZPL: single-shot inline (sem Labelary/pdf-lib → sem CPU spike)
     // ─────────────────────────────────────────────────────────────────
     if (format === 'zpl') {
-      console.log(`[labeltest-dispatcher] ZPL single-shot for ${validIds.length} shipments`);
-      const batchResult = await fetchZplBatchFromMl(validIds, mlAccount.access_token);
-      if (!batchResult.zpl) {
-        return respond(false, { error: batchResult.reason_message || 'Falha ao buscar ZPL', data: { success_count: 0, error_count: validIds.length } }, 502);
-      }
-      const validation = validateZpl(batchResult.zpl);
-      if (!validation.valid) return respond(false, { error: validation.reason_message }, 502);
-      const allBlocks = splitZplBlocks(validation.cleaned);
-      // Flex-aware distribution (Flex envia 1 bloco; Coleta envia 2)
+      console.log(`[labeltest-dispatcher] ZPL pipeline para ${validIds.length} shipments`);
       const flexSet = new Set<string>(
         validIds.filter(sid => shipMap.get(sid)?.logistic_type === 'self_service'),
       );
-      const { blocksByShipment, errors: distErrors } = distributeZplBlocks(allBlocks, validIds, {
-        flexShipmentIds: flexSet,
-        includeDanfe: layoutInfo.includeDanfe,
-      });
-      console.log(`[labeltest-dispatcher] ZPL distribution: total_blocks=${allBlocks.length} flex=${flexSet.size} coleta=${validIds.length - flexSet.size} mapped=${blocksByShipment.size} dist_errors=${distErrors.length}`);
+
+      // Tenta batch primeiro (1 chamada). Se ML retornar quantidade ambígua,
+      // distributeZplBlocksSafe faz fallback automático para per-shipment determinístico.
+      const batchResult = await fetchZplBatchFromMl(validIds, mlAccount.access_token);
+      let blocksByShipment: Map<string, string[]>;
+      let distErrors: { shipment_id: string; reason_code: string; reason_message: string }[];
+      let usedFallback = false;
+
+      if (!batchResult.zpl) {
+        // Batch falhou completamente — vai direto para per-shipment.
+        console.warn(`[labeltest-dispatcher] batch falhou (${batchResult.reason_code}), indo per-shipment`);
+        const safe = await distributeZplBlocksSafe([], validIds, mlAccount.access_token, {
+          flexShipmentIds: flexSet,
+          includeDanfe: layoutInfo.includeDanfe,
+        });
+        blocksByShipment = safe.blocksByShipment;
+        distErrors = safe.errors;
+        usedFallback = true;
+      } else {
+        const validation = validateZpl(batchResult.zpl);
+        if (!validation.valid) {
+          console.warn(`[labeltest-dispatcher] batch ZPL inválido, indo per-shipment`);
+          const safe = await distributeZplBlocksSafe([], validIds, mlAccount.access_token, {
+            flexShipmentIds: flexSet,
+            includeDanfe: layoutInfo.includeDanfe,
+          });
+          blocksByShipment = safe.blocksByShipment;
+          distErrors = safe.errors;
+          usedFallback = true;
+        } else {
+          const allBlocks = splitZplBlocks(validation.cleaned);
+          const safe = await distributeZplBlocksSafe(allBlocks, validIds, mlAccount.access_token, {
+            flexShipmentIds: flexSet,
+            includeDanfe: layoutInfo.includeDanfe,
+          });
+          blocksByShipment = safe.blocksByShipment;
+          distErrors = safe.errors;
+          usedFallback = safe.usedFallback;
+        }
+      }
+
+      console.log(`[labeltest-dispatcher] ZPL distribution: ${blocksByShipment.size}/${validIds.length} mapped, fallback=${usedFallback}, errors=${distErrors.length}`);
 
       const zplParts: string[] = []; let totalSuccess = 0; let totalPages = 0;
       const perShipmentLog: any[] = [];
       for (const sid of validIds) {
         const blocks = blocksByShipment.get(sid);
-        if (blocks) { zplParts.push(blocks.join('\n')); totalSuccess++; totalPages += blocks.length; perShipmentLog.push({ shipment_id: sid, status: 'ok', zpl_blocks: blocks.length, is_flex: flexSet.has(sid) }); }
+        if (blocks && blocks.length > 0) {
+          zplParts.push(blocks.join('\n')); totalSuccess++; totalPages += blocks.length;
+          perShipmentLog.push({ shipment_id: sid, status: 'ok', zpl_blocks: blocks.length, is_flex: flexSet.has(sid) });
+        } else {
+          const err = distErrors.find(e => e.shipment_id === sid);
+          perShipmentLog.push({ shipment_id: sid, status: 'error', reason_code: err?.reason_code || 'NO_BLOCKS', reason_message: err?.reason_message || 'Bloco não retornado pela ML' });
+          console.error(`[labels:fail] sid=${sid} seller=${seller_id} reason=${err?.reason_code || 'NO_BLOCKS'}`);
+        }
       }
       const finalZplContent = zplParts.join('\n');
 
@@ -246,10 +282,10 @@ serve(async (req) => {
           errors: [...validationErrors, ...distErrors],
           total_success: totalSuccess, total_pages: totalPages,
           per_shipment: perShipmentLog,
+          failed_shipments: perShipmentLog.filter(p => p.status === 'error'),
           layout, page_width_mm: layoutInfo.widthMm, page_height_mm: layoutInfo.heightMm,
           processing_time_ms: Date.now() - t0,
           download_filename: downloadFilename,
-          // sinaliza ao frontend: já está pronto, sem polling
           inline_complete: true,
         },
       });

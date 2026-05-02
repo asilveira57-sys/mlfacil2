@@ -237,28 +237,29 @@ async function fetchSingleShipmentPdf(
 ): Promise<Uint8Array | null> {
   const url = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentId}&response_type=pdf`;
   
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  // 5 retries, tratando 404 como transiente (ML responde 404 enquanto gera)
+  for (let attempt = 1; attempt <= 5; attempt++) {
     try {
       const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
       });
       
-      if (res.status === 429 || res.status >= 500) {
-        if (attempt < 3) {
+      if (res.status === 429 || res.status >= 500 || res.status === 404) {
+        if (attempt < 5) {
           await sleep(getBackoffDelay(attempt));
           continue;
         }
       }
       
       if (!res.ok) {
-        console.error(`Failed to fetch label for shipment ${shipmentId}: ${res.status}`);
+        console.error(`[labels:fail] sid=${shipmentId} HTTP ${res.status} (final)`);
         return null;
       }
       
       return new Uint8Array(await res.arrayBuffer());
     } catch (err) {
       console.error(`Error fetching shipment ${shipmentId} (attempt ${attempt}):`, err);
-      if (attempt < 3) await sleep(getBackoffDelay(attempt));
+      if (attempt < 5) await sleep(getBackoffDelay(attempt));
     }
   }
   return null;
@@ -293,26 +294,25 @@ async function buildHeaderPdfSafe(
     // Fetch this shipment's PDF individually
     const pdfBytes = await fetchSingleShipmentPdf(shipmentId, accessToken);
     if (!pdfBytes) {
-      console.error(`BLOCKING: shipment ${shipmentId} failed to download PDF`);
+      console.error(`[labels:fail] sid=${shipmentId} reason=PDF_DOWNLOAD_FAILED`);
       errorShipments.push(shipmentId);
-      // BLOCK ALL: any failure stops the entire generation
-      break;
+      continue; // CONTINUE — não aborta o lote inteiro por 1 falha
     }
     
     let sourcePdf: Awaited<ReturnType<typeof PDFDocument.load>>;
     try {
       sourcePdf = await PDFDocument.load(pdfBytes);
     } catch (err) {
-      console.error(`BLOCKING: shipment ${shipmentId} has invalid PDF`, err);
+      console.error(`[labels:fail] sid=${shipmentId} reason=PDF_INVALID`, err);
       errorShipments.push(shipmentId);
-      break;
+      continue;
     }
     
     const pageCount = sourcePdf.getPageCount();
     if (pageCount === 0) {
-      console.error(`BLOCKING: shipment ${shipmentId} PDF has 0 pages`);
+      console.error(`[labels:fail] sid=${shipmentId} reason=PDF_EMPTY`);
       errorShipments.push(shipmentId);
-      break;
+      continue;
     }
     
     // === PAGE 0: Label — apply header using original page size ===

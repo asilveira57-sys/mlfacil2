@@ -8,7 +8,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   LAYOUTS, fetchZplBatchFromMl, validateZpl, splitZplBlocks,
-  distributeZplBlocks, renderChunkToPdf,
+  distributeZplBlocks, distributeZplBlocksSafe, renderChunkToPdf,
   uint8ToBase64, DEFAULT_HEADER_PREFS,
   fetchVariationAttributesMap,
 } from "../_shared/labeltest-render.ts";
@@ -90,85 +90,98 @@ serve(async (req) => {
       .eq('seller_id', job.seller_id).in('shipment_id', sids);
     const shipMap = new Map((shipments || []).map((s: any) => [s.shipment_id, s]));
 
-    // Step 1: Fetch ZPL batch
+    // Step 1: Fetch ZPL batch + safe distribution (com fallback per-shipment automático)
     const fetched = await fetchZplBatchFromMl(sids, mlAccount.access_token);
     const errors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const log: any[] = [];
     let pdfBytes: Uint8Array | null = null; let successCount = 0; let pages = 0;
 
+    const flexSet = new Set<string>(
+      sids.filter(sid => shipMap.get(sid)?.logistic_type === 'self_service'),
+    );
+
+    let blocksByShipment = new Map<string, string[]>();
+    let distErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
+
     if (!fetched.zpl) {
-      for (const sid of sids) errors.push({ shipment_id: sid, reason_code: fetched.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: fetched.reason_message || 'Falha ao baixar ZPL' });
+      console.warn(`[labeltest-batch] job=${jobId} batch=${batchIdx} batch falhou (${fetched.reason_code}), fallback per-shipment`);
+      const safe = await distributeZplBlocksSafe([], sids, mlAccount.access_token, {
+        flexShipmentIds: flexSet, includeDanfe: layoutInfo.includeDanfe,
+      });
+      blocksByShipment = safe.blocksByShipment;
+      distErrors = safe.errors;
     } else {
       const validation = validateZpl(fetched.zpl);
       if (!validation.valid) {
-        for (const sid of sids) errors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
+        console.warn(`[labeltest-batch] job=${jobId} batch=${batchIdx} ZPL inválido, fallback per-shipment`);
+        const safe = await distributeZplBlocksSafe([], sids, mlAccount.access_token, {
+          flexShipmentIds: flexSet, includeDanfe: layoutInfo.includeDanfe,
+        });
+        blocksByShipment = safe.blocksByShipment;
+        distErrors = safe.errors;
       } else {
         const allBlocks = splitZplBlocks(validation.cleaned);
-        // Flex-aware distribution: Flex (self_service) envia 1 bloco (só etiqueta);
-        // Coleta envia 2 blocos (etiqueta + DANFE). Quando o layout não inclui DANFE
-        // (`meli_100x150_no_nf`), tratamos todos como 1 bloco.
-        const flexSet = new Set<string>(
-          sids.filter(sid => shipMap.get(sid)?.logistic_type === 'self_service'),
-        );
         console.log(`[labeltest-batch] job=${jobId} batch=${batchIdx} dist: total_blocks=${allBlocks.length} flex=${flexSet.size} coleta=${sids.length - flexSet.size} layout=${layout} includeDanfe=${layoutInfo.includeDanfe}`);
-        const { blocksByShipment, errors: distErrors } = distributeZplBlocks(allBlocks, sids, {
-          flexShipmentIds: flexSet,
-          includeDanfe: layoutInfo.includeDanfe,
+        const safe = await distributeZplBlocksSafe(allBlocks, sids, mlAccount.access_token, {
+          flexShipmentIds: flexSet, includeDanfe: layoutInfo.includeDanfe,
         });
-        // distErrors aqui são apenas warnings (DANFE_MISSING) — registramos no log mas
-        // NÃO bloqueamos a etiqueta. Só são propagados como erro real se o shipment
-        // não conseguir ser renderizado depois.
-        for (const e of distErrors) {
-          if (e.reason_code === 'DANFE_MISSING') {
-            log.push({ shipment_id: e.shipment_id, status: 'warning', stage: 'distribute', warning: e.reason_message, reason_code: e.reason_code });
-          } else {
-            errors.push(e);
-          }
-        }
+        blocksByShipment = safe.blocksByShipment;
+        distErrors = safe.errors;
+        if (safe.usedFallback) console.warn(`[labeltest-batch] job=${jobId} batch=${batchIdx} fallback per-shipment ativado`);
+      }
+    }
 
-        if (blocksByShipment.size > 0) {
-          // Header prefs + orders/items quando layout exige cabeçalho
-          let headerPrefs = { ...DEFAULT_HEADER_PREFS };
-          const ordersMap = new Map<string, any>();
-          const orderItemsMap = new Map<string, any[]>();
-          if (layoutInfo.includeHeader) {
-            const { data: hp } = await supabaseAdmin.from('meli_label_header_preferences').select('*').eq('user_id', job.user_id).eq('seller_id', job.seller_id).maybeSingle();
-            if (hp) headerPrefs = { ...DEFAULT_HEADER_PREFS, ...hp };
-            headerPrefs.show_variation_attrs = true;
-            const orderIds = sids.map(sid => shipMap.get(sid)?.order_id).filter(Boolean);
-            if (orderIds.length > 0) {
-              const { data: orders } = await supabaseAdmin.from('meli_orders_cache').select('order_id, buyer_name, order_comment').eq('seller_id', job.seller_id).in('order_id', orderIds);
-              for (const o of (orders || [])) ordersMap.set(o.order_id, o);
-              const { data: items } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, item_id, variation_id, title, title_short, sku, quantity, variation_attributes').eq('seller_id', job.seller_id).in('order_id', orderIds);
+    // distErrors: warnings DANFE_MISSING não bloqueiam; erros reais sim.
+    for (const e of distErrors) {
+      if (e.reason_code === 'DANFE_MISSING') {
+        log.push({ shipment_id: e.shipment_id, status: 'warning', stage: 'distribute', warning: e.reason_message, reason_code: e.reason_code });
+      } else {
+        errors.push(e);
+        console.error(`[labels:fail] sid=${e.shipment_id} job=${jobId} reason=${e.reason_code}`);
+      }
+    }
 
-              // ── Enriquecimento on-the-fly: cache de variation_attributes está vazio
-              // para a maioria dos pedidos. Buscamos /items?attributes=variations da ML
-              // e mesclamos antes de renderizar (corrige variação ausente no cabeçalho).
-              const itemsForEnrich = (items || [])
-                .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
-                .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
-              const variationMap = itemsForEnrich.length > 0
-                ? await fetchVariationAttributesMap(itemsForEnrich, mlAccount.access_token)
-                : new Map<string, { name: string; value_name: string }[]>();
+    if (blocksByShipment.size > 0) {
+      // Header prefs + orders/items quando layout exige cabeçalho
+      let headerPrefs = { ...DEFAULT_HEADER_PREFS };
+      const ordersMap = new Map<string, any>();
+      const orderItemsMap = new Map<string, any[]>();
+      if (layoutInfo.includeHeader) {
+        const { data: hp } = await supabaseAdmin.from('meli_label_header_preferences').select('*').eq('user_id', job.user_id).eq('seller_id', job.seller_id).maybeSingle();
+        if (hp) headerPrefs = { ...DEFAULT_HEADER_PREFS, ...hp };
+        headerPrefs.show_variation_attrs = true;
+        const orderIds = sids.map(sid => shipMap.get(sid)?.order_id).filter(Boolean);
+        if (orderIds.length > 0) {
+          const { data: orders } = await supabaseAdmin.from('meli_orders_cache').select('order_id, buyer_name, order_comment').eq('seller_id', job.seller_id).in('order_id', orderIds);
+          for (const o of (orders || [])) ordersMap.set(o.order_id, o);
+          const { data: items } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, item_id, variation_id, title, title_short, sku, quantity, variation_attributes').eq('seller_id', job.seller_id).in('order_id', orderIds);
 
-              for (const it of (items || [])) {
-                if (it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0)) {
-                  const enriched = variationMap.get(`${it.item_id}|${it.variation_id}`);
-                  if (enriched && enriched.length > 0) it.variation_attributes = enriched as any;
-                }
-                const arr = orderItemsMap.get(it.order_id) || []; arr.push(it); orderItemsMap.set(it.order_id, arr);
-              }
+          // ── Enriquecimento on-the-fly: cache de variation_attributes está vazio
+          // para a maioria dos pedidos. Buscamos /items?attributes=variations da ML
+          // e mesclamos antes de renderizar (corrige variação ausente no cabeçalho).
+          const itemsForEnrich = (items || [])
+            .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
+            .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
+          const variationMap = itemsForEnrich.length > 0
+            ? await fetchVariationAttributesMap(itemsForEnrich, mlAccount.access_token)
+            : new Map<string, { name: string; value_name: string }[]>();
+
+          for (const it of (items || [])) {
+            if (it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0)) {
+              const enriched = variationMap.get(`${it.item_id}|${it.variation_id}`);
+              if (enriched && enriched.length > 0) it.variation_attributes = enriched as any;
             }
+            const arr = orderItemsMap.get(it.order_id) || []; arr.push(it); orderItemsMap.set(it.order_id, arr);
           }
-
-          const result = await renderChunkToPdf({
-            shipmentIds: sids, zplBlocksByShipment: blocksByShipment, layout,
-            shipMap, ordersMap, orderItemsMap, headerPrefs,
-          });
-          pdfBytes = result.pdfBytes; successCount = result.successCount; pages = result.pages;
-          errors.push(...result.errors); log.push(...result.log);
         }
       }
+
+      const result = await renderChunkToPdf({
+        shipmentIds: sids, zplBlocksByShipment: blocksByShipment, layout,
+        shipMap, ordersMap, orderItemsMap, headerPrefs,
+      });
+      pdfBytes = result.pdfBytes; successCount = result.successCount; pages = result.pages;
+      errors.push(...result.errors); log.push(...result.log);
     }
 
     const batchPdfB64 = pdfBytes ? uint8ToBase64(pdfBytes) : null;

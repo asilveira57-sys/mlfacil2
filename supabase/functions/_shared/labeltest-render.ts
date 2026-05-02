@@ -216,6 +216,117 @@ export async function fetchZplBatchFromMl(shipmentIds: string[], token: string):
   return { zpl: null, reason_code: 'ML_ZPL_FETCH_TIMEOUT', reason_message: 'Falha ao buscar ZPL após 3 tentativas' };
 }
 
+// ─── Per-shipment ZPL fetch (DETERMINÍSTICO, identity-based) ──────────
+// CRÍTICO: este é o caminho usado quando a distribuição posicional do batch
+// não bate (mistura Flex/Coleta com NF/sem NF). Cada chamada à ML carrega
+// EXATAMENTE 1 shipment, então não há ambiguidade entre blocos retornados
+// e shipment de origem. Concorrência alta (8) compensa o overhead.
+//
+// Retorna SEMPRE um Map shipment_id → blocos[]; entradas vazias indicam
+// falha individual (sem corromper o resto do lote).
+export async function fetchZplPerShipmentDeterministic(
+  shipmentIds: string[],
+  token: string,
+  concurrency = 8,
+): Promise<{
+  blocksByShipment: Map<string, string[]>;
+  errors: { shipment_id: string; reason_code: string; reason_message: string }[];
+}> {
+  const blocksByShipment = new Map<string, string[]>();
+  const errors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
+  const t0 = Date.now();
+
+  await runWithConcurrency(shipmentIds, concurrency, async (sid) => {
+    const url = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${sid}&response_type=zpl2`;
+    let lastErr = '';
+    // 5 retries, including 404 (ML às vezes responde 404 enquanto a etiqueta é gerada)
+    for (let a = 1; a <= 5; a++) {
+      try {
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (r.status === 429 || r.status >= 500 || r.status === 404) {
+          lastErr = `HTTP ${r.status}`;
+          if (a < 5) { await sleep(getBackoff(a)); continue; }
+          break;
+        }
+        if (!r.ok) {
+          const body = await r.text().catch(() => '');
+          lastErr = `HTTP ${r.status}: ${body.slice(0, 120)}`;
+          break;
+        }
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        const zpl = await extractZplFromBytes(bytes, `single_${sid}`);
+        if (!zpl) { lastErr = 'ZPL inválido/vazio'; break; }
+        const validation = validateZpl(zpl);
+        if (!validation.valid) { lastErr = validation.reason_message || 'ZPL malformado'; break; }
+        const blocks = splitZplBlocks(validation.cleaned);
+        if (blocks.length === 0) { lastErr = 'Nenhum bloco ^XA encontrado'; break; }
+        blocksByShipment.set(sid, blocks);
+        return;
+      } catch (e: any) {
+        lastErr = e?.message || 'erro de rede';
+        if (a < 5) await sleep(getBackoff(a));
+      }
+    }
+    console.error(`[labeltest-shared] per-shipment ZPL FAIL sid=${sid}: ${lastErr}`);
+    errors.push({ shipment_id: sid, reason_code: 'ML_ZPL_PER_SHIPMENT_FAILED', reason_message: lastErr || 'Falha desconhecida' });
+  });
+
+  console.log(`[labeltest-shared] per-shipment ZPL: ${blocksByShipment.size}/${shipmentIds.length} OK, ${errors.length} falhas em ${Date.now() - t0}ms`);
+  return { blocksByShipment, errors };
+}
+
+// ─── Distribuição IDENTITY-BASED (substitui posicional) ────────────────
+// Estratégia em 2 etapas:
+//   1) Tenta batch (1 chamada à ML com todos os ids). Se quantidade de blocos
+//      bate EXATAMENTE com o esperado (sem ambiguidade), distribui posicional.
+//   2) Se NÃO bate (qualquer divergência), faz fallback automático para
+//      per-shipment determinístico — garante que NUNCA perdemos etiqueta
+//      por má distribuição.
+//
+// Esta função substitui `distributeZplBlocks` em todos os call sites quando
+// chamada via `distributeZplBlocksSafe`. A antiga `distributeZplBlocks`
+// permanece para compatibilidade mas só deve ser usada quando o caller
+// já validou que o batch é homogêneo.
+export async function distributeZplBlocksSafe(
+  allBlocks: string[],
+  shipmentIds: string[],
+  token: string,
+  opts: { flexShipmentIds?: Set<string>; includeDanfe?: boolean },
+): Promise<{
+  blocksByShipment: Map<string, string[]>;
+  errors: { shipment_id: string; reason_code: string; reason_message: string }[];
+  usedFallback: boolean;
+}> {
+  const flexSet = opts.flexShipmentIds || new Set<string>();
+  const includeDanfe = opts.includeDanfe !== false;
+
+  // Esperado: Flex=1, Coleta+DANFE=2, Coleta sem DANFE=1
+  const expected = shipmentIds.map(sid => (flexSet.has(sid) ? 1 : (includeDanfe ? 2 : 1)));
+  const expectedTotal = expected.reduce((a, b) => a + b, 0);
+
+  // CASO IDEAL: bate exatamente — distribui posicional (rápido).
+  if (allBlocks.length === expectedTotal && allBlocks.length > 0) {
+    const blocksByShipment = new Map<string, string[]>();
+    let cursor = 0;
+    for (let i = 0; i < shipmentIds.length; i++) {
+      const sid = shipmentIds[i];
+      const take = expected[i];
+      const blocks = allBlocks.slice(cursor, cursor + take);
+      cursor += take;
+      if (blocks.length > 0) blocksByShipment.set(sid, blocks);
+    }
+    if (blocksByShipment.size === shipmentIds.length) {
+      console.log(`[labeltest-shared] distributeZplBlocksSafe: posicional OK (${shipmentIds.length} shipments, ${allBlocks.length} blocos)`);
+      return { blocksByShipment, errors: [], usedFallback: false };
+    }
+  }
+
+  // FALLBACK: divergência detectada — refaz per-shipment (determinístico).
+  console.warn(`[labeltest-shared] distributeZplBlocksSafe: distribuição ambígua (esperado=${expectedTotal}, recebido=${allBlocks.length}). Refazendo per-shipment...`);
+  const result = await fetchZplPerShipmentDeterministic(shipmentIds, token);
+  return { ...result, usedFallback: true };
+}
+
 // ─── Enriquecimento de variação via ML API ──────────────────────────
 // O cache local (meli_order_items_cache) raramente tem variation_attributes populado
 // (legado + sync nem sempre captura). Buscamos /items?attributes=variations on-the-fly
