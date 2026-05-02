@@ -90,41 +90,58 @@ serve(async (req) => {
       .eq('seller_id', job.seller_id).in('shipment_id', sids);
     const shipMap = new Map((shipments || []).map((s: any) => [s.shipment_id, s]));
 
-    // Step 1: Fetch ZPL batch
+    // Step 1: Fetch ZPL batch + safe distribution (com fallback per-shipment automático)
     const fetched = await fetchZplBatchFromMl(sids, mlAccount.access_token);
     const errors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
     const log: any[] = [];
     let pdfBytes: Uint8Array | null = null; let successCount = 0; let pages = 0;
 
+    const flexSet = new Set<string>(
+      sids.filter(sid => shipMap.get(sid)?.logistic_type === 'self_service'),
+    );
+
+    let blocksByShipment = new Map<string, string[]>();
+    let distErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
+
     if (!fetched.zpl) {
-      for (const sid of sids) errors.push({ shipment_id: sid, reason_code: fetched.reason_code || 'ML_ZPL_FETCH_FAILED', reason_message: fetched.reason_message || 'Falha ao baixar ZPL' });
+      console.warn(`[labeltest-batch] job=${jobId} batch=${batchIdx} batch falhou (${fetched.reason_code}), fallback per-shipment`);
+      const safe = await distributeZplBlocksSafe([], sids, mlAccount.access_token, {
+        flexShipmentIds: flexSet, includeDanfe: layoutInfo.includeDanfe,
+      });
+      blocksByShipment = safe.blocksByShipment;
+      distErrors = safe.errors;
     } else {
       const validation = validateZpl(fetched.zpl);
       if (!validation.valid) {
-        for (const sid of sids) errors.push({ shipment_id: sid, reason_code: validation.reason_code!, reason_message: validation.reason_message! });
+        console.warn(`[labeltest-batch] job=${jobId} batch=${batchIdx} ZPL inválido, fallback per-shipment`);
+        const safe = await distributeZplBlocksSafe([], sids, mlAccount.access_token, {
+          flexShipmentIds: flexSet, includeDanfe: layoutInfo.includeDanfe,
+        });
+        blocksByShipment = safe.blocksByShipment;
+        distErrors = safe.errors;
       } else {
         const allBlocks = splitZplBlocks(validation.cleaned);
-        // Flex-aware distribution: Flex (self_service) envia 1 bloco (só etiqueta);
-        // Coleta envia 2 blocos (etiqueta + DANFE). Quando o layout não inclui DANFE
-        // (`meli_100x150_no_nf`), tratamos todos como 1 bloco.
-        const flexSet = new Set<string>(
-          sids.filter(sid => shipMap.get(sid)?.logistic_type === 'self_service'),
-        );
         console.log(`[labeltest-batch] job=${jobId} batch=${batchIdx} dist: total_blocks=${allBlocks.length} flex=${flexSet.size} coleta=${sids.length - flexSet.size} layout=${layout} includeDanfe=${layoutInfo.includeDanfe}`);
-        const { blocksByShipment, errors: distErrors } = distributeZplBlocks(allBlocks, sids, {
-          flexShipmentIds: flexSet,
-          includeDanfe: layoutInfo.includeDanfe,
+        const safe = await distributeZplBlocksSafe(allBlocks, sids, mlAccount.access_token, {
+          flexShipmentIds: flexSet, includeDanfe: layoutInfo.includeDanfe,
         });
-        // distErrors aqui são apenas warnings (DANFE_MISSING) — registramos no log mas
-        // NÃO bloqueamos a etiqueta. Só são propagados como erro real se o shipment
-        // não conseguir ser renderizado depois.
-        for (const e of distErrors) {
-          if (e.reason_code === 'DANFE_MISSING') {
-            log.push({ shipment_id: e.shipment_id, status: 'warning', stage: 'distribute', warning: e.reason_message, reason_code: e.reason_code });
-          } else {
-            errors.push(e);
-          }
-        }
+        blocksByShipment = safe.blocksByShipment;
+        distErrors = safe.errors;
+        if (safe.usedFallback) console.warn(`[labeltest-batch] job=${jobId} batch=${batchIdx} fallback per-shipment ativado`);
+      }
+    }
+
+    // distErrors: warnings DANFE_MISSING não bloqueiam; erros reais sim.
+    for (const e of distErrors) {
+      if (e.reason_code === 'DANFE_MISSING') {
+        log.push({ shipment_id: e.shipment_id, status: 'warning', stage: 'distribute', warning: e.reason_message, reason_code: e.reason_code });
+      } else {
+        errors.push(e);
+        console.error(`[labels:fail] sid=${e.shipment_id} job=${jobId} reason=${e.reason_code}`);
+      }
+    }
+
+    {
 
         if (blocksByShipment.size > 0) {
           // Header prefs + orders/items quando layout exige cabeçalho
