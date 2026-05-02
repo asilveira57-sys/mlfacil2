@@ -203,7 +203,8 @@ serve(async (req) => {
       .rpc('get_sales_metrics', { 
         p_seller_id: sellerId,
         p_date_from: dateFrom,
-        p_date_to: dateTo
+        p_date_to: dateTo,
+        p_user_id: user.id,
       });
 
     if (rpcError) {

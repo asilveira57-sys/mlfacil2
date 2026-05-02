@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (action === "status") return await handleGetStatus(supabase, seller_id, corsHeaders);
+    if (action === "status") return await handleGetStatus(supabase, user.id, seller_id, corsHeaders);
     if (action === "pause") return await handlePause(supabase, user.id, seller_id, corsHeaders);
     if (action === "reset") return await handleReset(supabase, user.id, seller_id, corsHeaders);
     if (action === "resync_single") {
@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
       const syncMode = mode || "incremental";
       return await handleStartOrContinue(supabase, user.id, seller_id, scope_days, force_resume, syncMode, corsHeaders);
     }
-    return await handleGetStatus(supabase, seller_id, corsHeaders);
+    return await handleGetStatus(supabase, user.id, seller_id, corsHeaders);
   } catch (err: unknown) {
     console.error("Error:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
   }
 });
 
-async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any) {
+async function handleGetStatus(supabase: any, userId: string, sellerId: string, corsHeaders: any) {
   const { data: state } = await supabase.from("meli_real_costs_sync_state").select("*").eq("seller_id", sellerId).maybeSingle();
   const { count: totalPaid } = await supabase.from("meli_orders_cache").select("*", { count: "exact", head: true }).eq("seller_id", sellerId).eq("order_status", "paid");
   
@@ -140,7 +140,7 @@ async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any
   const missingBreakdown = (totalPaid || 0) - (totalProcessed || 0);
 
   // Get count of orders needing sync (incremental mode target)
-  const { data: needingSyncData } = await supabase.rpc("count_orders_needing_cost_sync", { p_seller_id: sellerId });
+  const { data: needingSyncData } = await supabase.rpc("count_orders_needing_cost_sync", { p_seller_id: sellerId, p_user_id: userId });
   const needingSync = needingSyncData?.[0] || { total_pending: 0, no_breakdown: 0, pending_billing: 0 };
 
   const coverage = { 
@@ -1364,7 +1364,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
   const { count: totalPaid } = await totalQuery;
 
   // INCREMENTAL MODE: Get count of orders needing sync
-  const { data: needingSyncData } = await supabase.rpc("count_orders_needing_cost_sync", { p_seller_id: sellerId });
+  const { data: needingSyncData } = await supabase.rpc("count_orders_needing_cost_sync", { p_seller_id: sellerId, p_user_id: userId });
   const needingSync = needingSyncData?.[0]?.total_pending || 0;
   
   console.log(`[RealCosts] Mode: ${mode}, Total paid: ${totalPaid}, Needing sync: ${needingSync}`);
@@ -1480,7 +1480,8 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
       const { data: ordersNeedingSync, error: rpcError } = await supabase.rpc("get_orders_needing_cost_sync", {
         p_seller_id: sellerId,
         p_limit: PAGE_SIZE,
-        p_offset: currentOffset
+        p_offset: currentOffset,
+        p_user_id: userId,
       });
       
       if (rpcError) {
