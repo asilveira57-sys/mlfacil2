@@ -21411,23 +21411,14 @@ export type Database = {
           updated_recently: number
         }[]
       }
-      count_orders_needing_cost_sync:
-        | {
-            Args: { p_seller_id: string }
-            Returns: {
-              no_breakdown: number
-              pending_billing: number
-              total_pending: number
-            }[]
-          }
-        | {
-            Args: { p_seller_id: string; p_user_id?: string }
-            Returns: {
-              no_breakdown: number
-              pending_billing: number
-              total_pending: number
-            }[]
-          }
+      count_orders_needing_cost_sync: {
+        Args: { p_seller_id: string; p_user_id?: string }
+        Returns: {
+          no_breakdown: number
+          pending_billing: number
+          total_pending: number
+        }[]
+      }
       delete_email: {
         Args: { message_id: number; queue_name: string }
         Returns: boolean
@@ -21568,24 +21559,15 @@ export type Database = {
           total_amount: number
         }[]
       }
-      get_sales_metrics:
-        | {
-            Args: {
-              p_date_from?: string
-              p_date_to?: string
-              p_seller_id: string
-            }
-            Returns: Json
-          }
-        | {
-            Args: {
-              p_date_from?: string
-              p_date_to?: string
-              p_seller_id: string
-              p_user_id?: string
-            }
-            Returns: Json
-          }
+      get_sales_metrics: {
+        Args: {
+          p_date_from?: string
+          p_date_to?: string
+          p_seller_id: string
+          p_user_id?: string
+        }
+        Returns: Json
+      }
       get_seller_visible_categories: {
         Args: { p_account_id: string; p_limit?: number; p_user_id: string }
         Returns: {
