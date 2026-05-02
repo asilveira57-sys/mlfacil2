@@ -294,26 +294,25 @@ async function buildHeaderPdfSafe(
     // Fetch this shipment's PDF individually
     const pdfBytes = await fetchSingleShipmentPdf(shipmentId, accessToken);
     if (!pdfBytes) {
-      console.error(`BLOCKING: shipment ${shipmentId} failed to download PDF`);
+      console.error(`[labels:fail] sid=${shipmentId} reason=PDF_DOWNLOAD_FAILED`);
       errorShipments.push(shipmentId);
-      // BLOCK ALL: any failure stops the entire generation
-      break;
+      continue; // CONTINUE — não aborta o lote inteiro por 1 falha
     }
     
     let sourcePdf: Awaited<ReturnType<typeof PDFDocument.load>>;
     try {
       sourcePdf = await PDFDocument.load(pdfBytes);
     } catch (err) {
-      console.error(`BLOCKING: shipment ${shipmentId} has invalid PDF`, err);
+      console.error(`[labels:fail] sid=${shipmentId} reason=PDF_INVALID`, err);
       errorShipments.push(shipmentId);
-      break;
+      continue;
     }
     
     const pageCount = sourcePdf.getPageCount();
     if (pageCount === 0) {
-      console.error(`BLOCKING: shipment ${shipmentId} PDF has 0 pages`);
+      console.error(`[labels:fail] sid=${shipmentId} reason=PDF_EMPTY`);
       errorShipments.push(shipmentId);
-      break;
+      continue;
     }
     
     // === PAGE 0: Label — apply header using original page size ===
