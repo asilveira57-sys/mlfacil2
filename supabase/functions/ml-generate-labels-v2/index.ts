@@ -222,13 +222,31 @@ serve(async (req) => {
       if (isHeader) {
         const { data: pd } = await supabaseAdmin.from('meli_label_header_preferences').select('*').eq('seller_id', seller_id).maybeSingle();
         if (pd) prefs = { show_customer: pd.show_customer, show_products: pd.show_products, show_order_id: pd.show_order_id, show_shipment_id: pd.show_shipment_id, show_comment: pd.show_comment, show_sku: pd.show_sku ?? true, show_variation_attrs: (pd as any).show_variation_attrs ?? true, line_order: pd.line_order as string[], max_product_lines: pd.max_product_lines, max_total_lines: pd.max_total_lines, font_size: pd.font_size };
+        // Paridade com Label Teste: variação e observação sempre exibidas
+        prefs = { ...prefs, show_variation_attrs: true, show_comment: true };
         // Enrich s2oMap with pack siblings
         const { data: allSO } = await supabaseAdmin.from('meli_orders_cache').select('order_id, pack_id, shipment_id, buyer_name, order_comment').eq('seller_id', seller_id).in('shipment_id', validIds);
         for (const o of (allSO || [])) { if (!o.shipment_id) continue; const e = s2oMap.get(o.shipment_id) || []; if (!e.includes(o.order_id)) e.push(o.order_id); s2oMap.set(o.shipment_id, e); }
         const allOids = [...new Set(validIds.flatMap(sid => s2oMap.get(sid) || []))];
-        const { data: itemsData } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, sku, title_short, title, quantity, variation_attributes').eq('seller_id', seller_id).in('order_id', allOids);
+        const { data: itemsData } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, item_id, variation_id, sku, title_short, title, quantity, variation_attributes').eq('seller_id', seller_id).in('order_id', allOids);
+
+        // Enriquecimento on-the-fly de variation_attributes (cache geralmente vazio)
+        const itemsList = (itemsData || []) as any[];
+        const toEnrich = itemsList
+          .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
+          .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
+        const variationMap = toEnrich.length > 0
+          ? await fetchVariationAttributesMap(toEnrich, mlAccount.access_token)
+          : new Map<string, { name: string; value_name: string }[]>();
+        for (const it of itemsList) {
+          if (it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0)) {
+            const enriched = variationMap.get(`${it.item_id}|${it.variation_id}`);
+            if (enriched && enriched.length > 0) it.variation_attributes = enriched as any;
+          }
+        }
+
         const itemsByOrder = new Map<string, any[]>();
-        for (const i of (itemsData || [])) { const e = itemsByOrder.get(i.order_id) || []; e.push(i); itemsByOrder.set(i.order_id, e); }
+        for (const i of itemsList) { const e = itemsByOrder.get(i.order_id) || []; e.push(i); itemsByOrder.set(i.order_id, e); }
         for (const sid of validIds) {
           const sOids = s2oMap.get(sid) || [];
           if (sOids.length === 0) continue;
