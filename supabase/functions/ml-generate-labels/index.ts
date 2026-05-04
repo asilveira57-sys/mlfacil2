@@ -965,13 +965,28 @@ serve(async (req) => {
 
         const { data: itemsData } = await supabaseAdmin
           .from('meli_order_items_cache')
-          .select('order_id, sku, title_short, title, quantity, variation_attributes')
+          .select('order_id, item_id, variation_id, sku, title_short, title, quantity, variation_attributes')
           .eq('seller_id', seller_id)
           .in('order_id', allOrderIds);
 
+        // Enriquecimento on-the-fly de variation_attributes (cache geralmente vazio)
+        const itemsList = (itemsData || []) as any[];
+        const toEnrich = itemsList
+          .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
+          .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
+        const variationMap = toEnrich.length > 0
+          ? await fetchVariationAttributesMap(toEnrich, mlAccount.access_token)
+          : new Map<string, { name: string; value_name: string }[]>();
+        for (const it of itemsList) {
+          if (it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0)) {
+            const enriched = variationMap.get(`${it.item_id}|${it.variation_id}`);
+            if (enriched && enriched.length > 0) it.variation_attributes = enriched as any;
+          }
+        }
+
         // Group items by order_id
-        const itemsByOrder = new Map<string, typeof itemsData>();
-        for (const item of (itemsData || [])) {
+        const itemsByOrder = new Map<string, any[]>();
+        for (const item of itemsList) {
           const existing = itemsByOrder.get(item.order_id) || [];
           existing.push(item);
           itemsByOrder.set(item.order_id, existing);
