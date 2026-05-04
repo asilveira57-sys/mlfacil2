@@ -198,7 +198,7 @@ const SettingsPlan = () => {
     }
     const offer = getSelectedOffer(tier);
     if (offer) {
-      await checkout(offer.id);
+      await startCheckout(offer);
     }
   };
 
