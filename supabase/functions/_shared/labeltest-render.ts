@@ -325,24 +325,16 @@ export async function distributeZplBlocksSafe(
   console.warn(`[labeltest-shared] distributeZplBlocksSafe: distribuição ambígua (esperado=${expectedTotal}, recebido=${allBlocks.length}). Refazendo per-shipment...`);
   const result = await fetchZplPerShipmentDeterministic(shipmentIds, token);
 
-  // Aplica recorte por expectativa: Flex=1, Coleta sem DANFE=1.
-  // ML pode devolver 2 blocos (etiqueta + DANFE) mesmo para Flex ou para layout
-  // "labels-only"; nesses casos descartamos o(s) bloco(s) extra(s) para evitar
-  // que o renderer tente converter um ZPL DANFE como etiqueta (Labelary 404).
+  // Regra real: Flex PODE ter 1 OU 2 blocos (1 sem NF, 2 com NF/DANFE).
+  // Imprimir o que vier disponível — nunca forçar Flex a 1 bloco.
+  // Único caso em que recortamos: layout explicitamente sem DANFE (labels-only).
   const trimmed = new Map<string, string[]>();
   for (const [sid, blocks] of result.blocksByShipment.entries()) {
-    const isFlex = flexSet.has(sid);
-    // Flex é ISENTO de NF/DANFE — sempre 1 bloco (somente etiqueta).
-    // ML às vezes devolve 2 blocos para Flex (etiqueta + bloco extra inválido como ZPL),
-    // o que faz o Labelary retornar 404 "ZPL generated no labels". Descartar o excedente.
-    // Coleta com includeDanfe → até 2 blocos. Layout sem DANFE → sempre 1.
-    let finalBlocks: string[];
-    if (isFlex) finalBlocks = [blocks[0]];
-    else if (includeDanfe) finalBlocks = blocks.slice(0, 2);
-    else finalBlocks = [blocks[0]];
+    if (!blocks || blocks.length === 0) continue;
+    const finalBlocks = includeDanfe ? blocks.slice(0, 2) : [blocks[0]];
     trimmed.set(sid, finalBlocks);
   }
-  console.log(`[labeltest-shared] distributeZplBlocksSafe fallback: ${trimmed.size} shipments, includeDanfe=${includeDanfe} (blocos extras descartados quando aplicável)`);
+  console.log(`[labeltest-shared] distributeZplBlocksSafe fallback: ${trimmed.size} shipments, includeDanfe=${includeDanfe} (Flex aceita 1 ou 2 blocos)`);
   return { blocksByShipment: trimmed, errors: result.errors, usedFallback: true };
 }
 
