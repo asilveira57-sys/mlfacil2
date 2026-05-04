@@ -627,7 +627,10 @@ export function useSendAuthEmail() {
           target_user_id: params.target_user_id,
           email: params.email,
           mode: params.mode || 'auto',
-          redirectTo: window.location.origin,
+          // ALWAYS use production domain — never window.location.origin,
+          // because admin may be browsing via Lovable preview which would
+          // generate links pointing to id-preview--*.lovable.app (access denied).
+          redirectTo: 'https://www.mktpfacil.com',
         },
       });
       if (error) throw error;
