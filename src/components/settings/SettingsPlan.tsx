@@ -591,6 +591,13 @@ const SettingsPlan = () => {
           </CardContent>
         </Card>
       )}
+      <MpPayerEmailDialog
+        open={dialogOpen}
+        defaultEmail={defaultEmail}
+        loading={checkoutLoading}
+        onCancel={cancel}
+        onConfirm={confirmEmail}
+      />
     </div>
   );
 };
