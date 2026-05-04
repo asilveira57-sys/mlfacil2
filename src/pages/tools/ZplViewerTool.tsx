@@ -189,6 +189,7 @@ export default function ZplViewerTool() {
     setPresetSource(null);
     setImportSource(null);
     setTotalLabels(null);
+    try { sessionStorage.removeItem(ZPL_TOOL_STATE_KEY); } catch { /* ignore */ }
   };
 
   const handleLoadFromHistory = (
