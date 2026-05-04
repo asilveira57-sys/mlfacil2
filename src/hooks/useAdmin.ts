@@ -669,7 +669,8 @@ export function useGenerateAuthLink() {
           target_user_id: params.target_user_id,
           email: params.email,
           mode: params.mode || 'auto',
-          redirectTo: window.location.origin,
+          // ALWAYS use production domain (see useSendAuthEmail comment above).
+          redirectTo: 'https://www.mktpfacil.com',
         },
       });
       if (error) throw error;
