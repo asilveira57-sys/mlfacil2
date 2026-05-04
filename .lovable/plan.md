@@ -1,57 +1,46 @@
-Plano de correção
+## Diagnóstico
 
-Diagnóstico encontrado
+Os três módulos (Ship Label PDF, Ship Label V2, Label Teste) compartilham a mesma lógica de cabeçalho:
+- `buildHeaderLines / buildHeaderLinesForOrder` já suportam `variation_attributes` e `order_comment`.
+- `meli_orders_cache.order_comment` é populado pelo `ml-sync-orders` (linha 434: `order.comments`).
 
-- O erro das imagens é gerado dentro do Mercado Pago, depois que o cliente já foi redirecionado para o checkout.
-- Para pagamento avulso, o projeto já evita travar o pagador pelo e-mail do login.
-- Para assinatura recorrente, a função `billing-checkout` ainda envia obrigatoriamente `payer_email` com o e-mail do usuário logado quando a tela não informa outro e-mail.
-- O Mercado Pago valida esse `payer_email` contra a conta Mercado Pago usada no checkout. Se o cliente loga/paga no Mercado Pago com outro e-mail, aparece: “Seu e-mail não corresponde ao da assinatura”.
-- O caso `megatools` mostra várias tentativas de checkout recorrente criadas hoje, todas para o plano Veterano, mas sem pagamento ativado; isso combina com o bloqueio por e-mail divergente.
-- O caso `PEÇAS_ORIGINAIS` tem usuário confirmado, mas sem nenhum login registrado. Para esse cliente, além do pagamento, há um problema de primeiro acesso/senha que precisa ser tratado pelo fluxo de recuperação.
+**O que está funcionando hoje:**
 
-O que vou alterar
+| Módulo | Função edge | Variação | Observação | Enriquecimento ML |
+|---|---|---|---|---|
+| Label Teste | `ml-generate-labels-labeltest-batch` | ✅ | ✅ | ✅ via `fetchVariationAttributesMap` |
+| Ship Label V2 | `ml-generate-labels-v2` | ⚠️ só do cache | ✅ | ❌ |
+| Ship Label PDF (legado) | `ml-generate-labels` | ⚠️ só do cache | ✅ | ❌ |
 
-1. Corrigir o fluxo de assinatura recorrente
-- Antes de criar uma assinatura no Mercado Pago, abrir uma confirmação simples pedindo o e-mail da conta Mercado Pago que será usada para pagar.
-- Pré-preencher com o e-mail da conta MKTP Fácil, mas deixar claro: “Se você usa outro e-mail no Mercado Pago, altere aqui.”
-- Enviar esse e-mail como `payer_email` para `billing-checkout` somente em assinaturas recorrentes.
-- Manter pagamento avulso sem `payer.email`, como já está, para não reintroduzir o bloqueio.
+**Causa raiz:** o cache `meli_order_items_cache.variation_attributes` está vazio para a maioria dos pedidos (sync só preenche quando o item já é resolvido). O Label Teste resolve isso chamando `/items?attributes=variations` em runtime; o Ship Label não — então a variação some do cabeçalho. Além disso, `ml-generate-labels-labeltest-batch` força `show_variation_attrs = true` (linha 152) — Ship Label respeita a preferência salva e pode estar `false` para alguns sellers.
 
-2. Aplicar em todos os pontos de contratação
-- Página pública `/planos`.
-- Tela de plano dentro de configurações.
-- Tela de assinatura/status dentro de configurações.
-- Qualquer botão que use `useOfferCheckout` para plano recorrente.
+A "observação da venda" já é lida e formatada corretamente nos três (campo `order_comment`, prefixado com `Obs:`). Se não está saindo, é apenas porque a preferência `show_comment` está desligada para o seller — não há bug, mas vamos forçar paridade entre módulos.
 
-3. Melhorar a segurança e o log do checkout
-- Registrar no log interno se o checkout foi criado com e-mail padrão ou e-mail informado pelo cliente, sem expor dados sensíveis desnecessariamente.
-- Não alterar regras de ativação de plano: a ativação continuará dependendo do webhook/pagamento confirmado pelo Mercado Pago.
-- Não liberar acesso pago manualmente só porque o checkout foi aberto.
+## Mudanças
 
-4. Melhorar a mensagem para suporte/admin
-- No admin de clientes, reforçar a ação recomendada para usuários confirmados que nunca logaram: enviar recuperação de senha/link de recuperação.
-- Para `PEÇAS_ORIGINAIS`, a ação correta será enviar link de recuperação antes de tentar pagamento novamente.
+### 1. `supabase/functions/ml-generate-labels-v2/index.ts`
+- Importar `fetchVariationAttributesMap` de `_shared/labeltest-render.ts` (ou duplicar inline se o shared não estiver acessível ao bundle do v2).
+- Após carregar `itemsData` (linha 228), filtrar itens com `item_id` + `variation_id` cuja `variation_attributes` esteja vazia, chamar `fetchVariationAttributesMap` com `mlAccount.access_token` e mesclar antes de `buildHeaderLines`.
+- Forçar `prefs.show_variation_attrs = true` e `prefs.show_comment = true` antes de montar o header (paridade com Label Teste).
+- Selecionar também `item_id, variation_id` no query de items.
 
-5. Deploy e validação
-- Ajustar os arquivos do frontend e, se necessário, a função `billing-checkout`.
-- Publicar a função de checkout se houver alteração em backend.
-- Validar que:
-  - checkout recorrente pede/confirma e-mail Mercado Pago;
-  - checkout avulso continua sem travar por e-mail;
-  - o e-mail informado chega na função;
-  - a tela não quebra se o cliente cancelar o modal;
-  - os clientes conseguem gerar um novo link de assinatura sem cair direto no erro do Mercado Pago.
+### 2. `supabase/functions/ml-generate-labels/index.ts`
+- Mesma alteração no bloco 940–1010:
+  - Adicionar `item_id, variation_id` ao select de `meli_order_items_cache`.
+  - Aplicar o mesmo enriquecimento on-the-fly via `fetchVariationAttributesMap` antes de `buildHeaderLinesForOrder`.
+  - Forçar `prefs.show_variation_attrs = true` e `prefs.show_comment = true`.
 
-Orientação operacional imediata após a correção
+### 3. `supabase/functions/_shared/labeltest-render.ts`
+- Nenhuma mudança funcional — apenas confirmar que `fetchVariationAttributesMap` está exportado para reuso (caso já esteja, importar direto; caso contrário, exportar).
 
-- Para `megatools`: pedir para tentar novamente e informar, no novo modal, exatamente o e-mail da conta Mercado Pago que ele vai usar para pagar.
-- Para `PEÇAS_ORIGINAIS`: primeiro enviar recuperação de senha pelo painel de clientes; depois que acessar, repetir o pagamento usando o e-mail correto do Mercado Pago.
+## O que não muda
 
-Arquivos prováveis
+- Layout, fontes, ordem das linhas, máximos por seção.
+- Preferências do seller (`meli_label_header_preferences`) continuam respeitadas — apenas `show_variation_attrs` e `show_comment` ficam ligados em runtime para todos os módulos de etiqueta.
+- Sync de pedidos (`ml-sync-orders`) — sem alterações.
+- Frontend — sem alterações.
 
-- `src/hooks/useTierOffers.ts`
-- `src/pages/Planos.tsx`
-- `src/components/settings/SettingsPlan.tsx`
-- `src/components/settings/SettingsSubscription.tsx`
-- Possivelmente `supabase/functions/billing-checkout/index.ts` para logs/validação adicional
-- Possivelmente `src/pages/admin/AdminClientes.tsx` para deixar o diagnóstico de acesso mais claro
+## Validação
+
+- Após deploy, gerar uma etiqueta no Ship Label (V2) para um pedido com variação (cor/tamanho) e com observação do comprador. Conferir no PDF que ambas as linhas aparecem no cabeçalho, idênticas ao Label Teste.
+- Conferir logs `[HEADER]` para garantir que `headerDataMap.size` cobre todos os shipments.

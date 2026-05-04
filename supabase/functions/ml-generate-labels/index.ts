@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { ZipReader, BlobReader, TextWriter } from "https://deno.land/x/zipjs@v2.7.32/index.js";
 import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
+import { fetchVariationAttributesMap } from "../_shared/labeltest-render.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -920,7 +921,7 @@ serve(async (req) => {
           .eq('seller_id', seller_id)
           .maybeSingle();
 
-        const prefs = prefData ? {
+        const prefsBase = prefData ? {
           show_customer: prefData.show_customer,
           show_products: prefData.show_products,
           show_order_id: prefData.show_order_id,
@@ -933,6 +934,8 @@ serve(async (req) => {
           max_total_lines: prefData.max_total_lines,
           font_size: prefData.font_size,
         } : DEFAULT_HEADER_PREFS;
+        // Paridade com Label Teste: variação e observação sempre exibidas
+        const prefs = { ...prefsBase, show_variation_attrs: true, show_comment: true };
 
         // Load order data for all valid shipments — including pack siblings
         const knownOrderIds = validShipmentIds
@@ -962,13 +965,28 @@ serve(async (req) => {
 
         const { data: itemsData } = await supabaseAdmin
           .from('meli_order_items_cache')
-          .select('order_id, sku, title_short, title, quantity, variation_attributes')
+          .select('order_id, item_id, variation_id, sku, title_short, title, quantity, variation_attributes')
           .eq('seller_id', seller_id)
           .in('order_id', allOrderIds);
 
+        // Enriquecimento on-the-fly de variation_attributes (cache geralmente vazio)
+        const itemsList = (itemsData || []) as any[];
+        const toEnrich = itemsList
+          .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
+          .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
+        const variationMap = toEnrich.length > 0
+          ? await fetchVariationAttributesMap(toEnrich, mlAccount.access_token)
+          : new Map<string, { name: string; value_name: string }[]>();
+        for (const it of itemsList) {
+          if (it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0)) {
+            const enriched = variationMap.get(`${it.item_id}|${it.variation_id}`);
+            if (enriched && enriched.length > 0) it.variation_attributes = enriched as any;
+          }
+        }
+
         // Group items by order_id
-        const itemsByOrder = new Map<string, typeof itemsData>();
-        for (const item of (itemsData || [])) {
+        const itemsByOrder = new Map<string, any[]>();
+        for (const item of itemsList) {
           const existing = itemsByOrder.get(item.order_id) || [];
           existing.push(item);
           itemsByOrder.set(item.order_id, existing);
