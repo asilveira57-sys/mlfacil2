@@ -67,10 +67,28 @@ export function AdminClientes() {
     { id: 'f1e2d3c4-b5a6-7890-abcd-ef1234567890', name: '🏅 Veterano (ilimitado)' },
   ];
 
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
+  // Persist search/filter/page across tab switches and remounts
+  const ADMIN_CLIENTS_STATE_KEY = 'admin_clients_list_state_v1';
+  const initialPersisted = (() => {
+    try {
+      const raw = sessionStorage.getItem(ADMIN_CLIENTS_STATE_KEY);
+      return raw ? JSON.parse(raw) as { search?: string; statusFilter?: string; currentPage?: number } : null;
+    } catch { return null; }
+  })();
+  const [search, setSearch] = useState(initialPersisted?.search ?? '');
+  const [statusFilter, setStatusFilter] = useState(initialPersisted?.statusFilter ?? 'all');
+  const [currentPage, setCurrentPage] = useState(initialPersisted?.currentPage ?? 1);
   const PAGE_SIZE = 20;
+
+  // Persist on change
+  useMemo(() => {
+    try {
+      sessionStorage.setItem(
+        ADMIN_CLIENTS_STATE_KEY,
+        JSON.stringify({ search, statusFilter, currentPage }),
+      );
+    } catch { /* ignore */ }
+  }, [search, statusFilter, currentPage]);
   const [selectedClient, setSelectedClient] = useState<AdminClient | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
