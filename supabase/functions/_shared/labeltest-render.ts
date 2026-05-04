@@ -600,17 +600,25 @@ export async function renderChunkToPdf(input: RenderChunkInput): Promise<RenderC
   const imagesByShipment = new Map<string, Uint8Array[]>();
   for (const sid of shipmentIds) {
     const entry = tmpBySid.get(sid); if (!entry) continue;
-    const imgs = entry.imgs.filter((x): x is Uint8Array => x !== null);
     const blocksTotal = zplBlocksByShipment.get(sid)!.length;
-    // Aceita qualquer shipment cujos blocos foram TODOS renderizados (1 para Flex, 2+ para Coleta+DANFE).
-    // O número mínimo é 1 (etiqueta). Falha só se houver erro de Labelary OU se faltar bloco.
-    if (entry.err || imgs.length === 0 || imgs.length !== blocksTotal) {
-      const reason = entry.err || `Apenas ${imgs.length}/${blocksTotal} bloco(s) renderizado(s)`;
+    const labelImg = entry.imgs[0];
+    // Regra: a etiqueta (bloco 0) é OBRIGATÓRIA. Blocos extras (DANFE) são
+    // OPCIONAIS — se o Labelary devolver "ZPL generated no labels" para um
+    // bloco extra, ignoramos esse bloco e mantemos a etiqueta do envio.
+    if (!labelImg) {
+      const reason = entry.err || 'Etiqueta não renderizada';
       const category = entry.category || 'other';
       const reasonCode = category === 'rate_limit' ? 'LABELARY_RATE_LIMIT' : category === 'timeout' ? 'LABELARY_TIMEOUT' : 'LABELARY_CONVERSION_FAILED';
       errors.push({ shipment_id: sid, reason_code: reasonCode, reason_message: reason });
-      log.push({ shipment_id: sid, status: 'error', stage: 'labelary', zpl_blocks_total: blocksTotal, blocks_rendered: imgs.length, error_category: category, error: reason });
-    } else imagesByShipment.set(sid, imgs);
+      log.push({ shipment_id: sid, status: 'error', stage: 'labelary', zpl_blocks_total: blocksTotal, blocks_rendered: 0, error_category: category, error: reason });
+      continue;
+    }
+    const renderedExtras = entry.imgs.slice(1).filter((x): x is Uint8Array => x !== null);
+    const droppedExtras = (entry.imgs.length - 1) - renderedExtras.length;
+    if (droppedExtras > 0) {
+      log.push({ shipment_id: sid, status: 'warning', stage: 'labelary_extra', zpl_blocks_total: blocksTotal, blocks_rendered: 1 + renderedExtras.length, dropped_extras: droppedExtras, warning: 'Bloco extra (DANFE) não renderizado pelo Labelary — etiqueta gerada sem ele' });
+    }
+    imagesByShipment.set(sid, [labelImg, ...renderedExtras]);
   }
 
   if (imagesByShipment.size === 0) return { pdfBytes: null, pages: 0, successCount: 0, errors, log };
