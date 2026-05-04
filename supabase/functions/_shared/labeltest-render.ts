@@ -300,8 +300,10 @@ export async function distributeZplBlocksSafe(
   const flexSet = opts.flexShipmentIds || new Set<string>();
   const includeDanfe = opts.includeDanfe !== false;
 
-  // Esperado: Flex=1, Coleta+DANFE=2, Coleta sem DANFE=1
-  const expected = shipmentIds.map(sid => (flexSet.has(sid) ? 1 : (includeDanfe ? 2 : 1)));
+  // Flex pode ter 1 OU 2 blocos. Para o caminho posicional rápido, assumimos
+  // o tamanho mais provável (2 quando includeDanfe, 1 caso contrário). Se a
+  // contagem real não bater, caímos automaticamente no fallback per-shipment.
+  const expected = shipmentIds.map(_sid => (includeDanfe ? 2 : 1));
   const expectedTotal = expected.reduce((a, b) => a + b, 0);
 
   // CASO IDEAL: bate exatamente — distribui posicional (rápido).
@@ -325,24 +327,16 @@ export async function distributeZplBlocksSafe(
   console.warn(`[labeltest-shared] distributeZplBlocksSafe: distribuição ambígua (esperado=${expectedTotal}, recebido=${allBlocks.length}). Refazendo per-shipment...`);
   const result = await fetchZplPerShipmentDeterministic(shipmentIds, token);
 
-  // Aplica recorte por expectativa: Flex=1, Coleta sem DANFE=1.
-  // ML pode devolver 2 blocos (etiqueta + DANFE) mesmo para Flex ou para layout
-  // "labels-only"; nesses casos descartamos o(s) bloco(s) extra(s) para evitar
-  // que o renderer tente converter um ZPL DANFE como etiqueta (Labelary 404).
+  // Regra real: Flex PODE ter 1 OU 2 blocos (1 sem NF, 2 com NF/DANFE).
+  // Imprimir o que vier disponível — nunca forçar Flex a 1 bloco.
+  // Único caso em que recortamos: layout explicitamente sem DANFE (labels-only).
   const trimmed = new Map<string, string[]>();
   for (const [sid, blocks] of result.blocksByShipment.entries()) {
-    const isFlex = flexSet.has(sid);
-    // Flex é ISENTO de NF/DANFE — sempre 1 bloco (somente etiqueta).
-    // ML às vezes devolve 2 blocos para Flex (etiqueta + bloco extra inválido como ZPL),
-    // o que faz o Labelary retornar 404 "ZPL generated no labels". Descartar o excedente.
-    // Coleta com includeDanfe → até 2 blocos. Layout sem DANFE → sempre 1.
-    let finalBlocks: string[];
-    if (isFlex) finalBlocks = [blocks[0]];
-    else if (includeDanfe) finalBlocks = blocks.slice(0, 2);
-    else finalBlocks = [blocks[0]];
+    if (!blocks || blocks.length === 0) continue;
+    const finalBlocks = includeDanfe ? blocks.slice(0, 2) : [blocks[0]];
     trimmed.set(sid, finalBlocks);
   }
-  console.log(`[labeltest-shared] distributeZplBlocksSafe fallback: ${trimmed.size} shipments, includeDanfe=${includeDanfe} (blocos extras descartados quando aplicável)`);
+  console.log(`[labeltest-shared] distributeZplBlocksSafe fallback: ${trimmed.size} shipments, includeDanfe=${includeDanfe} (Flex aceita 1 ou 2 blocos)`);
   return { blocksByShipment: trimmed, errors: result.errors, usedFallback: true };
 }
 
@@ -606,17 +600,25 @@ export async function renderChunkToPdf(input: RenderChunkInput): Promise<RenderC
   const imagesByShipment = new Map<string, Uint8Array[]>();
   for (const sid of shipmentIds) {
     const entry = tmpBySid.get(sid); if (!entry) continue;
-    const imgs = entry.imgs.filter((x): x is Uint8Array => x !== null);
     const blocksTotal = zplBlocksByShipment.get(sid)!.length;
-    // Aceita qualquer shipment cujos blocos foram TODOS renderizados (1 para Flex, 2+ para Coleta+DANFE).
-    // O número mínimo é 1 (etiqueta). Falha só se houver erro de Labelary OU se faltar bloco.
-    if (entry.err || imgs.length === 0 || imgs.length !== blocksTotal) {
-      const reason = entry.err || `Apenas ${imgs.length}/${blocksTotal} bloco(s) renderizado(s)`;
+    const labelImg = entry.imgs[0];
+    // Regra: a etiqueta (bloco 0) é OBRIGATÓRIA. Blocos extras (DANFE) são
+    // OPCIONAIS — se o Labelary devolver "ZPL generated no labels" para um
+    // bloco extra, ignoramos esse bloco e mantemos a etiqueta do envio.
+    if (!labelImg) {
+      const reason = entry.err || 'Etiqueta não renderizada';
       const category = entry.category || 'other';
       const reasonCode = category === 'rate_limit' ? 'LABELARY_RATE_LIMIT' : category === 'timeout' ? 'LABELARY_TIMEOUT' : 'LABELARY_CONVERSION_FAILED';
       errors.push({ shipment_id: sid, reason_code: reasonCode, reason_message: reason });
-      log.push({ shipment_id: sid, status: 'error', stage: 'labelary', zpl_blocks_total: blocksTotal, blocks_rendered: imgs.length, error_category: category, error: reason });
-    } else imagesByShipment.set(sid, imgs);
+      log.push({ shipment_id: sid, status: 'error', stage: 'labelary', zpl_blocks_total: blocksTotal, blocks_rendered: 0, error_category: category, error: reason });
+      continue;
+    }
+    const renderedExtras = entry.imgs.slice(1).filter((x): x is Uint8Array => x !== null);
+    const droppedExtras = (entry.imgs.length - 1) - renderedExtras.length;
+    if (droppedExtras > 0) {
+      log.push({ shipment_id: sid, status: 'warning', stage: 'labelary_extra', zpl_blocks_total: blocksTotal, blocks_rendered: 1 + renderedExtras.length, dropped_extras: droppedExtras, warning: 'Bloco extra (DANFE) não renderizado pelo Labelary — etiqueta gerada sem ele' });
+    }
+    imagesByShipment.set(sid, [labelImg, ...renderedExtras]);
   }
 
   if (imagesByShipment.size === 0) return { pdfBytes: null, pages: 0, successCount: 0, errors, log };

@@ -1,46 +1,46 @@
-## Diagnóstico
+Plano cirúrgico para corrigir o Label Teste sem mexer no Shipping Labels que já parece correto.
 
-Os três módulos (Ship Label PDF, Ship Label V2, Label Teste) compartilham a mesma lógica de cabeçalho:
-- `buildHeaderLines / buildHeaderLinesForOrder` já suportam `variation_attributes` e `order_comment`.
-- `meli_orders_cache.order_comment` é populado pelo `ml-sync-orders` (linha 434: `order.comments`).
+Diagnóstico confirmado
+- O erro recente do Label Teste ocorreu em envios Flex com NF emitida:
+  - 46987392300
+  - 46986368516
+- Ambos estão como `logistic_type = self_service` e `invoice_status = emitida`.
+- O job do Label Teste falhou porque recebeu 2 blocos ZPL por envio, mas o segundo bloco retornou 404 no Labelary: `ZPL generated no labels`.
+- A regra atual ficou errada porque tratou Flex como sempre 1 bloco no fallback, ou como esperado sempre 1 bloco na distribuição segura. Isso contradiz a regra real: Flex pode vir com 1 bloco ou 2 blocos, dependendo se a NF/DANFE veio junto.
 
-**O que está funcionando hoje:**
+O que vou alterar
+1. Ajustar apenas o motor compartilhado do Label Teste (`supabase/functions/_shared/labeltest-render.ts`):
+   - Remover a premissa “Flex = sempre 1 bloco”.
+   - Para layout com DANFE (`meli_100x150` e `mlfacil_100x175_header`), aceitar Flex com 1 ou 2 blocos quando a ML retornar isso.
+   - Para layout sem NF (`meli_100x150_no_nf`), manter somente 1 bloco por envio, porque esse layout é explicitamente “somente etiqueta”.
 
-| Módulo | Função edge | Variação | Observação | Enriquecimento ML |
-|---|---|---|---|---|
-| Label Teste | `ml-generate-labels-labeltest-batch` | ✅ | ✅ | ✅ via `fetchVariationAttributesMap` |
-| Ship Label V2 | `ml-generate-labels-v2` | ⚠️ só do cache | ✅ | ❌ |
-| Ship Label PDF (legado) | `ml-generate-labels` | ⚠️ só do cache | ✅ | ❌ |
+2. Corrigir a distribuição de blocos ZPL no Label Teste:
+   - Se a ML retornar 1 bloco para um Flex, imprimir somente a etiqueta.
+   - Se a ML retornar 2 blocos para um Flex, tentar preservar etiqueta + DANFE.
+   - Se o lote misturar envios com 1 e 2 blocos, manter fallback individual por shipment para não corromper a ordem.
 
-**Causa raiz:** o cache `meli_order_items_cache.variation_attributes` está vazio para a maioria dos pedidos (sync só preenche quando o item já é resolvido). O Label Teste resolve isso chamando `/items?attributes=variations` em runtime; o Ship Label não — então a variação some do cabeçalho. Além disso, `ml-generate-labels-labeltest-batch` força `show_variation_attrs = true` (linha 152) — Ship Label respeita a preferência salva e pode estar `false` para alguns sellers.
+3. Tornar a renderização tolerante a DANFE inválida/sem imagem no Labelary:
+   - A etiqueta de envio continua obrigatória.
+   - Blocos extras de DANFE passam a ser opcionais: se a DANFE não renderizar no Labelary com `ZPL generated no labels`, o Label Teste não deve derrubar o envio inteiro.
+   - Nesse caso, o PDF será gerado com a etiqueta e um aviso interno no log informando que a DANFE extra foi ignorada por não renderizar.
+   - Isso garante o comportamento desejado: veio NF válida, imprime etiqueta + nota; não veio ou veio bloco extra inválido, imprime só a etiqueta sem erro.
 
-A "observação da venda" já é lida e formatada corretamente nos três (campo `order_comment`, prefixado com `Obs:`). Se não está saindo, é apenas porque a preferência `show_comment` está desligada para o seller — não há bug, mas vamos forçar paridade entre módulos.
+4. Manter paridade com o que já funciona no Shipping Labels:
+   - Não alterar `ml-generate-labels-v2`, porque ele baixa PDF direto da ML e já copia página 0 + página 1 quando existe.
+   - Não alterar layout, seleção, download, cabeçalho, variação, observação ou regras de negócio.
 
-## Mudanças
+5. Atualizar memória/regra do projeto para evitar regressão futura:
+   - Registrar que Flex não é “sempre 1” nem “sempre 2”.
+   - A regra correta é: imprimir o que vier disponível; etiqueta é obrigatória, DANFE é complementar/opcional.
 
-### 1. `supabase/functions/ml-generate-labels-v2/index.ts`
-- Importar `fetchVariationAttributesMap` de `_shared/labeltest-render.ts` (ou duplicar inline se o shared não estiver acessível ao bundle do v2).
-- Após carregar `itemsData` (linha 228), filtrar itens com `item_id` + `variation_id` cuja `variation_attributes` esteja vazia, chamar `fetchVariationAttributesMap` com `mlAccount.access_token` e mesclar antes de `buildHeaderLines`.
-- Forçar `prefs.show_variation_attrs = true` e `prefs.show_comment = true` antes de montar o header (paridade com Label Teste).
-- Selecionar também `item_id, variation_id` no query de items.
+Validação após implementar
+- Conferir os logs e jobs recentes do Label Teste para garantir que o erro `ZPL generated no labels` não volte a bloquear o envio.
+- Testar o fluxo do Label Teste com os envios Flex problemáticos, se ainda estiverem disponíveis na API da ML.
+- Confirmar que Shipping Labels continua sem alteração.
 
-### 2. `supabase/functions/ml-generate-labels/index.ts`
-- Mesma alteração no bloco 940–1010:
-  - Adicionar `item_id, variation_id` ao select de `meli_order_items_cache`.
-  - Aplicar o mesmo enriquecimento on-the-fly via `fetchVariationAttributesMap` antes de `buildHeaderLinesForOrder`.
-  - Forçar `prefs.show_variation_attrs = true` e `prefs.show_comment = true`.
-
-### 3. `supabase/functions/_shared/labeltest-render.ts`
-- Nenhuma mudança funcional — apenas confirmar que `fetchVariationAttributesMap` está exportado para reuso (caso já esteja, importar direto; caso contrário, exportar).
-
-## O que não muda
-
-- Layout, fontes, ordem das linhas, máximos por seção.
-- Preferências do seller (`meli_label_header_preferences`) continuam respeitadas — apenas `show_variation_attrs` e `show_comment` ficam ligados em runtime para todos os módulos de etiqueta.
-- Sync de pedidos (`ml-sync-orders`) — sem alterações.
-- Frontend — sem alterações.
-
-## Validação
-
-- Após deploy, gerar uma etiqueta no Ship Label (V2) para um pedido com variação (cor/tamanho) e com observação do comprador. Conferir no PDF que ambas as linhas aparecem no cabeçalho, idênticas ao Label Teste.
-- Conferir logs `[HEADER]` para garantir que `headerDataMap.size` cobre todos os shipments.
+Escopo protegido
+- Sem refatoração visual.
+- Sem polling novo.
+- Sem limite artificial novo.
+- Sem mudança em regras de seleção/download.
+- Sem mexer em Shipping Labels além de leitura/validação.
