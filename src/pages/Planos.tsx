@@ -141,7 +141,7 @@ const Planos = () => {
       navigate(`/criar-acesso?${params.toString()}`);
       return;
     }
-    checkout(offer.id);
+    startCheckout(offer);
   };
 
   if (isLoading) {
