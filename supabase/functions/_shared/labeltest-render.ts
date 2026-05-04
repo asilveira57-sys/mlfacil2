@@ -332,10 +332,14 @@ export async function distributeZplBlocksSafe(
   const trimmed = new Map<string, string[]>();
   for (const [sid, blocks] of result.blocksByShipment.entries()) {
     const isFlex = flexSet.has(sid);
-    const maxBlocks = isFlex ? (includeDanfe ? 2 : 1) : (includeDanfe ? 2 : 1);
-    // Flex pode ter 1 OU 2 (com NF). Coleta com DANFE pode ter 1 OU 2.
-    // Para layout sem DANFE (includeDanfe=false), SEMPRE 1.
-    const finalBlocks = includeDanfe ? blocks.slice(0, maxBlocks) : [blocks[0]];
+    // Flex é ISENTO de NF/DANFE — sempre 1 bloco (somente etiqueta).
+    // ML às vezes devolve 2 blocos para Flex (etiqueta + bloco extra inválido como ZPL),
+    // o que faz o Labelary retornar 404 "ZPL generated no labels". Descartar o excedente.
+    // Coleta com includeDanfe → até 2 blocos. Layout sem DANFE → sempre 1.
+    let finalBlocks: string[];
+    if (isFlex) finalBlocks = [blocks[0]];
+    else if (includeDanfe) finalBlocks = blocks.slice(0, 2);
+    else finalBlocks = [blocks[0]];
     trimmed.set(sid, finalBlocks);
   }
   console.log(`[labeltest-shared] distributeZplBlocksSafe fallback: ${trimmed.size} shipments, includeDanfe=${includeDanfe} (blocos extras descartados quando aplicável)`);
