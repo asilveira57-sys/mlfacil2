@@ -17,24 +17,56 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Info, Upload, Settings2, History } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
+const ZPL_TOOL_STATE_KEY = 'zpl_viewer_tool_state_v1';
+
+type PersistedZplState = {
+  zplCode: string;
+  width: number;
+  height: number;
+  dpmm: number;
+  detectedType: string | null;
+  confidence: string | null;
+  presetSource: string | null;
+  importSource: string | null;
+  totalLabels: number | null;
+};
+
+function loadPersistedZplState(): Partial<PersistedZplState> {
+  try {
+    const raw = sessionStorage.getItem(ZPL_TOOL_STATE_KEY);
+    return raw ? JSON.parse(raw) as PersistedZplState : {};
+  } catch { return {}; }
+}
+
 export default function ZplViewerTool() {
   const { t } = useTranslation("tools");
   const [searchParams] = useSearchParams();
+  const persisted = loadPersistedZplState();
 
-  const [zplCode, setZplCode] = useState("");
+  const [zplCode, setZplCode] = useState(persisted.zplCode ?? "");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(false);
-  const [width, setWidth] = useState(105);
-  const [height, setHeight] = useState(150);
-  const [dpmm, setDpmm] = useState(8);
+  const [width, setWidth] = useState(persisted.width ?? 105);
+  const [height, setHeight] = useState(persisted.height ?? 150);
+  const [dpmm, setDpmm] = useState(persisted.dpmm ?? 8);
 
   // Import state
-  const [detectedType, setDetectedType] = useState<string | null>(null);
-  const [confidence, setConfidence] = useState<string | null>(null);
-  const [presetSource, setPresetSource] = useState<string | null>(null);
-  const [importSource, setImportSource] = useState<string | null>(null);
-  const [totalLabels, setTotalLabels] = useState<number | null>(null);
+  const [detectedType, setDetectedType] = useState<string | null>(persisted.detectedType ?? null);
+  const [confidence, setConfidence] = useState<string | null>(persisted.confidence ?? null);
+  const [presetSource, setPresetSource] = useState<string | null>(persisted.presetSource ?? null);
+  const [importSource, setImportSource] = useState<string | null>(persisted.importSource ?? null);
+  const [totalLabels, setTotalLabels] = useState<number | null>(persisted.totalLabels ?? null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Persist state across tab switches / remounts
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(ZPL_TOOL_STATE_KEY, JSON.stringify({
+        zplCode, width, height, dpmm,
+        detectedType, confidence, presetSource, importSource, totalLabels,
+      }));
+    } catch { /* quota */ }
+  }, [zplCode, width, height, dpmm, detectedType, confidence, presetSource, importSource, totalLabels]);
 
   // Check for extension auto-import on load
   useEffect(() => {
