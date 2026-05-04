@@ -921,7 +921,7 @@ serve(async (req) => {
           .eq('seller_id', seller_id)
           .maybeSingle();
 
-        const prefs = prefData ? {
+        const prefsBase = prefData ? {
           show_customer: prefData.show_customer,
           show_products: prefData.show_products,
           show_order_id: prefData.show_order_id,
@@ -934,6 +934,8 @@ serve(async (req) => {
           max_total_lines: prefData.max_total_lines,
           font_size: prefData.font_size,
         } : DEFAULT_HEADER_PREFS;
+        // Paridade com Label Teste: variação e observação sempre exibidas
+        const prefs = { ...prefsBase, show_variation_attrs: true, show_comment: true };
 
         // Load order data for all valid shipments — including pack siblings
         const knownOrderIds = validShipmentIds
