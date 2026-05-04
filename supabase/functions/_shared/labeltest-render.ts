@@ -324,7 +324,22 @@ export async function distributeZplBlocksSafe(
   // FALLBACK: divergência detectada — refaz per-shipment (determinístico).
   console.warn(`[labeltest-shared] distributeZplBlocksSafe: distribuição ambígua (esperado=${expectedTotal}, recebido=${allBlocks.length}). Refazendo per-shipment...`);
   const result = await fetchZplPerShipmentDeterministic(shipmentIds, token);
-  return { ...result, usedFallback: true };
+
+  // Aplica recorte por expectativa: Flex=1, Coleta sem DANFE=1.
+  // ML pode devolver 2 blocos (etiqueta + DANFE) mesmo para Flex ou para layout
+  // "labels-only"; nesses casos descartamos o(s) bloco(s) extra(s) para evitar
+  // que o renderer tente converter um ZPL DANFE como etiqueta (Labelary 404).
+  const trimmed = new Map<string, string[]>();
+  for (const [sid, blocks] of result.blocksByShipment.entries()) {
+    const isFlex = flexSet.has(sid);
+    const maxBlocks = isFlex ? (includeDanfe ? 2 : 1) : (includeDanfe ? 2 : 1);
+    // Flex pode ter 1 OU 2 (com NF). Coleta com DANFE pode ter 1 OU 2.
+    // Para layout sem DANFE (includeDanfe=false), SEMPRE 1.
+    const finalBlocks = includeDanfe ? blocks.slice(0, maxBlocks) : [blocks[0]];
+    trimmed.set(sid, finalBlocks);
+  }
+  console.log(`[labeltest-shared] distributeZplBlocksSafe fallback: ${trimmed.size} shipments, includeDanfe=${includeDanfe} (blocos extras descartados quando aplicável)`);
+  return { blocksByShipment: trimmed, errors: result.errors, usedFallback: true };
 }
 
 // ─── Enriquecimento de variação via ML API ──────────────────────────
