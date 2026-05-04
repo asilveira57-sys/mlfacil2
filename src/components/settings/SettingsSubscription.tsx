@@ -24,7 +24,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useTierOffersCatalog, formatPriceBRL, type PlanTier } from "@/hooks/useTierOffers";
 import { useUserSalesVolume } from "@/hooks/useUserSalesVolume";
-import { useOfferCheckout } from "@/hooks/useTierOffers";
+import { useCheckoutWithPayerEmail } from "@/hooks/useCheckoutWithPayerEmail";
+import { MpPayerEmailDialog } from "@/components/billing/MpPayerEmailDialog";
 import { useUserAccess } from "@/contexts/UserAccessContext";
 
 const TIER_ICONS: Record<string, typeof Zap> = {
