@@ -150,6 +150,7 @@ serve(async (req) => {
         const { data: hp } = await supabaseAdmin.from('meli_label_header_preferences').select('*').eq('user_id', job.user_id).eq('seller_id', job.seller_id).maybeSingle();
         if (hp) headerPrefs = { ...DEFAULT_HEADER_PREFS, ...hp };
         headerPrefs.show_variation_attrs = true;
+        headerPrefs.show_comment = true;
         const orderIds = sids.map(sid => shipMap.get(sid)?.order_id).filter(Boolean);
         if (orderIds.length > 0) {
           const { data: orders } = await supabaseAdmin.from('meli_orders_cache').select('order_id, buyer_name, order_comment').eq('seller_id', job.seller_id).in('order_id', orderIds);
