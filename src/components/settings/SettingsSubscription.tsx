@@ -80,7 +80,7 @@ const SettingsSubscription = () => {
     }
     const offer = getCheapestOffer(tier);
     if (offer) {
-      await checkout(offer.id);
+      await startCheckout(offer);
     }
   };
 
