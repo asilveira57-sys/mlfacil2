@@ -6,7 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LandingHeader, LandingFooter } from "@/components/landing";
-import { useTierOffersCatalog, useOfferCheckout, formatPriceBRL, getPeriodLabel, getPeriodSuffix } from "@/hooks/useTierOffers";
+import { useTierOffersCatalog, formatPriceBRL, getPeriodLabel, getPeriodSuffix } from "@/hooks/useTierOffers";
+import { useCheckoutWithPayerEmail } from "@/hooks/useCheckoutWithPayerEmail";
+import { MpPayerEmailDialog } from "@/components/billing/MpPayerEmailDialog";
 import { useUserAccess } from "@/contexts/UserAccessContext";
 import { useUserSalesVolume } from "@/hooks/useUserSalesVolume";
 import { toast } from "sonner";
@@ -38,7 +40,7 @@ const Planos = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: catalog, isLoading, error } = useTierOffersCatalog();
-  const { checkout, loading: checkoutLoading } = useOfferCheckout();
+  const { startCheckout, dialogOpen, defaultEmail, confirmEmail, cancel, loading: checkoutLoading } = useCheckoutWithPayerEmail();
   const { isAuthenticated, trialActive, trialExpired, flags } = useUserAccess();
   const { totalSales30d } = useUserSalesVolume();
 
@@ -139,7 +141,7 @@ const Planos = () => {
       navigate(`/criar-acesso?${params.toString()}`);
       return;
     }
-    checkout(offer.id);
+    startCheckout(offer);
   };
 
   if (isLoading) {
@@ -528,6 +530,13 @@ const Planos = () => {
         </section>
       </main>
       <LandingFooter />
+      <MpPayerEmailDialog
+        open={dialogOpen}
+        defaultEmail={defaultEmail}
+        loading={checkoutLoading}
+        onCancel={cancel}
+        onConfirm={confirmEmail}
+      />
     </div>
   );
 };

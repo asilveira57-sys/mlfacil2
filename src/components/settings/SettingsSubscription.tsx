@@ -24,7 +24,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useTierOffersCatalog, formatPriceBRL, type PlanTier } from "@/hooks/useTierOffers";
 import { useUserSalesVolume } from "@/hooks/useUserSalesVolume";
-import { useOfferCheckout } from "@/hooks/useTierOffers";
+import { useCheckoutWithPayerEmail } from "@/hooks/useCheckoutWithPayerEmail";
+import { MpPayerEmailDialog } from "@/components/billing/MpPayerEmailDialog";
 import { useUserAccess } from "@/contexts/UserAccessContext";
 
 const TIER_ICONS: Record<string, typeof Zap> = {
@@ -40,7 +41,7 @@ const SettingsSubscription = () => {
   const navigate = useNavigate();
   const { data: catalog, isLoading: catalogLoading } = useTierOffersCatalog();
   const { totalSales30d, loading: salesLoading } = useUserSalesVolume();
-  const { checkout, loading: checkoutLoading } = useOfferCheckout();
+  const { startCheckout, dialogOpen, defaultEmail, confirmEmail, cancel, loading: checkoutLoading } = useCheckoutWithPayerEmail();
   const { trialActive, trialExpired, flags } = useUserAccess();
 
   const tiers = catalog?.tiers ?? [];
@@ -79,7 +80,7 @@ const SettingsSubscription = () => {
     }
     const offer = getCheapestOffer(tier);
     if (offer) {
-      await checkout(offer.id);
+      await startCheckout(offer);
     }
   };
 
@@ -304,6 +305,13 @@ const SettingsSubscription = () => {
           </div>
         </CardContent>
       </Card>
+      <MpPayerEmailDialog
+        open={dialogOpen}
+        defaultEmail={defaultEmail}
+        loading={checkoutLoading}
+        onCancel={cancel}
+        onConfirm={confirmEmail}
+      />
     </div>
   );
 };

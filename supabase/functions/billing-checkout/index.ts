@@ -123,7 +123,13 @@ serve(async (req) => {
       level: "info", area: "billing", action: "checkout_initiated",
       userId: user.id, success: true,
       message: `Checkout iniciado: ${offerName}`,
-      meta: { offer_id, entitlement_type: entitlementType, entity_code: entityCode, offer_code: offer.offer_code, billing_mode: offer.billing_mode },
+      meta: {
+        offer_id, entitlement_type: entitlementType, entity_code: entityCode,
+        offer_code: offer.offer_code, billing_mode: offer.billing_mode,
+        payer_email_source: effectivePayerEmail
+          ? (effectivePayerEmail === (user.email || '').toLowerCase() ? 'login_match' : 'user_override')
+          : 'login_default',
+      },
     });
 
     if (offer.billing_mode === "recurring") {

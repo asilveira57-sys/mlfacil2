@@ -32,13 +32,14 @@ import { useUserAccessState } from "@/hooks/useUserAccessState";
 import { useUserSalesVolume } from "@/hooks/useUserSalesVolume";
 import {
   useTierOffersCatalog,
-  useOfferCheckout,
   formatPriceBRL,
   getPeriodLabel,
   getPeriodSuffix,
   type PlanTier,
   type TierOffer,
 } from "@/hooks/useTierOffers";
+import { useCheckoutWithPayerEmail } from "@/hooks/useCheckoutWithPayerEmail";
+import { MpPayerEmailDialog } from "@/components/billing/MpPayerEmailDialog";
 
 const TIER_ICONS: Record<string, typeof Zap> = {
   volume_ate_50: Zap,
@@ -83,7 +84,7 @@ const SettingsPlan = () => {
   const { flags, selectedPlan, trialActive, trialExpired, loading: userLoading } = useUserAccessState();
   const { totalSales30d } = useUserSalesVolume();
   const { data: catalog, isLoading: catalogLoading } = useTierOffersCatalog();
-  const { checkout, loading: checkoutLoading } = useOfferCheckout();
+  const { startCheckout, dialogOpen, defaultEmail, confirmEmail, cancel, loading: checkoutLoading } = useCheckoutWithPayerEmail();
 
   // State: selected mode and offer per tier
   const [selectedModes, setSelectedModes] = useState<Record<string, BillingMode>>({});
@@ -197,7 +198,7 @@ const SettingsPlan = () => {
     }
     const offer = getSelectedOffer(tier);
     if (offer) {
-      await checkout(offer.id);
+      await startCheckout(offer);
     }
   };
 
@@ -590,6 +591,13 @@ const SettingsPlan = () => {
           </CardContent>
         </Card>
       )}
+      <MpPayerEmailDialog
+        open={dialogOpen}
+        defaultEmail={defaultEmail}
+        loading={checkoutLoading}
+        onCancel={cancel}
+        onConfirm={confirmEmail}
+      />
     </div>
   );
 };
