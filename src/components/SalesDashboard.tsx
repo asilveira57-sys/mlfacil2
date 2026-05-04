@@ -371,25 +371,13 @@ export function SalesDashboard() {
 
     setupAutoRefresh();
 
-    // Handle visibility changes
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // Refresh immediately when becoming visible
-        fetchSalesData(undefined, false);
-        setupAutoRefresh();
-      } else {
-        // Clear interval when hidden
-        if (autoRefreshRef.current) {
-          clearInterval(autoRefreshRef.current);
-          autoRefreshRef.current = null;
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    // NOTE: Removido o listener de `visibilitychange` que disparava refetch
+    // imediato ao voltar para a aba. Causava perda de estado em telas
+    // operacionais (Etiquetas, Admin, etc.) e refresh destrutivo. O intervalo
+    // de auto-refresh continua ativo em background; o navegador já reduz
+    // sua frequência quando a aba está oculta.
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (autoRefreshRef.current) {
         clearInterval(autoRefreshRef.current);
       }
