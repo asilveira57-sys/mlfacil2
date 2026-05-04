@@ -41,7 +41,7 @@ const SettingsSubscription = () => {
   const navigate = useNavigate();
   const { data: catalog, isLoading: catalogLoading } = useTierOffersCatalog();
   const { totalSales30d, loading: salesLoading } = useUserSalesVolume();
-  const { checkout, loading: checkoutLoading } = useOfferCheckout();
+  const { startCheckout, dialogOpen, defaultEmail, confirmEmail, cancel, loading: checkoutLoading } = useCheckoutWithPayerEmail();
   const { trialActive, trialExpired, flags } = useUserAccess();
 
   const tiers = catalog?.tiers ?? [];
