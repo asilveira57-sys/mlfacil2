@@ -84,7 +84,7 @@ const SettingsPlan = () => {
   const { flags, selectedPlan, trialActive, trialExpired, loading: userLoading } = useUserAccessState();
   const { totalSales30d } = useUserSalesVolume();
   const { data: catalog, isLoading: catalogLoading } = useTierOffersCatalog();
-  const { checkout, loading: checkoutLoading } = useOfferCheckout();
+  const { startCheckout, dialogOpen, defaultEmail, confirmEmail, cancel, loading: checkoutLoading } = useCheckoutWithPayerEmail();
 
   // State: selected mode and offer per tier
   const [selectedModes, setSelectedModes] = useState<Record<string, BillingMode>>({});
