@@ -300,8 +300,10 @@ export async function distributeZplBlocksSafe(
   const flexSet = opts.flexShipmentIds || new Set<string>();
   const includeDanfe = opts.includeDanfe !== false;
 
-  // Esperado: Flex=1, Coleta+DANFE=2, Coleta sem DANFE=1
-  const expected = shipmentIds.map(sid => (flexSet.has(sid) ? 1 : (includeDanfe ? 2 : 1)));
+  // Flex pode ter 1 OU 2 blocos. Para o caminho posicional rápido, assumimos
+  // o tamanho mais provável (2 quando includeDanfe, 1 caso contrário). Se a
+  // contagem real não bater, caímos automaticamente no fallback per-shipment.
+  const expected = shipmentIds.map(_sid => (includeDanfe ? 2 : 1));
   const expectedTotal = expected.reduce((a, b) => a + b, 0);
 
   // CASO IDEAL: bate exatamente — distribui posicional (rápido).
