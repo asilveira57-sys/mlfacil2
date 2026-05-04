@@ -40,7 +40,7 @@ const Planos = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { data: catalog, isLoading, error } = useTierOffersCatalog();
-  const { checkout, loading: checkoutLoading } = useOfferCheckout();
+  const { startCheckout, dialogOpen, defaultEmail, confirmEmail, cancel, loading: checkoutLoading } = useCheckoutWithPayerEmail();
   const { isAuthenticated, trialActive, trialExpired, flags } = useUserAccess();
   const { totalSales30d } = useUserSalesVolume();
 
