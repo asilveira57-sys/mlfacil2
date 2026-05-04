@@ -32,13 +32,14 @@ import { useUserAccessState } from "@/hooks/useUserAccessState";
 import { useUserSalesVolume } from "@/hooks/useUserSalesVolume";
 import {
   useTierOffersCatalog,
-  useOfferCheckout,
   formatPriceBRL,
   getPeriodLabel,
   getPeriodSuffix,
   type PlanTier,
   type TierOffer,
 } from "@/hooks/useTierOffers";
+import { useCheckoutWithPayerEmail } from "@/hooks/useCheckoutWithPayerEmail";
+import { MpPayerEmailDialog } from "@/components/billing/MpPayerEmailDialog";
 
 const TIER_ICONS: Record<string, typeof Zap> = {
   volume_ate_50: Zap,
