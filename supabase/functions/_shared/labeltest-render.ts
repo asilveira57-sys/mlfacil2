@@ -144,7 +144,7 @@ export const DEFAULT_HEADER_PREFS = {
   max_product_lines: 5, max_total_lines: 8, font_size: 9,
 };
 
-export function buildHeaderLines(prefs: typeof DEFAULT_HEADER_PREFS, order: any, items: any[]) {
+export function buildHeaderLines(prefs: typeof DEFAULT_HEADER_PREFS, order: any, items: any[], cart?: { isCart: boolean; itemCount: number }) {
   const contents: Record<string, { text: string; bold: boolean }[]> = { customer: [], products: [], order: [], shipment: [], comment: [] };
   if (prefs.show_customer && order.buyer_name) contents.customer = [{ text: sanitize(order.buyer_name, 40), bold: false }];
   if (prefs.show_products && items.length > 0) contents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku ?? true, prefs.show_variation_attrs ?? true);
@@ -152,8 +152,31 @@ export function buildHeaderLines(prefs: typeof DEFAULT_HEADER_PREFS, order: any,
   if (prefs.show_shipment_id && order.shipment_id) contents.shipment = [{ text: `Envio: ${order.shipment_id}`, bold: false }];
   if (prefs.show_comment && order.order_comment) { const c = sanitize(order.order_comment, 60); if (c) contents.comment = [{ text: `Obs: ${c}`, bold: false }]; }
   const lines: { text: string; bold: boolean }[] = [];
+  // Cart marker: SOMENTE quando o envio é carrinho (>1 item agregado)
+  if (cart?.isCart) {
+    if (lines.length < prefs.max_total_lines) lines.push({ text: `CARRINHO: ${cart.itemCount} itens`, bold: true });
+  }
   if (contents.customer.length > 0) for (const l of contents.customer) { if (lines.length >= prefs.max_total_lines) break; lines.push(l); }
-  for (const lt of prefs.line_order) { if (lt === 'customer') continue; for (const l of (contents[lt] || [])) { if (lines.length >= prefs.max_total_lines) break; lines.push(l); } if (lines.length >= prefs.max_total_lines) break; }
+  for (const lt of prefs.line_order) {
+    if (lt === 'customer') continue;
+    const block = contents[lt] || [];
+    // Para carrinho, se products não couber inteiro, adiciona aviso final
+    if (lt === 'products' && cart?.isCart) {
+      const remaining = prefs.max_total_lines - lines.length;
+      if (remaining <= 0) break;
+      // reservar 1 linha para o aviso quando não couber tudo
+      const willOverflow = block.length > remaining;
+      const slice = willOverflow ? block.slice(0, Math.max(0, remaining - 1)) : block;
+      for (const l of slice) { if (lines.length >= prefs.max_total_lines) break; lines.push(l); }
+      if (willOverflow && lines.length < prefs.max_total_lines) {
+        const missing = block.length - slice.length;
+        lines.push({ text: `Verificar itens do carrinho (+${missing})`, bold: true });
+      }
+      continue;
+    }
+    for (const l of block) { if (lines.length >= prefs.max_total_lines) break; lines.push(l); }
+    if (lines.length >= prefs.max_total_lines) break;
+  }
   return lines;
 }
 
