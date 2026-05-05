@@ -146,20 +146,38 @@ serve(async (req) => {
       let headerPrefs = { ...DEFAULT_HEADER_PREFS };
       const ordersMap = new Map<string, any>();
       const orderItemsMap = new Map<string, any[]>();
+      const cartByShipment = new Map<string, { isCart: boolean; itemCount: number; aggregatedItems: any[]; primaryOrder?: any }>();
       if (layoutInfo.includeHeader) {
         const { data: hp } = await supabaseAdmin.from('meli_label_header_preferences').select('*').eq('user_id', job.user_id).eq('seller_id', job.seller_id).maybeSingle();
         if (hp) headerPrefs = { ...DEFAULT_HEADER_PREFS, ...hp };
         headerPrefs.show_variation_attrs = true;
         headerPrefs.show_comment = true;
-        const orderIds = sids.map(sid => shipMap.get(sid)?.order_id).filter(Boolean);
-        if (orderIds.length > 0) {
-          const { data: orders } = await supabaseAdmin.from('meli_orders_cache').select('order_id, buyer_name, order_comment').eq('seller_id', job.seller_id).in('order_id', orderIds);
-          for (const o of (orders || [])) ordersMap.set(o.order_id, o);
-          const { data: items } = await supabaseAdmin.from('meli_order_items_cache').select('order_id, item_id, variation_id, title, title_short, sku, quantity, variation_attributes').eq('seller_id', job.seller_id).in('order_id', orderIds);
 
-          // ── Enriquecimento on-the-fly: cache de variation_attributes está vazio
-          // para a maioria dos pedidos. Buscamos /items?attributes=variations da ML
-          // e mesclamos antes de renderizar (corrige variação ausente no cabeçalho).
+        // Buscar TODOS os pedidos irmãos pelos shipment_ids do batch (não só o order_id principal).
+        // Carrinho = mesmo shipment_id com >1 order_id.
+        const { data: allOrders } = await supabaseAdmin
+          .from('meli_orders_cache')
+          .select('order_id, pack_id, shipment_id, buyer_name, order_comment')
+          .eq('seller_id', job.seller_id)
+          .in('shipment_id', sids);
+
+        const ordersByShipment = new Map<string, any[]>();
+        for (const o of (allOrders || [])) {
+          if (!o.shipment_id) continue;
+          ordersMap.set(o.order_id, o);
+          const arr = ordersByShipment.get(o.shipment_id) || [];
+          arr.push(o);
+          ordersByShipment.set(o.shipment_id, arr);
+        }
+
+        const allOrderIds = (allOrders || []).map((o: any) => o.order_id);
+        if (allOrderIds.length > 0) {
+          const { data: items } = await supabaseAdmin
+            .from('meli_order_items_cache')
+            .select('order_id, item_id, variation_id, title, title_short, sku, quantity, variation_attributes')
+            .eq('seller_id', job.seller_id)
+            .in('order_id', allOrderIds);
+
           const itemsForEnrich = (items || [])
             .filter((it: any) => it.item_id && it.variation_id && (!Array.isArray(it.variation_attributes) || it.variation_attributes.length === 0))
             .map((it: any) => ({ item_id: it.item_id as string, variation_id: it.variation_id as string }));
@@ -174,12 +192,28 @@ serve(async (req) => {
             }
             const arr = orderItemsMap.get(it.order_id) || []; arr.push(it); orderItemsMap.set(it.order_id, arr);
           }
+
+          // Detecção de carrinho: shipment_id com >1 pedido irmão
+          for (const sid of sids) {
+            const siblings = ordersByShipment.get(sid) || [];
+            if (siblings.length > 1) {
+              const primaryOrderId = shipMap.get(sid)?.order_id;
+              const primary = siblings.find((s: any) => s.order_id === primaryOrderId) || siblings[0];
+              const aggregated: any[] = [];
+              for (const sib of siblings) {
+                for (const it of (orderItemsMap.get(sib.order_id) || [])) aggregated.push(it);
+              }
+              const itemCount = aggregated.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+              cartByShipment.set(sid, { isCart: true, itemCount, aggregatedItems: aggregated, primaryOrder: primary });
+              console.log(`[labeltest-batch] cart detected sid=${sid} siblings=${siblings.length} items=${itemCount}`);
+            }
+          }
         }
       }
 
       const result = await renderChunkToPdf({
         shipmentIds: sids, zplBlocksByShipment: blocksByShipment, layout,
-        shipMap, ordersMap, orderItemsMap, headerPrefs,
+        shipMap, ordersMap, orderItemsMap, headerPrefs, cartByShipment,
       });
       pdfBytes = result.pdfBytes; successCount = result.successCount; pages = result.pages;
       errors.push(...result.errors); log.push(...result.log);

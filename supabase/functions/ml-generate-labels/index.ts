@@ -177,7 +177,8 @@ function buildProductLines(
 function buildHeaderLinesForOrder(
   prefs: typeof DEFAULT_HEADER_PREFS,
   order: { order_id: string; shipment_id: string | null; buyer_name: string | null; order_comment: string | null },
-  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number; variation_attributes?: any[] | null }[]
+  items: { sku: string | null; title_short: string | null; title: string | null; quantity: number; variation_attributes?: any[] | null }[],
+  cart?: { isCart: boolean; itemCount: number }
 ): { text: string; bold: boolean }[] {
   const contents: Record<string, { text: string; bold: boolean }[]> = {
     customer: [],
@@ -204,8 +205,11 @@ function buildHeaderLinesForOrder(
     if (clean) contents.comment = [{ text: `Obs: ${clean}`, bold: false }];
   }
 
-  // Customer ALWAYS first
   const lines: { text: string; bold: boolean }[] = [];
+  // Marcador de CARRINHO: somente quando isCart=true (pipeline antigo intacto p/ não-carrinho).
+  if (cart?.isCart && lines.length < prefs.max_total_lines) {
+    lines.push({ text: `CARRINHO: ${cart.itemCount} itens`, bold: true });
+  }
   if (contents.customer.length > 0) {
     for (const line of contents.customer) {
       if (lines.length >= prefs.max_total_lines) break;
@@ -214,7 +218,20 @@ function buildHeaderLinesForOrder(
   }
   for (const lineType of prefs.line_order) {
     if (lineType === 'customer') continue;
-    for (const line of (contents[lineType] || [])) {
+    const block = contents[lineType] || [];
+    if (lineType === 'products' && cart?.isCart) {
+      const remaining = prefs.max_total_lines - lines.length;
+      if (remaining <= 0) break;
+      const willOverflow = block.length > remaining;
+      const slice = willOverflow ? block.slice(0, Math.max(0, remaining - 1)) : block;
+      for (const line of slice) { if (lines.length >= prefs.max_total_lines) break; lines.push(line); }
+      if (willOverflow && lines.length < prefs.max_total_lines) {
+        const missing = block.length - slice.length;
+        lines.push({ text: `Verificar itens do carrinho (+${missing})`, bold: true });
+      }
+      continue;
+    }
+    for (const line of block) {
       if (lines.length >= prefs.max_total_lines) break;
       lines.push(line);
     }
@@ -1015,12 +1032,16 @@ serve(async (req) => {
             }
           }
 
+          // Detecção de carrinho: shipment com >1 order_id irmão
+          const isCart = siblingOrderIds.length > 1;
+          const itemCount = isCart ? allItems.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0) : 0;
+
           const lines = buildHeaderLinesForOrder(prefs, {
             order_id: primaryOrder.pack_id || primaryOrder.order_id,
             shipment_id: primaryOrder.shipment_id,
             buyer_name: primaryOrder.buyer_name,
             order_comment: primaryOrder.order_comment,
-          }, allItems);
+          }, allItems, isCart ? { isCart: true, itemCount } : undefined);
 
           headerDataMap.set(shipmentId, lines);
         }

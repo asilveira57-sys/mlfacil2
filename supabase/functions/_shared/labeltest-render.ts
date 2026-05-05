@@ -144,7 +144,7 @@ export const DEFAULT_HEADER_PREFS = {
   max_product_lines: 5, max_total_lines: 8, font_size: 9,
 };
 
-export function buildHeaderLines(prefs: typeof DEFAULT_HEADER_PREFS, order: any, items: any[]) {
+export function buildHeaderLines(prefs: typeof DEFAULT_HEADER_PREFS, order: any, items: any[], cart?: { isCart: boolean; itemCount: number }) {
   const contents: Record<string, { text: string; bold: boolean }[]> = { customer: [], products: [], order: [], shipment: [], comment: [] };
   if (prefs.show_customer && order.buyer_name) contents.customer = [{ text: sanitize(order.buyer_name, 40), bold: false }];
   if (prefs.show_products && items.length > 0) contents.products = buildProductLines(items, prefs.max_product_lines, prefs.show_sku ?? true, prefs.show_variation_attrs ?? true);
@@ -152,8 +152,31 @@ export function buildHeaderLines(prefs: typeof DEFAULT_HEADER_PREFS, order: any,
   if (prefs.show_shipment_id && order.shipment_id) contents.shipment = [{ text: `Envio: ${order.shipment_id}`, bold: false }];
   if (prefs.show_comment && order.order_comment) { const c = sanitize(order.order_comment, 60); if (c) contents.comment = [{ text: `Obs: ${c}`, bold: false }]; }
   const lines: { text: string; bold: boolean }[] = [];
+  // Cart marker: SOMENTE quando o envio é carrinho (>1 item agregado)
+  if (cart?.isCart) {
+    if (lines.length < prefs.max_total_lines) lines.push({ text: `CARRINHO: ${cart.itemCount} itens`, bold: true });
+  }
   if (contents.customer.length > 0) for (const l of contents.customer) { if (lines.length >= prefs.max_total_lines) break; lines.push(l); }
-  for (const lt of prefs.line_order) { if (lt === 'customer') continue; for (const l of (contents[lt] || [])) { if (lines.length >= prefs.max_total_lines) break; lines.push(l); } if (lines.length >= prefs.max_total_lines) break; }
+  for (const lt of prefs.line_order) {
+    if (lt === 'customer') continue;
+    const block = contents[lt] || [];
+    // Para carrinho, se products não couber inteiro, adiciona aviso final
+    if (lt === 'products' && cart?.isCart) {
+      const remaining = prefs.max_total_lines - lines.length;
+      if (remaining <= 0) break;
+      // reservar 1 linha para o aviso quando não couber tudo
+      const willOverflow = block.length > remaining;
+      const slice = willOverflow ? block.slice(0, Math.max(0, remaining - 1)) : block;
+      for (const l of slice) { if (lines.length >= prefs.max_total_lines) break; lines.push(l); }
+      if (willOverflow && lines.length < prefs.max_total_lines) {
+        const missing = block.length - slice.length;
+        lines.push({ text: `Verificar itens do carrinho (+${missing})`, bold: true });
+      }
+      continue;
+    }
+    for (const l of block) { if (lines.length >= prefs.max_total_lines) break; lines.push(l); }
+    if (lines.length >= prefs.max_total_lines) break;
+  }
   return lines;
 }
 
@@ -545,6 +568,9 @@ export interface RenderChunkInput {
   ordersMap: Map<string, any>;
   orderItemsMap: Map<string, any[]>;
   headerPrefs: typeof DEFAULT_HEADER_PREFS;
+  // OPCIONAL: por shipment_id, dados agregados do carrinho (SOMENTE quando isCart=true).
+  // Quando ausente para um sid, mantém pipeline antigo de pedido único intacto.
+  cartByShipment?: Map<string, { isCart: boolean; itemCount: number; aggregatedItems: any[]; primaryOrder?: any }>;
 }
 
 export interface RenderChunkResult {
@@ -556,7 +582,7 @@ export interface RenderChunkResult {
 }
 
 export async function renderChunkToPdf(input: RenderChunkInput): Promise<RenderChunkResult> {
-  const { shipmentIds, zplBlocksByShipment, layout, shipMap, ordersMap, orderItemsMap, headerPrefs } = input;
+  const { shipmentIds, zplBlocksByShipment, layout, shipMap, ordersMap, orderItemsMap, headerPrefs, cartByShipment } = input;
   const layoutInfo = LAYOUTS[layout];
   const targetWPt = layoutInfo.widthMm * MM_TO_PT;
   const targetHPt = layoutInfo.heightMm * MM_TO_PT;
@@ -642,9 +668,19 @@ export async function renderChunkToPdf(input: RenderChunkInput): Promise<RenderC
         else { drawH = labelAreaH; drawW = labelAreaH * imgAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = labelAreaY; }
         page.drawImage(labelImg, { x: drawX, y: drawY, width: drawW, height: drawH });
         const orderId = shipMap.get(sid)?.order_id;
-        const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
-        const items = orderItemsMap.get(orderId) || [];
-        const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, items);
+        const cartInfo = cartByShipment?.get(sid);
+        // Carrinho: usa pedido primário + itens agregados de TODOS os irmãos.
+        // NÃO carrinho: caminho original — pedido único + seus itens.
+        let orderData: any;
+        let items: any[];
+        if (cartInfo?.isCart) {
+          orderData = cartInfo.primaryOrder || ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
+          items = cartInfo.aggregatedItems;
+        } else {
+          orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
+          items = orderItemsMap.get(orderId) || [];
+        }
+        const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, items, cartInfo?.isCart ? { isCart: true, itemCount: cartInfo.itemCount } : undefined);
         const fontSize = headerPrefs.font_size || 9; const lineH = fontSize * HEADER_LINE_HEIGHT_FACTOR;
         let yPos = targetHPt - HEADER_PADDING_TOP;
         for (const line of lines) { const f = line.bold ? fontBold : font; page.drawText(line.text, { x: 8, y: yPos, size: fontSize, font: f, color: rgb(0, 0, 0) }); yPos -= lineH; }
