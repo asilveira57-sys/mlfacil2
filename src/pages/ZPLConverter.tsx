@@ -112,6 +112,39 @@ export default function ZPLConverter() {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
+  // Persistir configuração / preview no sessionStorage para sobreviver a remount.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(CONFIG_STATE_KEY, JSON.stringify({
+        zplCode, width, height, dpi, uploadedFileName,
+        selectedLabelType, selectedFullProdutoSubType, outputFormat,
+        previewImage,
+      } as PersistedConfig));
+    } catch { /* quota — silencia */ }
+  }, [zplCode, width, height, dpi, uploadedFileName, selectedLabelType, selectedFullProdutoSubType, outputFormat, previewImage]);
+
+  // Subscribe ao job singleton (sobrevive a remount: retoma progresso/PDF ao voltar).
+  useEffect(() => {
+    tryZplRehydrate();
+    const unsub = subscribeZplJob(setJobState);
+    attemptZplAutoDownload();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') attemptZplAutoDownload();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      unsub();
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
+  const handleManualDownload = () => {
+    const blob = getZplResultBlob();
+    const fname = jobState.fileName || 'etiquetas_zpl.pdf';
+    if (!blob) return;
+    triggerZplDownload(blob, fname);
+  };
+
   // Detecta automaticamente a quantidade de etiquetas
   const labelCount = useMemo(() => {
     if (!zplCode) return 0;
