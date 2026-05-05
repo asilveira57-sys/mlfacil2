@@ -20,29 +20,67 @@ import { useZPLTimeEstimate } from "@/hooks/useZPLTimeEstimate";
 import { useZPLPrintHistory } from "@/hooks/useZPLPrintHistory";
 import { PageContainer } from "@/components/layout/PageContainer";
 import type { User } from "@supabase/supabase-js";
+import {
+  runJob as runZplJob,
+  subscribeJob as subscribeZplJob,
+  getJobState as getZplJobState,
+  getResultBlob as getZplResultBlob,
+  triggerDownload as triggerZplDownload,
+  attemptAutoDownload as attemptZplAutoDownload,
+  tryRehydrate as tryZplRehydrate,
+  clearJob as clearZplJob,
+  isRunning as isZplJobRunning,
+} from "@/lib/zplConverterJob";
+
+const CONFIG_STATE_KEY = 'zpl_converter_config_v1';
+
+interface PersistedConfig {
+  zplCode: string;
+  width: string;
+  height: string;
+  dpi: string;
+  uploadedFileName: string | null;
+  selectedLabelType: string;
+  selectedFullProdutoSubType: string;
+  outputFormat: 'pdf_png' | 'pdf_vector';
+  previewImage: string | null;
+}
+
+function loadPersistedConfig(): Partial<PersistedConfig> {
+  try {
+    const raw = sessionStorage.getItem(CONFIG_STATE_KEY);
+    return raw ? (JSON.parse(raw) as PersistedConfig) : {};
+  } catch { return {}; }
+}
 
 export default function ZPLConverter() {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  
-  const [zplCode, setZplCode] = useState("");
-  const [width, setWidth] = useState("105");
-  const [height, setHeight] = useState("150");
-  const [dpi, setDpi] = useState("203");
-  const [isConverting, setIsConverting] = useState(false);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [conversionProgress, setConversionProgress] = useState(0);
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
-  const [selectedLabelType, setSelectedLabelType] = useState("");
-  const [selectedFullProdutoSubType, setSelectedFullProdutoSubType] = useState(() => {
-    return localStorage.getItem('zpl_full_produto_subtype') || "";
-  });
+
+  const persisted = loadPersistedConfig();
+
+  const [zplCode, setZplCode] = useState(persisted.zplCode ?? "");
+  const [width, setWidth] = useState(persisted.width ?? "105");
+  const [height, setHeight] = useState(persisted.height ?? "150");
+  const [dpi, setDpi] = useState(persisted.dpi ?? "203");
+  const [previewImage, setPreviewImage] = useState<string | null>(persisted.previewImage ?? null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(persisted.uploadedFileName ?? null);
+  const [selectedLabelType, setSelectedLabelType] = useState(persisted.selectedLabelType ?? "");
+  const [selectedFullProdutoSubType, setSelectedFullProdutoSubType] = useState(
+    persisted.selectedFullProdutoSubType ?? localStorage.getItem('zpl_full_produto_subtype') ?? ""
+  );
   const [quality, setQuality] = useState<'normal'>('normal');
-  const [outputFormat, setOutputFormat] = useState<'pdf_png' | 'pdf_vector'>(() => {
-    return (localStorage.getItem('zpl_output_format') as 'pdf_png' | 'pdf_vector') || 'pdf_png';
-  });
-  const [estimatedSeconds, setEstimatedSeconds] = useState(0);
+  const [outputFormat, setOutputFormat] = useState<'pdf_png' | 'pdf_vector'>(
+    persisted.outputFormat ?? (localStorage.getItem('zpl_output_format') as 'pdf_png' | 'pdf_vector') ?? 'pdf_png'
+  );
+
+  // Job state (vem do singleton, sobrevive a desmontagens)
+  const [jobState, setJobState] = useState(() => getZplJobState());
+  const isConverting = jobState.phase === 'running';
+  const conversionProgress = jobState.progress;
+  const estimatedSeconds = jobState.estimatedSeconds;
+  const setEstimatedSeconds = (_: number) => { /* noop — gerenciado pelo singleton */ };
   
   const { getEstimate, saveConversionTime } = useZPLTimeEstimate();
   const { history, addToHistory, removeFromHistory, clearHistory, getTimeRemaining } = useZPLPrintHistory();
