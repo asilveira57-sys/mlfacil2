@@ -1032,12 +1032,16 @@ serve(async (req) => {
             }
           }
 
+          // Detecção de carrinho: shipment com >1 order_id irmão
+          const isCart = siblingOrderIds.length > 1;
+          const itemCount = isCart ? allItems.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0) : 0;
+
           const lines = buildHeaderLinesForOrder(prefs, {
             order_id: primaryOrder.pack_id || primaryOrder.order_id,
             shipment_id: primaryOrder.shipment_id,
             buyer_name: primaryOrder.buyer_name,
             order_comment: primaryOrder.order_comment,
-          }, allItems);
+          }, allItems, isCart ? { isCart: true, itemCount } : undefined);
 
           headerDataMap.set(shipmentId, lines);
         }
