@@ -168,34 +168,35 @@ export default function ZPLConverter() {
   };
 
   const processLabelsInBatches = async (
-    labels: string[], 
-    widthInches: number, 
-    heightInches: number, 
+    labels: string[],
+    widthInches: number,
+    heightInches: number,
     scale: number = 1,
-    format: 'png' | 'pdf' = 'png'
+    format: 'png' | 'pdf' = 'png',
+    onProgress?: (p: number) => void,
   ): Promise<Blob[]> => {
     const blobs: Blob[] = new Array(labels.length);
     let currentDelay = 200;
     // Higher scales = larger images = fewer concurrent requests
     const concurrentRequests = scale >= 3 ? 2 : 3;
-    
+
     for (let i = 0; i < labels.length; i += concurrentRequests) {
       const batch = labels.slice(i, Math.min(i + concurrentRequests, labels.length));
-      
+
       try {
         const batchPromises = batch.map(async (label, batchIndex) => {
           const labelIndex = i + batchIndex;
           const blob = await convertSingleLabel(label, widthInches, heightInches, scale, format);
           blobs[labelIndex] = blob;
-          
+
           const progress = Math.round(((labelIndex + 1) / labels.length) * 100);
-          setConversionProgress(progress);
-          
+          onProgress?.(progress);
+
           return blob;
         });
 
         await Promise.all(batchPromises);
-        
+
         if (i + concurrentRequests < labels.length) {
           await new Promise((resolve) => setTimeout(resolve, currentDelay));
         }
@@ -210,7 +211,7 @@ export default function ZPLConverter() {
         }
       }
     }
-    
+
     return blobs;
   };
 
@@ -230,175 +231,168 @@ export default function ZPLConverter() {
       return;
     }
 
-    setIsConverting(true);
-    setConversionProgress(0);
+    if (isZplJobRunning()) {
+      toast.info("Já existe uma conversão em andamento.");
+      return;
+    }
 
-    // Buscar estimativa baseada no histórico
     const estimatedTime = await getEstimate(selectedLabelType, labelCount, selectedFullProdutoSubType || null);
-    setEstimatedSeconds(estimatedTime);
 
+    // Snapshot dos parâmetros para o job (sobrevive a remount)
+    const snapZplCode = zplCode.trim();
+    const snapWidth = width;
+    const snapHeight = height;
+    const snapDpi = dpi;
+    const snapLabelType = selectedLabelType;
+    const snapSubType = selectedFullProdutoSubType;
+    const snapOutputFormat = outputFormat;
+    const snapFileName = uploadedFileName;
+    const snapUserId = user?.id;
     const startTime = Date.now();
 
     try {
-      const widthInches = parseFloat(width) / 25.4;
-      const heightInches = parseFloat(height) / 25.4;
-      const scale = getQualityScale(quality);
-      const useVectorPdf = outputFormat === 'pdf_vector';
+      await runZplJob({
+        estimatedSeconds: estimatedTime,
+        run: async (onProgress) => {
+          const widthInches = parseFloat(snapWidth) / 25.4;
+          const heightInches = parseFloat(snapHeight) / 25.4;
+          const scale = getQualityScale(quality);
+          const useVectorPdf = snapOutputFormat === 'pdf_vector';
 
-      const labels = splitZPLByType(zplCode.trim(), selectedLabelType);
+          const labels = splitZPLByType(snapZplCode, snapLabelType);
 
-      if (labels.length === 0) {
-        toast.error("Nenhuma etiqueta encontrada no código ZPL");
-        setIsConverting(false);
-        return;
-      }
-
-      // Validate that every split block contains printable ZPL (^XA...^XZ)
-      const invalidBlocks = labels.filter(block => !/\^XA[\s\S]*?\^XZ/i.test(block));
-      if (invalidBlocks.length > 0) {
-        console.warn(`${invalidBlocks.length} blocks without ^XA/^XZ removed from batch`);
-        const validLabels = labels.filter(block => /\^XA[\s\S]*?\^XZ/i.test(block));
-        if (validLabels.length === 0) {
-          toast.error("O código ZPL não contém etiquetas imprimíveis válidas (faltam marcadores ^XA/^XZ)");
-          setIsConverting(false);
-          return;
-        }
-      }
-
-      const qualityLabel = 'normal';
-      toast.info(`Processando ${labels.length} etiqueta(s) em qualidade ${qualityLabel}${useVectorPdf ? ' (PDF vetorial)' : ''}...`);
-
-      if (useVectorPdf) {
-        // Vector PDF mode - get PDFs directly from Labelary
-        // For vector, scale=1 since PDF is already vector quality
-        const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 1, 'pdf');
-        
-        // For preview, get first label as PNG at scale 1
-        const previewBlob = await convertSingleLabel(labels[0], widthInches, heightInches, 1, 'png');
-        setPreviewImage(URL.createObjectURL(previewBlob));
-
-        // Merge PDFs using pdf-lib would be ideal, but for simplicity, if single label, download directly
-        if (convertedBlobs.length === 1) {
-          const url = URL.createObjectURL(convertedBlobs[0]);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'etiquetas_zpl.pdf';
-          a.click();
-          URL.revokeObjectURL(url);
-        } else {
-          // For multiple labels in vector mode, fallback to jsPDF with max quality PNGs
-          const pngBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 3, 'png');
-          
-          const pdf = new jsPDF({
-            orientation: widthInches > heightInches ? "landscape" : "portrait",
-            unit: "mm",
-            format: [parseFloat(width), parseFloat(height)],
-          });
-
-          for (let i = 0; i < pngBlobs.length; i++) {
-            const blob = pngBlobs[i];
-            const reader = new FileReader();
-            
-            await new Promise<void>((resolve, reject) => {
-              reader.onload = () => {
-                try {
-                  if (i > 0) pdf.addPage();
-                  // Insert scaled image at original dimensions (supersampling)
-                  pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(width), parseFloat(height));
-                  resolve();
-                } catch (error) {
-                  reject(error);
-                }
-              };
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
+          if (labels.length === 0) {
+            throw new Error("Nenhuma etiqueta encontrada no código ZPL");
           }
 
-          pdf.save("etiquetas_zpl.pdf");
-        }
-      } else {
-        // Standard PNG to PDF mode with supersampling
-        const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, scale, 'png');
+          const invalidBlocks = labels.filter(block => !/\^XA[\s\S]*?\^XZ/i.test(block));
+          if (invalidBlocks.length > 0) {
+            console.warn(`${invalidBlocks.length} blocks without ^XA/^XZ removed from batch`);
+            const validLabels = labels.filter(block => /\^XA[\s\S]*?\^XZ/i.test(block));
+            if (validLabels.length === 0) {
+              throw new Error("O código ZPL não contém etiquetas imprimíveis válidas (faltam marcadores ^XA/^XZ)");
+            }
+          }
 
-        const pdf = new jsPDF({
-          orientation: widthInches > heightInches ? "landscape" : "portrait",
-          unit: "mm",
-          format: [parseFloat(width), parseFloat(height)],
-        });
+          const qualityLabel = 'normal';
+          toast.info(`Processando ${labels.length} etiqueta(s) em qualidade ${qualityLabel}${useVectorPdf ? ' (PDF vetorial)' : ''}...`);
 
-        for (let i = 0; i < convertedBlobs.length; i++) {
-          const blob = convertedBlobs[i];
-          const reader = new FileReader();
-          
-          await new Promise<void>((resolve, reject) => {
-            reader.onload = () => {
-              try {
-                if (i > 0) pdf.addPage();
-                pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(width), parseFloat(height));
-                resolve();
-              } catch (error) {
-                reject(error);
+          let outputBlob: Blob;
+
+          if (useVectorPdf) {
+            const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 1, 'pdf', onProgress);
+
+            const previewBlob = await convertSingleLabel(labels[0], widthInches, heightInches, 1, 'png');
+            try { setPreviewImage(URL.createObjectURL(previewBlob)); } catch { /* unmounted */ }
+
+            if (convertedBlobs.length === 1) {
+              outputBlob = convertedBlobs[0];
+            } else {
+              const pngBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 3, 'png', onProgress);
+
+              const pdf = new jsPDF({
+                orientation: widthInches > heightInches ? "landscape" : "portrait",
+                unit: "mm",
+                format: [parseFloat(snapWidth), parseFloat(snapHeight)],
+              });
+
+              for (let i = 0; i < pngBlobs.length; i++) {
+                const blob = pngBlobs[i];
+                const reader = new FileReader();
+                await new Promise<void>((resolve, reject) => {
+                  reader.onload = () => {
+                    try {
+                      if (i > 0) pdf.addPage();
+                      pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(snapWidth), parseFloat(snapHeight));
+                      resolve();
+                    } catch (error) { reject(error); }
+                  };
+                  reader.onerror = reject;
+                  reader.readAsDataURL(blob);
+                });
               }
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
 
-          if (i === 0) {
-            setPreviewImage(URL.createObjectURL(blob));
+              outputBlob = pdf.output('blob');
+            }
+          } else {
+            const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, scale, 'png', onProgress);
+
+            const pdf = new jsPDF({
+              orientation: widthInches > heightInches ? "landscape" : "portrait",
+              unit: "mm",
+              format: [parseFloat(snapWidth), parseFloat(snapHeight)],
+            });
+
+            for (let i = 0; i < convertedBlobs.length; i++) {
+              const blob = convertedBlobs[i];
+              const reader = new FileReader();
+              await new Promise<void>((resolve, reject) => {
+                reader.onload = () => {
+                  try {
+                    if (i > 0) pdf.addPage();
+                    pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(snapWidth), parseFloat(snapHeight));
+                    resolve();
+                  } catch (error) { reject(error); }
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+
+              if (i === 0) {
+                try { setPreviewImage(URL.createObjectURL(blob)); } catch { /* unmounted */ }
+              }
+            }
+
+            outputBlob = pdf.output('blob');
           }
-        }
 
-        pdf.save("etiquetas_zpl.pdf");
-      }
-      toast.success(`${labels.length} etiqueta(s) convertida(s) com sucesso!`);
-      
-      // Salvar no histórico de reimpressão rápida
-      addToHistory({
-        fileName: uploadedFileName || `etiquetas_${Date.now()}.zpl`,
-        labelType: selectedLabelType,
-        labelSubtype: selectedFullProdutoSubType || null,
-        labelCount: labels.length,
-        zplCode: zplCode.trim(),
-        width,
-        height,
-        dpi,
+          toast.success(`${labels.length} etiqueta(s) convertida(s) com sucesso!`);
+
+          try {
+            addToHistory({
+              fileName: snapFileName || `etiquetas_${Date.now()}.zpl`,
+              labelType: snapLabelType,
+              labelSubtype: snapSubType || null,
+              labelCount: labels.length,
+              zplCode: snapZplCode,
+              width: snapWidth,
+              height: snapHeight,
+              dpi: snapDpi,
+            });
+          } catch (e) { console.warn('addToHistory failed', e); }
+
+          const endTime = Date.now();
+          const durationSeconds = (endTime - startTime) / 1000;
+          if (snapUserId) {
+            try {
+              await saveConversionTime(snapUserId, {
+                label_type: snapLabelType,
+                label_subtype: snapSubType || null,
+                label_count: labels.length,
+                width_mm: parseFloat(snapWidth),
+                height_mm: parseFloat(snapHeight),
+                duration_seconds: durationSeconds,
+              });
+            } catch (e) { console.warn('saveConversionTime failed', e); }
+          }
+
+          return { blob: outputBlob, fileName: 'etiquetas_zpl.pdf' };
+        },
       });
-      
-      // Salvar tempo real de conversão no histórico
-      const endTime = Date.now();
-      const durationSeconds = (endTime - startTime) / 1000;
-      
-      if (user?.id) {
-        await saveConversionTime(user.id, {
-          label_type: selectedLabelType,
-          label_subtype: selectedFullProdutoSubType || null,
-          label_count: labels.length,
-          width_mm: parseFloat(width),
-          height_mm: parseFloat(height),
-          duration_seconds: durationSeconds,
-        });
-      }
-      
     } catch (error) {
       console.error("Erro na conversão:", error);
       toast.error(error instanceof Error ? error.message : "Erro ao converter ZPL");
-    } finally {
-      setIsConverting(false);
-      setConversionProgress(0);
-      setEstimatedSeconds(0);
     }
   };
 
   const handleClearCode = () => {
     setZplCode("");
     setPreviewImage(null);
-    setConversionProgress(0);
     setUploadedFileName(null);
     setSelectedLabelType("");
     setSelectedFullProdutoSubType("");
-    setEstimatedSeconds(0);
+    clearZplJob();
+    try { sessionStorage.removeItem(CONFIG_STATE_KEY); } catch { /* ignore */ }
     toast.success("Código ZPL limpo!");
   };
 
