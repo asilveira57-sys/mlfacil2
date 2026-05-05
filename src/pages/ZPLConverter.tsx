@@ -124,10 +124,12 @@ export default function ZPLConverter() {
   }, [zplCode, width, height, dpi, uploadedFileName, selectedLabelType, selectedFullProdutoSubType, outputFormat, previewImage]);
 
   // Subscribe ao job singleton (sobrevive a remount: retoma progresso/PDF ao voltar).
+  // IMPORTANTE: NÃO disparar auto-download incondicional no mount — isso causava
+  // múltiplos downloads ao trocar de página e voltar. O auto-download só ocorre
+  // 1x por jobId (controlado pelo singleton) e quando a aba se torna visível.
   useEffect(() => {
     tryZplRehydrate();
     const unsub = subscribeZplJob(setJobState);
-    attemptZplAutoDownload();
     const onVis = () => {
       if (document.visibilityState === 'visible') attemptZplAutoDownload();
     };
