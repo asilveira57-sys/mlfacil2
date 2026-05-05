@@ -86,13 +86,16 @@ function base64ToBlob(dataUrl: string): Blob | null {
   } catch { return null; }
 }
 
-async function persistResult(blob: Blob, fileName: string) {
+async function persistResult(blob: Blob, fileName: string, jobId: string, startedAt: number) {
   try {
     const dataUrl = await blobToBase64(blob);
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
       savedAt: Date.now(),
       fileName,
       dataUrl,
+      jobId,
+      startedAt,
+      autoDownloadAttempted: state.autoDownloadAttempted,
     }));
   } catch { /* quota — silencia */ }
 }
@@ -102,7 +105,8 @@ export function tryRehydrate(): void {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-    const { savedAt, fileName, dataUrl } = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    const { savedAt, fileName, dataUrl, jobId, startedAt, autoDownloadAttempted } = parsed;
     if (Date.now() - savedAt > TTL_MS) {
       sessionStorage.removeItem(STORAGE_KEY);
       return;
@@ -114,7 +118,10 @@ export function tryRehydrate(): void {
       phase: 'ready',
       progress: 100,
       fileName,
-      pendingDownload: true,
+      pendingDownload: !autoDownloadAttempted,
+      jobId: jobId ?? null,
+      startedAt: startedAt ?? null,
+      autoDownloadAttempted: !!autoDownloadAttempted,
     });
   } catch { /* ignore */ }
 }
@@ -133,6 +140,9 @@ export function clearJob(): void {
     fileName: null,
     error: null,
     pendingDownload: false,
+    jobId: null,
+    startedAt: null,
+    autoDownloadAttempted: false,
   };
   emit();
 }
@@ -166,14 +176,20 @@ export function triggerDownload(blob: Blob, fileName: string): boolean {
 }
 
 /**
- * Marca pendingDownload conforme se a aba está visível (sem dependência de gesto).
- * Quando visível: dispara e limpa pendingDownload.
+ * Tenta o auto-download UMA ÚNICA VEZ por jobId. Se a aba estiver visível,
+ * dispara e marca como entregue. Se não, deixa pendingDownload=true para o usuário
+ * baixar manualmente — não tenta de novo automaticamente.
  */
 export function attemptAutoDownload(): void {
   if (!resultBlob || !state.fileName) return;
+  if (state.autoDownloadAttempted) return; // ← evita o loop de downloads
   if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
     triggerDownload(resultBlob, state.fileName);
-    update({ pendingDownload: false });
+    update({ pendingDownload: false, autoDownloadAttempted: true });
+    // Persiste a flag para sobreviver a remount/refresh
+    if (state.jobId && state.startedAt) {
+      void persistResult(resultBlob, state.fileName, state.jobId, state.startedAt);
+    }
   } else {
     update({ pendingDownload: true });
   }
@@ -193,6 +209,10 @@ export function isRunning(): boolean {
   return state.phase === 'running';
 }
 
+function genJobId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export async function runJob(cbs: RunJobCallbacks): Promise<void> {
   if (runningPromise) return runningPromise;
 
@@ -204,6 +224,9 @@ export async function runJob(cbs: RunJobCallbacks): Promise<void> {
   resultBlob = null;
   try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
 
+  const jobId = genJobId();
+  const startedAt = Date.now();
+
   update({
     phase: 'running',
     progress: 0,
@@ -211,6 +234,9 @@ export async function runJob(cbs: RunJobCallbacks): Promise<void> {
     fileName: null,
     error: null,
     pendingDownload: false,
+    jobId,
+    startedAt,
+    autoDownloadAttempted: false,
   });
 
   runningPromise = (async () => {
@@ -220,7 +246,7 @@ export async function runJob(cbs: RunJobCallbacks): Promise<void> {
       });
       resultBlob = blob;
       update({ phase: 'ready', progress: 100, fileName });
-      await persistResult(blob, fileName);
+      await persistResult(blob, fileName, jobId, startedAt);
       attemptAutoDownload();
     } catch (e: any) {
       update({ phase: 'error', error: e?.message || 'Erro ao gerar PDF' });
