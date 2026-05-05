@@ -674,6 +674,7 @@ export default function ZPLConverter() {
                     <ZPLTimer 
                       isActive={isConverting} 
                       estimatedSeconds={estimatedSeconds}
+                      startedAtMs={jobState.startedAt}
                       message={`Gerando ${labelCount} etiqueta(s)... Tempo estimado: {TIME}`}
                       userName={user?.user_metadata?.full_name || user?.email}
                     />
