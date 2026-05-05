@@ -1,64 +1,52 @@
-Plano cirúrgico — corrigir SOMENTE vendas de carrinho em Shipping Labels e Label Teste. Vendas sem carrinho (Flex/Coleta normais) NÃO sofrem alteração.
+## Problema
 
-Princípio inegociável
-- Detecção de carrinho é a chave. Só aplica a nova lógica quando o envio é carrinho.
-- Definição de carrinho: `shipment_id` que tem mais de 1 `order_id` em `meli_orders_cache` OU pedido com `pack_id` cujos irmãos compartilham o mesmo `shipment_id`.
-- Para envios não-carrinho, o caminho de código atual é mantido idêntico, sem qualquer mudança em rendering, distribuição de blocos, DANFE, Flex ou layout.
+No `/zpl-converter` (Etiqueta Full):
+1. Ao sair da página durante a conversão e voltar, **a configuração some** (tipo, dimensões, código ZPL, preview).
+2. Quando a conversão termina com a aba em segundo plano ou após navegação, o `pdf.save()` não dispara o "Salvar como" automaticamente — o usuário precisa clicar de novo para o download abrir.
+3. A geração da etiqueta em si funciona e **NÃO pode ser quebrada** (sem mexer em `convertSingleLabel`, `processLabelsInBatches`, `splitZPLByType`, Labelary, jsPDF).
 
-Diagnóstico confirmado
-- Hoje os hooks já deduplicam `shipment_id` antes de chamar o backend. Isso impede gerar duas etiquetas para o mesmo envio de carrinho.
-- O bug atual está no cabeçalho:
-  - Em `Label Teste`, o worker carrega só o `order_id` principal do envio. Em carrinho, o cabeçalho mostra somente o primeiro item e descarta o restante, sem aviso.
-  - Em `Shipping Labels`, mesmo agregando irmãos, o cabeçalho não diz que é carrinho, então o operador acha que “sumiu” item.
+## Causa
 
-O que vai mudar (SOMENTE quando o envio for carrinho)
+- `ZPLConverter.tsx` mantém todo o estado em `useState` puro. Ao trocar de rota o componente desmonta → estado se perde.
+- O `pdf.save()` do jsPDF cria um `<a>` no DOM e clica nele. Se isso ocorrer enquanto o componente já desmontou (rota trocada) ou a aba está em background, o navegador trata como sem gesto do usuário e exige clique para concluir.
+- Não há persistência (igual já existe em `ZplViewerTool`/`shippingLabelsSession`), nem cache do PDF gerado para reoferecer download imediato.
 
-1. Função utilitária `isCartShipment(shipment)`
-- Retorna verdadeiro quando o `shipment_id` aparece em mais de um `order_id`, ou quando o pedido principal tem `pack_id` com irmãos compartilhando o mesmo `shipment_id`.
-- Esta função é a única porta de entrada da lógica nova. Onde ela retornar falso, todo o pipeline antigo é preservado byte-a-byte.
+## Solução (cirúrgica, sem tocar no pipeline de conversão)
 
-2. Cabeçalho de carrinho
-- Aplicado apenas para envios em que `isCartShipment` é verdadeiro.
-- Acrescenta uma linha clara identificando carrinho, por exemplo: `CARRINHO: N itens`.
-- Agrega itens de todos os `order_id` irmãos do mesmo `shipment_id`.
-- Respeita o limite de linhas configurado pelo usuário; se não couber tudo, adiciona uma linha final indicando conferência, por exemplo: `Verificar itens do carrinho (+N)`.
-- Para envios não-carrinho, o cabeçalho continua sendo gerado como hoje, sem nenhuma mudança.
+### 1. Persistir configuração + preview em sessionStorage
+Espelhar o padrão de `src/pages/tools/ZplViewerTool.tsx` (chave única `zpl_converter_state_v1`):
+- Salvar em `useEffect`: `zplCode`, `width`, `height`, `dpi`, `selectedLabelType`, `selectedFullProdutoSubType`, `outputFormat`, `uploadedFileName`, e (novo) o **último PDF gerado** como base64 + nome do arquivo.
+- Hidratar lazy nos `useState(() => ...)` no mount.
+- Não limpar em `finally` (já não limpa). Em `handleClearCode`, remover a chave.
 
-3. Backend `Shipping Labels` (`supabase/functions/ml-generate-labels/index.ts`)
-- Manter a deduplicação por `shipment_id`.
-- No bloco que monta cabeçalho, antes de construir as linhas:
-  - Se o envio for carrinho, agregar irmãos e usar a regra do passo 2.
-  - Se não for carrinho, usar exatamente o mesmo caminho de hoje.
-- Não mexer em validações, distribuição de páginas, DANFE, Flex sem NF, layouts ou geração final.
+### 2. Conversão sobrevive à navegação
+Mover o estado de conversão para um **singleton em módulo** (`src/lib/zplConverterJob.ts`) com:
+- `runJob(params, callbacks)` — guarda promise atual, `progress`, `phase`, `resultPdfBlob`.
+- `subscribe(listener)` para a página re-hidratar progresso ao voltar.
+- Se o componente desmontar, a Promise continua executando; quando termina, salva o blob no singleton + sessionStorage (base64).
+- Ao voltar para a página: hook lê o singleton, mostra a barra continuando, e se já terminou faz o download (ver passo 3).
 
-4. Backend `Label Teste` (`supabase/functions/_shared/labeltest-render.ts` e `ml-generate-labels-labeltest-batch`)
-- No worker, ao carregar pedidos do batch:
-  - Buscar todos os irmãos com o mesmo `shipment_id`.
-  - Carregar itens de todos esses pedidos irmãos.
-- Em `renderChunkToPdf`, usar a regra do passo 2 só quando o envio for carrinho. Para envios não-carrinho, manter o caminho atual.
-- Manter intacta a regra Flex já corrigida: 1 ou 2 blocos, etiqueta obrigatória, DANFE complementar.
+### 3. Auto-download confiável
+Quando o PDF termina:
+1. Em vez de `pdf.save(...)`, gerar `const blob = pdf.output('blob')` e guardar em memória + sessionStorage.
+2. Tentar `triggerDownload(blob, fileName)`:
+   - Cria `URL.createObjectURL`, `<a download>`, anexa ao `document.body`, `.click()`, remove.
+   - Funciona se a aba/página estiver ativa (caso normal).
+3. Se a aba estiver em background OU rota desmontou: salva o blob no estado persistido e, ao montar/voltar à aba (`visibilitychange` + mount), tenta o download novamente automaticamente uma única vez. Se o navegador ainda bloquear (sem gesto), mostrar um banner discreto **"PDF pronto — Baixar agora"** que executa o download no clique. (Sem perder configuração nem preview.)
+4. Manter o `addToHistory` e `saveConversionTime` exatamente como hoje.
 
-5. Frontend
-- Não mudar seleção, deduplicação, filtros, layouts ou polling.
-- A única mudança visível ao usuário é o cabeçalho diferente nas etiquetas de carrinho.
+### 4. Não dar refresh / não recriar
+- Nenhum `navigate`, nenhum `window.location`, nenhum `key={}` que force remount.
+- `onAuthStateChange` continua ignorando `TOKEN_REFRESHED` (já está correto).
 
-6. Pequena correção lateral (não relacionada à etiqueta, mas presente como erro de runtime)
-- Envolver o uso de `navigator.clipboard.writeText` em `try/catch` para evitar `Document is not focused` quebrar a UI durante a interação.
+## Arquivos a alterar
 
-Validação por leitura de código após implementar
-- Confirmar que envios não-carrinho mantêm a saída atual, sem qualquer alteração em layout, DANFE, Flex, NF ou ZPL.
-- Confirmar que envios de carrinho geram exatamente 1 etiqueta com cabeçalho informando carrinho e itens agregados.
-- Confirmar que Flex sem NF continua gerando só etiqueta, e Flex com NF continua gerando etiqueta + DANFE.
-- Confirmar que carrinho nunca gera 2+ etiquetas para o mesmo `shipment_id`.
+- `src/lib/zplConverterJob.ts` — **novo**: singleton de job + persistência blob/base64 + helpers `triggerDownload` / `tryAutoDownload`.
+- `src/pages/ZPLConverter.tsx` — hidratar estado de sessionStorage, usar o singleton para `runJob`, substituir `pdf.save()` por `pdf.output('blob')` + `triggerDownload`, escutar `visibilitychange` para retry de download, banner "Baixar agora" quando bloqueado.
 
-Memória
-- Atualizar a regra `Cart Pack Grouping` para deixar explícito:
-  - 1 envio = 1 etiqueta, mesmo em carrinho.
-  - Cabeçalho de carrinho sempre indica que é carrinho e agrega itens, com aviso de conferência se não couber.
-  - Envios não-carrinho NUNCA podem ser afetados por código novo de carrinho.
+## Garantias de não-regressão
 
-Escopo protegido
-- Sem refatoração de Flex/Coleta sem carrinho.
-- Sem mudança em validação de NF, distribuição de blocos ou layouts.
-- Sem novo polling, novo limite ou nova seleção.
-- Sem mudança em Shipping Labels além do cabeçalho do carrinho.
+- `convertSingleLabel`, `processLabelsInBatches`, `splitZPLByType`, geração jsPDF/Labelary: **byte-a-byte preservados**.
+- Fluxo de PDF vetorial single-label (download direto do blob da Labelary) passa pelo mesmo `triggerDownload`.
+- `quality`, `outputFormat`, sub-tipos `full_produto`, dropzone, histórico de reimpressão: inalterados.
+- `Sobre flex / NF / carrinho`: fora do escopo, nada alterado.
