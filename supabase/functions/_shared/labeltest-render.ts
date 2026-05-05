@@ -582,7 +582,7 @@ export interface RenderChunkResult {
 }
 
 export async function renderChunkToPdf(input: RenderChunkInput): Promise<RenderChunkResult> {
-  const { shipmentIds, zplBlocksByShipment, layout, shipMap, ordersMap, orderItemsMap, headerPrefs } = input;
+  const { shipmentIds, zplBlocksByShipment, layout, shipMap, ordersMap, orderItemsMap, headerPrefs, cartByShipment } = input;
   const layoutInfo = LAYOUTS[layout];
   const targetWPt = layoutInfo.widthMm * MM_TO_PT;
   const targetHPt = layoutInfo.heightMm * MM_TO_PT;
