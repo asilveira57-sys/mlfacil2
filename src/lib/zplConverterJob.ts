@@ -15,6 +15,12 @@ export interface ZplJobState {
   error: string | null;
   /** true quando o PDF está pronto mas o navegador bloqueou o download automático */
   pendingDownload: boolean;
+  /** id único do job atual (muda a cada nova conversão) */
+  jobId: string | null;
+  /** timestamp de início do job (ms) — usado p/ contador real */
+  startedAt: number | null;
+  /** marca se já tentamos auto-download desse jobId */
+  autoDownloadAttempted: boolean;
 }
 
 const STORAGE_KEY = 'zpl_converter_job_v1';
@@ -27,6 +33,9 @@ let state: ZplJobState = {
   fileName: null,
   error: null,
   pendingDownload: false,
+  jobId: null,
+  startedAt: null,
+  autoDownloadAttempted: false,
 };
 let resultBlob: Blob | null = null;
 let resultBlobUrl: string | null = null;
