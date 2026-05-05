@@ -668,9 +668,19 @@ export async function renderChunkToPdf(input: RenderChunkInput): Promise<RenderC
         else { drawH = labelAreaH; drawW = labelAreaH * imgAspect; drawX = (LABEL_W_PT - drawW) / 2; drawY = labelAreaY; }
         page.drawImage(labelImg, { x: drawX, y: drawY, width: drawW, height: drawH });
         const orderId = shipMap.get(sid)?.order_id;
-        const orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
-        const items = orderItemsMap.get(orderId) || [];
-        const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, items);
+        const cartInfo = cartByShipment?.get(sid);
+        // Carrinho: usa pedido primário + itens agregados de TODOS os irmãos.
+        // NÃO carrinho: caminho original — pedido único + seus itens.
+        let orderData: any;
+        let items: any[];
+        if (cartInfo?.isCart) {
+          orderData = cartInfo.primaryOrder || ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
+          items = cartInfo.aggregatedItems;
+        } else {
+          orderData = ordersMap.get(orderId) || { order_id: orderId, buyer_name: '', shipment_id: sid };
+          items = orderItemsMap.get(orderId) || [];
+        }
+        const lines = buildHeaderLines(headerPrefs, { ...orderData, shipment_id: sid }, items, cartInfo?.isCart ? { isCart: true, itemCount: cartInfo.itemCount } : undefined);
         const fontSize = headerPrefs.font_size || 9; const lineH = fontSize * HEADER_LINE_HEIGHT_FACTOR;
         let yPos = targetHPt - HEADER_PADDING_TOP;
         for (const line of lines) { const f = line.bold ? fontBold : font; page.drawText(line.text, { x: 8, y: yPos, size: fontSize, font: f, color: rgb(0, 0, 0) }); yPos -= lineH; }
