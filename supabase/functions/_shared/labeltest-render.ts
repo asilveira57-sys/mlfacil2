@@ -568,6 +568,9 @@ export interface RenderChunkInput {
   ordersMap: Map<string, any>;
   orderItemsMap: Map<string, any[]>;
   headerPrefs: typeof DEFAULT_HEADER_PREFS;
+  // OPCIONAL: por shipment_id, dados agregados do carrinho (SOMENTE quando isCart=true).
+  // Quando ausente para um sid, mantém pipeline antigo de pedido único intacto.
+  cartByShipment?: Map<string, { isCart: boolean; itemCount: number; aggregatedItems: any[]; primaryOrder?: any }>;
 }
 
 export interface RenderChunkResult {
