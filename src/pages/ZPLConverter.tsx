@@ -693,6 +693,17 @@ export default function ZPLConverter() {
                 >
                   {isConverting ? "Convertendo..." : <><Download className="mr-2 h-4 w-4" /> Converter e Baixar PDF</>}
                 </Button>
+
+                {jobState.phase === 'ready' && jobState.pendingDownload && (
+                  <div className="rounded-md border border-primary/40 bg-primary/5 p-3 flex items-center justify-between gap-3">
+                    <div className="text-sm">
+                      <strong>PDF pronto.</strong> O navegador bloqueou o download automático.
+                    </div>
+                    <Button size="sm" onClick={handleManualDownload}>
+                      <Download className="h-4 w-4 mr-1" /> Baixar agora
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
