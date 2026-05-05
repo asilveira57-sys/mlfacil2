@@ -6,23 +6,37 @@ interface ZPLTimerProps {
   estimatedSeconds?: number;
   message?: string;
   userName?: string;
+  /** Timestamp (ms) de início do job. Quando informado, o contador
+   *  é calculado por relógio real e sobrevive a remount da página. */
+  startedAtMs?: number | null;
 }
 
-export const ZPLTimer = ({ isActive, estimatedSeconds = 0, message, userName }: ZPLTimerProps) => {
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+export const ZPLTimer = ({ isActive, estimatedSeconds = 0, message, userName, startedAtMs }: ZPLTimerProps) => {
+  const computeElapsed = () => {
+    if (startedAtMs) return Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+    return 0;
+  };
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(computeElapsed);
 
   useEffect(() => {
     if (!isActive) {
-      setElapsedSeconds(0);
+      if (!startedAtMs) setElapsedSeconds(0);
       return;
     }
+    // Sincroniza imediatamente ao montar/voltar à página
+    setElapsedSeconds(computeElapsed());
 
     const interval = setInterval(() => {
-      setElapsedSeconds(prev => prev + 1);
+      if (startedAtMs) {
+        setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+      } else {
+        setElapsedSeconds(prev => prev + 1);
+      }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isActive]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, startedAtMs]);
 
   if (!isActive) return null;
 
