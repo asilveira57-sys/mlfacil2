@@ -149,6 +149,8 @@ project_id = "rfckrbqwdsejicjlxqdv"
     verify_jwt = false
   [functions.record-consent]
     verify_jwt = false
+  [functions.resolve-verification-link]
+    verify_jwt = false
   [functions.shipping-labels-sync]
     verify_jwt = false
   [functions.shipping-status-sync]

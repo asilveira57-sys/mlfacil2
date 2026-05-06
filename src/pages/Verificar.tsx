@@ -15,29 +15,24 @@ const Verificar = () => {
     }
 
     const resolve = async () => {
-      const { data, error: fetchError } = await supabase
-        .from("verification_links")
-        .select("verification_url, expires_at, used")
-        .eq("id", token)
-        .maybeSingle();
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke(
+          "resolve-verification-link",
+          { body: { token } },
+        );
 
-      if (fetchError || !data) {
-        setError("Link não encontrado ou já expirado.");
-        return;
+        if (fnError || !data?.url) {
+          const code = (data as { error?: string } | null)?.error;
+          if (code === "already_used") setError("Este link já foi utilizado.");
+          else if (code === "expired") setError("Este link expirou. Solicite um novo ao suporte.");
+          else setError("Link não encontrado ou já expirado.");
+          return;
+        }
+
+        window.location.href = data.url as string;
+      } catch {
+        setError("Não foi possível validar o link. Tente novamente.");
       }
-
-      if (data.used) {
-        setError("Este link já foi utilizado.");
-        return;
-      }
-
-      if (new Date(data.expires_at) < new Date()) {
-        setError("Este link expirou. Solicite um novo ao suporte.");
-        return;
-      }
-
-      // Redirect to the real verification URL
-      window.location.href = data.verification_url;
     };
 
     resolve();
