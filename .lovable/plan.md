@@ -1,73 +1,71 @@
+# Isolar Resend e padronizar envio em Lovable Emails
+
 ## Diagnóstico
 
-O problema veio da última correção de preservação do arquivo:
+Boa notícia: o sistema **já envia 100% dos e-mails via Lovable Emails**.
 
-1. O PDF passou a ficar salvo corretamente no singleton/sessionStorage, mas o `attemptAutoDownload()` é chamado automaticamente no mount da página e também no `visibilitychange`.
-2. Como não existe uma marcação de “este PDF já teve tentativa de download automático”, toda vez que você sai e volta para `/zpl-converter`, o mesmo arquivo pronto é detectado de novo e o sistema clica no link de download novamente.
-3. O contador zera porque o componente `ZPLTimer` guarda o tempo decorrido em `useState` local. Ao sair da rota, o componente desmonta; ao voltar, ele monta de novo começando de `0`, mesmo que o job real continue rodando no singleton.
+- Domínio verificado: `notify.notifica.mktpfacil.com` ✅
+- `auth-email-hook` já usa o padrão de fila (`enqueue_email` → `process-email-queue`) com retry e suppression — não há envio direto pelo Resend
+- Busca por código Resend retornou **zero ocorrências reais** (`RESEND_API_KEY`, `resend.com`, `@resend/*`, `connector-gateway/resend`) em `src/` e `supabase/functions/`
+- Os arquivos que aparecem com a palavra "resend" são na verdade **"reenviar e-mail de verificação"** (admin-resend-verification, admin-resend-collab-invite) — não têm relação com o serviço Resend
+- Único vestígio do Resend: o **secret `RESEND_API_KEY`** ainda configurado no projeto (órfão, não usado por ninguém)
 
-## Plano cirúrgico
+Portanto, as reclamações de "e-mail não chega" **não são causadas por mistura de provedores**. Elas têm outras causas prováveis (caixa cheia, spam, suppression list, DNS ainda propagando para algum cliente, ou fila com erro). Vamos atacar as duas frentes:
 
-### 1. Bloquear loop de downloads automáticos
-Alterar somente a camada de controle do job em `src/lib/zplConverterJob.ts`:
+## Plano
 
-- Adicionar um identificador único por conversão (`jobId`).
-- Adicionar estado de entrega do download:
-  - `autoDownloadAttempted`: se o download automático já foi tentado para esse PDF.
-  - `pendingDownload`: se o PDF ficou pronto enquanto a aba/página não estava em condição de baixar.
-- O download automático poderá acontecer no máximo 1 vez por `jobId`.
-- Ao sair e voltar da página, se o mesmo PDF já teve tentativa automática, ele não dispara outro download.
-- O botão manual “Baixar agora” continuará disponível para o usuário baixar novamente, mas clique manual não cria loop.
+### 1. Limpeza do Resend (eliminar qualquer vestígio)
 
-### 2. Remover chamada automática no mount que causa repetição
-Em `src/pages/ZPLConverter.tsx`:
+- **Remover o secret `RESEND_API_KEY`** do projeto (uso de `delete_secret`) — único resíduo real no backend
+- **Remover NS do Cloudflare relacionados ao Resend**: o Resend nunca chegou a ser configurado em DNS no projeto atual. O subdomínio `notify.notifica.mktpfacil.com` está delegado para os nameservers do Lovable (`ns5.lovable.cloud`, `ns6.lovable.cloud`) — esses **devem permanecer**. Se houver registros TXT/MX/CNAME antigos do Resend em `notifica.mktpfacil.com` (raiz) no seu Cloudflare, eu listo quais procurar e você apaga manualmente no painel (não tenho acesso ao seu Cloudflare). Esses registros órfãos não afetam envio, mas confundem o DNS.
+- Garantir que `email_domain--toggle_project_emails` esteja **enabled** (já está, pois o hook está ativo)
 
-- Remover a chamada incondicional de `attemptZplAutoDownload()` quando a página monta.
-- Manter o `visibilitychange`, mas ele só tentará baixar quando:
-  - houver PDF pronto,
-  - `pendingDownload` estiver ativo,
-  - e aquele `jobId` ainda não tiver recebido tentativa automática.
+### 2. Garantir entregabilidade 100% (cadastro + recuperação de senha)
 
-Isso preserva o comportamento desejado: se terminou enquanto o usuário estava fora/aba oculta, tenta abrir o download quando ele volta. Mas não fica baixando 5, 6 arquivos ao navegar.
+Vou implementar verificações e correções pró-ativas:
 
-### 3. Corrigir contador para não zerar ao voltar para a página
-Alterar o estado do job em `src/lib/zplConverterJob.ts`:
+**A. Auditoria de fila e suppression**
+- Consultar `email_send_log` dos últimos 30 dias filtrando `status IN ('failed','dlq','suppressed','pending')` para identificar padrões de falha (provedor, ISP, motivo)
+- Listar `suppressed_emails` — clientes nessa lista nunca recebem nada. Decidir caso a caso se devem ser removidos (apenas para hard bounces antigos onde o cliente confirma que tem o e-mail correto)
+- Verificar se o cron `process-email-queue` está ativo (`cron.job`) e processando
 
-- Salvar `startedAt` no singleton quando a conversão começa.
-- Persistir `startedAt` enquanto a conversão está em andamento.
-- O tempo exibido será calculado por relógio real: `Date.now() - startedAt`.
+**B. Hardening do auth-email-hook**
+- Reduzir TTL para 15 min é o padrão atual — manter
+- Adicionar **logging extra** quando `enqueue_email` falhar, para alertar imediatamente em vez de o cliente descobrir
+- Confirmar que `SUPPORT_EMAILS` e admin recebem alerta quando houver e-mails em DLQ
 
-Alterar `src/components/ZPLTimer.tsx` de forma compatível:
+**C. UX para o cliente novo**
+- Na tela de cadastro (`/auth`), após signup exibir mensagem clara: *"Enviamos um e-mail de confirmação para X. Verifique também a pasta de spam/lixo eletrônico. Não recebeu em 2 minutos? [Reenviar]"*
+- Botão **Reenviar e-mail de confirmação** já existe via `admin-resend-verification`, vamos expor também ao próprio usuário no Auth.tsx (não só para admin)
+- Em `/reset-password` / fluxo de recuperação, mesma instrução de spam + opção de reenvio
+- Adicionar nota nas duas telas: *"Remetente: noreply@notifica.mktpfacil.com — adicione aos seus contatos"*
 
-- Adicionar uma prop opcional, por exemplo `startedAtMs`.
-- Quando essa prop existir, o timer não começa do zero; ele calcula o tempo decorrido a partir do início real do job.
-- Se o componente desmontar e montar de novo, ele volta mostrando o tempo correto, por exemplo 00:42 em vez de 00:00.
-- Manter compatibilidade com usos antigos do `ZPLTimer` que não passarem `startedAtMs`.
+**D. Painel admin de monitoramento**
+- Em `AdminEmails.tsx`, adicionar aba/card **"Falhas de Entrega"** mostrando últimas 50 entradas com status ≠ sent, com botão para **reenviar manualmente** ou **remover do suppression**
+- Alerta visível quando houver mais de 5 e-mails em DLQ nas últimas 24h
 
-Alterar `src/pages/ZPLConverter.tsx`:
+### 3. Documentação para suporte
 
-- Passar `jobState.startedAt` para o `ZPLTimer`.
-- Não usar estado local para tempo do job.
+- Criar/atualizar artigo na Central de Ajuda: *"Não recebi o e-mail de confirmação/recuperação"* com passos: spam → reenviar → adicionar remetente → contatar suporte
+- Memorizar regra: **provedor único = Lovable Emails**, Resend proibido
 
-### 4. Não mexer na geração das etiquetas
-Não alterar estas funções/pipeline:
+## Arquivos / ações previstos
 
-- `convertSingleLabel`
-- `processLabelsInBatches`
-- `splitZPLByType`
-- chamada Labelary
-- montagem jsPDF
-- tipo Full Produto / Full Volume
-- PDF padrão / PDF vetorial
-- histórico de reimpressão
+| Item | Ação |
+|---|---|
+| Secret `RESEND_API_KEY` | Deletar via `delete_secret` |
+| `src/pages/Auth.tsx` | Adicionar mensagem pós-signup + botão reenviar para o próprio usuário |
+| `src/pages/ResetPassword.tsx` | Adicionar nota sobre spam e remetente |
+| `src/pages/admin/AdminEmails.tsx` | Nova aba "Falhas de Entrega" com ações |
+| `supabase/functions/auth-email-hook/index.ts` | Logging extra em falha de enqueue |
+| Edge Function nova `email-delivery-monitor` (opcional) | Alerta admin quando DLQ > N |
+| Memória do projeto | Atualizar regra "Lovable Emails é único provedor; Resend banido" |
+| Cloudflare (manual pelo cliente) | Remover registros órfãos do Resend na zona `notifica.mktpfacil.com` (se houver) |
 
-A correção fica restrita ao controle de estado, timer e disparo de download.
+## O que NÃO vou fazer
 
-## Resultado esperado
+- Não vou remover/desabilitar Lovable Emails nem mexer nos NS `ns5/ns6.lovable.cloud` (são essenciais)
+- Não vou apagar `auth-email-hook` (é o que faz funcionar hoje)
+- Não vou tocar em `admin-resend-*` (são "reenviar", não Resend)
 
-- A conversão continua rodando se o usuário sair da página e voltar.
-- O contador continua do tempo real, sem zerar.
-- O PDF pronto não some.
-- O download automático não entra em loop.
-- Cada conversão dispara no máximo uma tentativa automática de download.
-- Se o navegador bloquear ou se o usuário quiser baixar de novo, ele usa o botão manual, sem gerar múltiplos arquivos sozinho.
+Aprova para eu executar?
