@@ -17,8 +17,8 @@ const Verificar = () => {
     const resolve = async () => {
       try {
         const { data, error: fnError } = await supabase.functions.invoke(
-          `resolve-verification-link?t=${encodeURIComponent(token)}`,
-          { method: "GET" },
+          "resolve-verification-link",
+          { body: { token } },
         );
 
         if (fnError || !data?.url) {

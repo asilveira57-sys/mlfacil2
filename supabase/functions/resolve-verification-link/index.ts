@@ -9,8 +9,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const url = new URL(req.url);
-    const token = url.searchParams.get("t");
+    let token: string | null = null;
+    try {
+      const body = await req.json();
+      token = typeof body?.token === "string" ? body.token : null;
+    } catch {
+      token = new URL(req.url).searchParams.get("t");
+    }
     if (!token || !/^[0-9a-f-]{10,64}$/i.test(token)) {
       return new Response(JSON.stringify({ error: "invalid_token" }), {
         status: 400,
