@@ -87,8 +87,13 @@ export default function ResetPassword() {
         </CardHeader>
         <CardContent>
           {!ready ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <div className="space-y-4 py-4">
+              <div className="flex justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-200">
+                Se o link não abrir, copie-o do e-mail enviado por <strong>noreply@notifica.mktpfacil.com</strong> (verifique também a pasta de Spam/Promoções).
+              </div>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
