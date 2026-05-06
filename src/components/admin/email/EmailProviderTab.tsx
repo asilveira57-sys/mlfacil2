@@ -8,7 +8,7 @@ export function EmailProviderTab() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Provedor de Envio</CardTitle>
-          <CardDescription>Sistema de e-mails configurado e ativo</CardDescription>
+          <CardDescription>Sistema de e-mails configurado e ativo (provedor único)</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-3">

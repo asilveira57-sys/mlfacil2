@@ -362,11 +362,29 @@ const Auth = () => {
             ) : forgotMode ? (
               forgotSent ? (
                 <div className="text-center space-y-4 py-4">
+                  <div className="flex justify-center">
+                    <div className="w-14 h-14 bg-primary/10 rounded-full flex items-center justify-center">
+                      <MailCheck className="w-7 h-7 text-primary" />
+                    </div>
+                  </div>
                   <h2 className="text-xl font-bold text-card-foreground">{t("auth:email_sent")}</h2>
                   <p className="text-muted-foreground text-sm leading-relaxed">
                     Enviamos um link de recuperação para <strong>{forgotEmail}</strong>.
-                    <br />Verifique sua caixa de entrada.
                   </p>
+
+                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-left max-w-sm mx-auto">
+                    <p className="text-xs text-amber-800 dark:text-amber-200 font-medium mb-1">⚠️ Não encontrou o e-mail?</p>
+                    <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-0.5 list-disc list-inside">
+                      <li>Verifique a pasta <strong>Spam</strong> ou <strong>Lixo eletrônico</strong></li>
+                      <li>No Gmail, cheque a aba <strong>Promoções</strong></li>
+                      <li>Remetente: <strong>noreply@notifica.mktpfacil.com</strong></li>
+                    </ul>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+                    Não chegou em 2 minutos? Use o WhatsApp no canto inferior direito.
+                  </p>
+
                   <button onClick={() => { setForgotMode(false); setForgotSent(false); }} className="text-sm text-primary hover:underline mt-4 font-medium">
                     Voltar ao login
                   </button>

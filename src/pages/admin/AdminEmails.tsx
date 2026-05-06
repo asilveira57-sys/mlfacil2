@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Mail, Settings2, FileText, History, Zap, Calendar, Megaphone, BarChart3 } from 'lucide-react';
+import { Mail, Settings2, FileText, History, Zap, Calendar, Megaphone, BarChart3, AlertTriangle } from 'lucide-react';
 import { EmailProviderTab } from '@/components/admin/email/EmailProviderTab';
 import { EmailTemplatesTab } from '@/components/admin/email/EmailTemplatesTab';
 import { EmailCategoriesTab } from '@/components/admin/email/EmailCategoriesTab';
@@ -9,6 +9,7 @@ import { EmailEventRulesTab } from '@/components/admin/email/EmailEventRulesTab'
 import { EmailSchedulesTab } from '@/components/admin/email/EmailSchedulesTab';
 import { EmailCampaignsTab } from '@/components/admin/email/EmailCampaignsTab';
 import { EmailAnalyticsTab } from '@/components/admin/email/EmailAnalyticsTab';
+import { EmailDeliveryFailuresTab } from '@/components/admin/email/EmailDeliveryFailuresTab';
 
 export function AdminEmails() {
   const [activeTab, setActiveTab] = useState('analytics');
@@ -25,6 +26,10 @@ export function AdminEmails() {
           <TabsTrigger value="analytics" className="gap-1 py-2.5 flex-shrink-0">
             <BarChart3 className="h-4 w-4" />
             <span className="hidden xl:inline text-xs">Analytics</span>
+          </TabsTrigger>
+          <TabsTrigger value="failures" className="gap-1 py-2.5 flex-shrink-0">
+            <AlertTriangle className="h-4 w-4" />
+            <span className="hidden xl:inline text-xs">Falhas</span>
           </TabsTrigger>
           <TabsTrigger value="provider" className="gap-1 py-2.5 flex-shrink-0">
             <Settings2 className="h-4 w-4" />
@@ -57,6 +62,7 @@ export function AdminEmails() {
         </TabsList>
 
         <TabsContent value="analytics"><EmailAnalyticsTab /></TabsContent>
+        <TabsContent value="failures"><EmailDeliveryFailuresTab /></TabsContent>
         <TabsContent value="provider"><EmailProviderTab /></TabsContent>
         <TabsContent value="categories"><EmailCategoriesTab /></TabsContent>
         <TabsContent value="templates"><EmailTemplatesTab /></TabsContent>
