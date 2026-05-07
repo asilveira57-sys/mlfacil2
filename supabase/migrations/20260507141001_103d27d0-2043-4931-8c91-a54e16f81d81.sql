@@ -1,0 +1,1 @@
+ALTER FUNCTION public.get_sales_metrics(text, date, date, uuid) SET statement_timeout TO '45s';
