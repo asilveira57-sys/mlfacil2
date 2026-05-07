@@ -41,9 +41,7 @@ const AREA_LABELS: Record<string, string> = {
   global_metrics: 'Métricas Globais',
   mensagem_do_dia: 'Mensagem do Dia',
   onboarding: 'Onboarding',
-  operational_quick_sync: 'Sync Operacional',
   retrospectiva: 'Retrospectiva',
-  sandbox: 'Sandbox',
   visual_identity: 'Identidade Visual',
 };
 

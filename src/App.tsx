@@ -126,7 +126,7 @@ const AdTimelineDetail = lazyRetry(() => import("./pages/AdTimelineDetail"));
 const AdActionsCenter = lazyRetry(() => import("./pages/AdActionsCenter"));
 const Seed = lazyRetry(() => import("./pages/Seed"));
 const PostIts = lazyRetry(() => import("./pages/PostIts"));
-const Sandbox = lazyRetry(() => import("./pages/Sandbox"));
+
 const FreightManagement = lazyRetry(() => import("./pages/FreightManagement"));
 const Precificacao = lazyRetry(() => import("./pages/Precificacao"));
 const Comissoes = lazyRetry(() => import("./pages/Comissoes"));
@@ -312,7 +312,7 @@ const App = () => {
                   <Route path="/postits" element={<PostIts />} />
                   <Route path="/seed/:itemId" element={<Seed />} />
                   <Route path="/seed/sementes" element={<Seed />} />
-                  <Route path="/sandbox" element={<Sandbox />} />
+                  
                   <Route path="/frete" element={<FreightManagement />} />
                   <Route path="/biblioteca-dicas" element={<ConsultantLibrary />} />
                   <Route path="/precificacao" element={<Precificacao />} />
