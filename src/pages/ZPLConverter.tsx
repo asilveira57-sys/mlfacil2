@@ -251,6 +251,14 @@ export default function ZPLConverter() {
   };
 
   const convertZPLtoPDF = async () => {
+    console.log('[ZPL] convertZPLtoPDF clicked', {
+      hasCode: !!zplCode.trim(),
+      labelType: selectedLabelType,
+      width, height,
+      labelCount,
+      jobPhase: jobState.phase,
+    });
+
     if (!zplCode.trim()) {
       toast.error("Por favor, insira o código ZPL");
       return;
@@ -267,11 +275,28 @@ export default function ZPLConverter() {
     }
 
     if (isZplJobRunning()) {
-      toast.info("Já existe uma conversão em andamento.");
-      return;
+      // Job preso há mais de 3min é considerado travado e auto-resetado
+      const startedAt = jobState.startedAt;
+      if (startedAt && Date.now() - startedAt > 3 * 60 * 1000) {
+        console.warn('[ZPL] Job travado detectado, limpando...');
+        clearZplJob();
+        toast.info("Conversão anterior estava travada — reiniciando.");
+      } else {
+        toast.info("Já existe uma conversão em andamento. Aguarde ou recarregue a página.");
+        return;
+      }
     }
 
-    const estimatedTime = await getEstimate(selectedLabelType, labelCount, selectedFullProdutoSubType || null);
+    let estimatedTime = 30;
+    try {
+      estimatedTime = await Promise.race([
+        getEstimate(selectedLabelType, labelCount, selectedFullProdutoSubType || null),
+        new Promise<number>((resolve) => setTimeout(() => resolve(30), 4000)),
+      ]);
+    } catch (e) {
+      console.warn('[ZPL] getEstimate falhou, usando default', e);
+    }
+    console.log('[ZPL] estimatedTime=', estimatedTime, '— iniciando job');
 
     // Snapshot dos parâmetros para o job (sobrevive a remount)
     const snapZplCode = zplCode.trim();
