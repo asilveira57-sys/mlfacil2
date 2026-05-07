@@ -1,31 +1,44 @@
-Remoção total do Sandbox para aliviar o backend imediatamente.
+Plano emergencial para tentar liberar espaço sem aumentar a instância
 
-Status até agora (já feito):
-- Removidos os arquivos: `src/pages/Sandbox.tsx`, `src/components/sandbox/`, `src/hooks/useSandboxSnapshots.ts`, `src/hooks/useOperationalQuickSync.ts`.
-- Removidas as edge functions do backend: `sandbox-snapshot-refresh` e `operational-quick-sync` (essas duas eram as principais responsáveis pela tempestade de chamadas a cada 30s por aba aberta).
+Diagnóstico agora
+- O teste direto no banco ainda falhou com timeout de conexão.
+- As requisições de autenticação no navegador também estão falhando com “Failed to fetch”.
+- Isso indica que o backend/banco ainda não está aceitando conexões. Enquanto estiver assim, uma limpeza por DELETE também não consegue rodar.
 
-Falta aplicar (precisa aprovar este plano para eu editar os arquivos):
+O que vou fazer assim que você aprovar
+1. Confirmar se o banco voltou a responder
+   - Rodar uma consulta simples de saúde.
+   - Se ainda estiver em timeout, eu vou informar que a limpeza ainda não é executável e que o gargalo atual é a instância em manutenção/indisponível, não a aplicação.
 
-1. `src/App.tsx`
-   - Remover a linha do `lazyRetry` que importa `./pages/Sandbox` (linha 129).
-   - Remover a rota `<Route path="/sandbox" element={<Sandbox />} />` (linha 315).
+2. Medir onde está o volume antes de apagar
+   - Conferir tamanho aproximado e quantidade de registros nas tabelas de cache mais prováveis:
+     - vendas/pedidos: `meli_orders_cache`
+     - envios/etiquetas/fretes: `meli_shipments_cache` e caches relacionados, se existirem
+     - logs/sincronizações volumosos, se existirem
+   - Prioridade: identificar o que dá mais retorno de espaço com menor risco operacional.
 
-2. `src/pages/admin/AdminAuditLogs.tsx`
-   - Remover as chaves `operational_quick_sync` e `sandbox` do mapa `AREA_LABELS` (linhas 44 e 46), pois as áreas não existem mais.
+3. Executar limpeza segura de vendas antigas
+   - Apagar vendas com mais de 30 dias dos caches de vendas, começando pelas contas Deconex/suas contas se for possível identificar com segurança no banco.
+   - Se a identificação da Deconex não estiver inequívoca, aplicar a limpeza geral em cache antigo de vendas com mais de 30 dias, porque são dados reimportáveis/sincronizáveis.
+   - Evitar mexer em dados críticos de usuários, pagamentos, planos, autenticação, configurações, auditoria principal ou integrações.
 
-3. Sem migração de banco
-   - Não vou mexer na tabela `sandbox_company_snapshot` agora — apenas paro de chamá-la. Você pode dropar à noite quando quiser, sem risco para o sistema em produção.
-   - O item `sandbox` em `AdminErpIntegrations` é "ambiente sandbox de ERP" (não tem relação com a página Sandbox); fica como está.
+4. Limpar caches relacionados antigos
+   - Remover registros antigos dependentes/relacionados que ocupem espaço e sejam reconstituíveis, como cache de shipment/frete/logística antigo, respeitando dependências para não quebrar tela de etiquetas recentes.
+   - Manter dados dos últimos 30 dias para preservar o funcionamento operacional imediato da conversão/etiquetas.
 
-4. Verificação pós-edição
-   - Confirmar que o app compila sem o `Sandbox`.
-   - Conferir se Dashboard, Conversor ZPL e demais telas voltaram a responder normal.
+5. Forçar recuperação de espaço de forma compatível com produção
+   - Após DELETE, analisar a possibilidade de `VACUUM`/limpeza interna leve.
+   - Evitar operações pesadas tipo `VACUUM FULL` em horário de uso, porque podem travar tabelas. Se necessário, deixar isso para noite/final de semana.
 
-Por que isso resolve agora:
-- O hook `useOperationalQuickSync` disparava `operational-quick-sync` a cada 30 segundos para cada aba do Sandbox aberta. Cada execução fazia upserts em `hot_orders_queue`, varreduras em `meli_orders_cache` e `meli_shipments_cache`, e ainda chamava `sandbox-snapshot-refresh`. Multiplicado pelos clientes simultâneos, isso era o principal vetor de saturação. Removendo, o banco respira.
+6. Validar abertura do sistema
+   - Testar login/consulta básica.
+   - Conferir se a tela de autenticação e a rota de etiqueta param de ficar carregando indefinidamente.
+   - Se o backend continuar recusando conexão mesmo depois da limpeza possível, apontar o próximo bloqueio real.
 
-Pode aprovar para eu aplicar as edições restantes.
+Critério de segurança
+- A limpeza será feita apenas em caches/dados reconstituíveis e antigos.
+- Não vou apagar usuários, assinaturas, integrações, tokens, configurações de conta, planos, notas fiscais recentes, histórico recente de etiquetas ou permissões.
 
-<lov-actions>
-<lov-link url="https://docs.lovable.dev/tips-tricks/troubleshooting">Troubleshooting docs</lov-link>
-</lov-actions>
+Observação importante
+- Eu concordo com sua ideia: limpar vendas com mais de 30 dias é uma alternativa melhor do que aumentar a instância, desde que o banco já esteja aceitando conexão.
+- Se o banco ainda estiver em timeout, não existe comando de limpeza que consiga rodar naquele momento; a primeira ação é aguardar ele voltar a responder e então executar a limpeza imediatamente.
