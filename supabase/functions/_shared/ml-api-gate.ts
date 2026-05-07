@@ -29,12 +29,23 @@ export async function assertMlApiAccess(
   userId: string,
 ): Promise<MlApiGateResult> {
   try {
-    const { data, error } = await supabaseAdmin.rpc('check_ml_api_access', {
-      p_user_id: userId,
-    });
+    // Retry up to 3x on transient errors (Cloudflare 522, network blips)
+    let data: any = null;
+    let error: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const res = await supabaseAdmin.rpc('check_ml_api_access', { p_user_id: userId });
+      data = res.data;
+      error = res.error;
+      if (!error) break;
+      const msg = String(error.message || '');
+      const transient = /522|timeout|fetch failed|network|ECONN|503|504/i.test(msg);
+      console.warn(`[ml-api-gate] RPC attempt ${attempt} failed (transient=${transient}):`, msg);
+      if (!transient || attempt === 3) break;
+      await new Promise((r) => setTimeout(r, 300 * attempt));
+    }
 
     if (error) {
-      console.error('[ml-api-gate] RPC error:', error.message);
+      console.error('[ml-api-gate] RPC error after retries:', error.message);
       // On error, deny access as safety measure
       return {
         allowed: false,
