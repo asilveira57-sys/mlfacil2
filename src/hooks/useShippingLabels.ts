@@ -514,8 +514,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
     enabled: !!sellerId && orders.length > 0,
     staleTime: 60000,
-    refetchOnMount: !hasActiveJobV1,
-    refetchOnReconnect: !hasActiveJobV1,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
     refetchOnWindowFocus: false,
   });
 
