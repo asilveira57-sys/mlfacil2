@@ -398,9 +398,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
     refetchOnWindowFocus: false,
-    // REGRA: com job ativo, sem refetch destrutivo (mount/reconnect/focus).
-    refetchOnMount: !hasActiveJobV1,
-    refetchOnReconnect: !hasActiveJobV1,
+    // REGRA: nunca refetch automático (mount/reconnect/focus). Apenas sync manual.
+    refetchOnMount: false,
+    refetchOnReconnect: false,
     placeholderData: (prev: any) => prev,
   });
 
