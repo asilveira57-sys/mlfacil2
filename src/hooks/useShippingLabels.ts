@@ -1460,55 +1460,44 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     }
   }, [sellerId, isSyncing, refetch, queryClient]);
 
-  // Auto-refresh every 5 minutes
-  useEffect(() => {
-    if (!sellerId) return;
-    const interval = setInterval(refreshShipmentStatuses, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [sellerId, refreshShipmentStatuses]);
-
-  // Auto-sync on first load: only fetch last sync time, skip heavy pipeline
-  // The server-side cron (shipping-labels-sync) handles the heavy sync now
+  // REGRA: nenhum auto-refresh/auto-sync ao montar o hook ou ao retornar para
+  // a aba/rota. Atualizações só ocorrem por ação explícita do usuário (botão
+  // "Sincronizar"). Aqui apenas lemos o metadado leve do último sync (cron
+  // server-side) para exibir o timestamp na UI, sem disparar pipeline pesado.
   useEffect(() => {
     if (!sellerId || hasAutoSyncedRef.current) return;
-    // Bloqueia auto-sync inicial se há job ativo recuperado.
     if (hasV1ActiveJob()) return;
 
     hasAutoSyncedRef.current = true;
-    
+
     const checkLastSync = async () => {
-      // Check last sync from scheduler (cron job)
       const { data: scheduler } = await supabase
         .from('sync_scheduler')
         .select('last_run_at')
         .eq('job_name', 'shipping-labels-sync')
         .maybeSingle();
-      
+
       if (scheduler?.last_run_at) {
         setLastSyncAt(scheduler.last_run_at);
-      } else {
-        // Fallback: check sync_jobs
-        const { data: lastJob } = await supabase
-          .from('sync_jobs')
-          .select('created_at')
-          .eq('module', 'labels_orders_list')
-          .eq('status', 'success')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        
-        setLastSyncAt(lastJob?.created_at || null);
-        
-        // If never synced at all, trigger manual sync for first-time setup
-        if (!lastJob?.created_at) {
-          startSyncPipeline(false);
-        }
+        return;
       }
+
+      const { data: lastJob } = await supabase
+        .from('sync_jobs')
+        .select('created_at')
+        .eq('module', 'labels_orders_list')
+        .eq('status', 'success')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      setLastSyncAt(lastJob?.created_at || null);
+      // Não disparar startSyncPipeline aqui — usuário deve clicar em "Sincronizar".
     };
-    
+
     const timer = setTimeout(checkLastSync, 300);
     return () => clearTimeout(timer);
-  }, [sellerId, startSyncPipeline]);
+  }, [sellerId]);
 
   // Set custom date range helper
   const setDateRange = useCallback((range: DateRange) => {
