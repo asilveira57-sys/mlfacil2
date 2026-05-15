@@ -1,6 +1,9 @@
-import { useSearchParams } from "react-router-dom";
-import { Settings, LucideIcon } from "lucide-react";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { Settings, LucideIcon, LogOut } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useConfigMenu } from "@/hooks/useConfigMenu";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -81,6 +84,20 @@ export function SettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { menuItems, isLoading, error } = useConfigMenu();
   const { isAdmin } = useUserRole();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      try { localStorage.clear(); } catch {}
+      try { sessionStorage.clear(); } catch {}
+      toast({ title: "Logout realizado", description: "Você foi desconectado com sucesso" });
+      navigate("/auth", { replace: true });
+    } catch (e) {
+      toast({ title: "Erro ao sair", description: "Tente novamente", variant: "destructive" });
+    }
+  };
 
   // Use DB items (flat, already sorted with mensagem-do-dia last)
   // Fallback only on actual error
@@ -127,6 +144,15 @@ export function SettingsLayout() {
                 </TabsList>
               </Tabs>
               {isAdmin && <SettingsMenuEditor />}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLogout}
+                className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Sair</span>
+              </Button>
             </div>
 
             {ActiveComponent ? (
