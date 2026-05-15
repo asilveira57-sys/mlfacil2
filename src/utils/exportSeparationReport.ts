@@ -162,7 +162,8 @@ export async function buildSeparationReportPdf({
       doc.setFontSize(8);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(40, 40, 40);
-      const orderLabel = `Pedido: ${order.order_id}`;
+      const displayId = order.pack_id || order.order_id;
+      const orderLabel = `Pedido: #${displayId}`;
       doc.text(orderLabel, margin + 2, y + 5);
       const buyerLabel = order.buyer_nickname ? `Comprador: ${order.buyer_nickname}` : '';
       if (buyerLabel) {
