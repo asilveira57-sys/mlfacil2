@@ -84,6 +84,20 @@ export function SettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { menuItems, isLoading, error } = useConfigMenu();
   const { isAdmin } = useUserRole();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      try { localStorage.clear(); } catch {}
+      try { sessionStorage.clear(); } catch {}
+      toast({ title: "Logout realizado", description: "Você foi desconectado com sucesso" });
+      navigate("/auth", { replace: true });
+    } catch (e) {
+      toast({ title: "Erro ao sair", description: "Tente novamente", variant: "destructive" });
+    }
+  };
 
   // Use DB items (flat, already sorted with mensagem-do-dia last)
   // Fallback only on actual error
