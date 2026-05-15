@@ -70,6 +70,21 @@ export function AppShellLayout() {
     headerContent: undefined as ReactNode,
   });
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log("[MOUNT] AppLayout");
+    console.log("[MOUNT] Header");
+    return () => {
+      console.log("[UNMOUNT] Header");
+      console.log("[UNMOUNT] AppLayout");
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log("[ROUTE_CHANGE]", location.pathname);
+  }, [location.pathname]);
+
   const setHeader = useCallback((title: string, subtitle?: string, headerContent?: ReactNode) => {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console

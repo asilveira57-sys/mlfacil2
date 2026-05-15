@@ -180,6 +180,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     ) {
       // eslint-disable-next-line no-console
       console.info('[CTX] ActiveAccountContext changed', { prev, next });
+      console.log('[AUTH_LOADING_CHANGED]', next.loading);
       prevStateRef.current = next;
     }
   }, [activeAccount?.id, activeAccount?.sellerId, loading, initialized]);
@@ -329,9 +330,9 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   // Listen for auth changes
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      // Re-initialize on genuine SIGNED_IN (covers re-login after logout)
-      if (event === 'SIGNED_IN' && !initializingRef.current) {
-        initializingRef.current = false; // Reset to allow re-initialization
+      // Re-initialize only after a real post-logout login. Ignore tab-return SIGNED_IN
+      // events when the account context is already initialized to avoid global reload.
+      if (event === 'SIGNED_IN' && !initialized && !initializingRef.current) {
         initialize();
       } else if (event === 'SIGNED_OUT') {
         setAccounts([]);

@@ -26,6 +26,12 @@ export default function ShippingLabels() {
   const { t } = useTranslation('shipping');
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log('[MOUNT] ShippingLabelsPage');
+    return () => console.log('[UNMOUNT] ShippingLabelsPage');
+  }, []);
   
   // Use global active account from context
   const { activeAccount, sellerId, loading: accountLoading, initialized } = useActiveAccount();
@@ -201,7 +207,7 @@ export default function ShippingLabels() {
     </Button>
   );
 
-  if (accountLoading || !initialized || mlAccessLoading) {
+  if ((!activeAccount && (accountLoading || !initialized)) || (mlAccessLoading && !flags)) {
     return (
       <PageContainer title={t('title')}>
         <div className="flex items-center justify-center h-64">

@@ -112,7 +112,7 @@ export function useUserAccessState(): UseUserAccessStateReturn {
         initialLoadDoneRef.current = false;
         // Clear persisted React Query cache to prevent stale data on next login
         try { localStorage.removeItem('mlfacil-rq-cache'); } catch {}
-      } else if (event === 'SIGNED_IN') {
+      } else if (event === 'SIGNED_IN' && !initialLoadDoneRef.current) {
         // Clear stale persisted cache from previous sessions — prevents white screen
         // when logging in on a window that still has old cached user/onboarding data
         try {
@@ -128,6 +128,11 @@ export function useUserAccessState(): UseUserAccessStateReturn {
 
     return () => subscription.unsubscribe();
   }, [fetchStatus]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log('[ACCESS_LOADING_CHANGED]', loading);
+  }, [loading]);
 
   // Select a plan
   const selectPlan = useCallback(async (planId: string): Promise<boolean> => {

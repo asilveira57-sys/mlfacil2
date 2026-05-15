@@ -37,6 +37,9 @@ import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
 import PublicLayout from "./components/PublicLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
+import ShippingLabels from "./pages/ShippingLabels";
+import LabelTeste from "./pages/LabelTeste";
+import ZPLConverter from "./pages/ZPLConverter";
 
 // === Lazy-loaded routes (heavy modules) ===
 const clearLazyReloadFlag = () => {
@@ -100,10 +103,7 @@ const lazyRetry = (factory: () => Promise<any>) =>
       ),
   );
 
-const ShippingLabels = lazyRetry(() => import("./pages/ShippingLabels"));
-const LabelTeste = lazyRetry(() => import("./pages/LabelTeste"));
 const LabelHeaderSettings = lazyRetry(() => import("./pages/LabelHeaderSettings"));
-const ZPLConverter = lazyRetry(() => import("./pages/ZPLConverter"));
 const AbcAnalysis = lazyRetry(() => import("./pages/AbcAnalysis"));
 const TendenciasV2 = lazyRetry(() => import("./pages/TendenciasV2"));
 const Mercado = lazyRetry(() => import("./pages/Mercado"));

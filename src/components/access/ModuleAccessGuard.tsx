@@ -5,7 +5,6 @@ import { useCollaboratorAccess, getModuleKeyFromRouteSync } from '@/hooks/useCol
 import { useModuleRouteMap } from '@/hooks/useSystemModules';
 import { useCanAccessModule } from '@/hooks/useCanAccessModule';
 import { useUserRole } from '@/hooks/useUserRole';
-import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ModuleAccessDenied } from './ModuleAccessDenied';
 
@@ -145,18 +144,8 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
     return <>{children}</>;
   }
 
-  if (combinedLoading) {
-    if (hasResolvedOnceRef.current) {
-      return <>{children}</>;
-    }
-    if (timedOut) {
-      return <>{children}</>;
-    }
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
+  if (combinedLoading || timedOut || hasResolvedOnceRef.current) {
+    return <>{children}</>;
   }
 
   return <>{children}</>;
