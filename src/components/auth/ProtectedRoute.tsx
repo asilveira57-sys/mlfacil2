@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserAccess } from "@/contexts/UserAccessContext";
@@ -19,6 +19,18 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [hasSession, setHasSession] = useState<boolean | null>(null);
   const [timedOut, setTimedOut] = useState(false);
   const { requiresOnboarding, loading: accessLoading } = useUserAccess();
+  const lastDecisionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log("[MOUNT] ProtectedRoute");
+    return () => console.log("[UNMOUNT] ProtectedRoute");
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log("[ACCESS_LOADING_CHANGED]", accessLoading);
+  }, [accessLoading]);
 
   // Check session on mount
   useEffect(() => {
@@ -53,17 +65,22 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     }
   }, [requiresOnboarding, hasSession]);
 
-  // Still checking session (no timeout needed — getSession is fast)
-  if (!sessionChecked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
+  const isBypassRoute = ONBOARDING_BYPASS.some((p) => location.pathname.startsWith(p));
+  const decision = !sessionChecked
+    ? "checking_session"
+    : !hasSession
+      ? "redirect_auth"
+      : requiresOnboarding && !isBypassRoute
+        ? "redirect_onboarding"
+        : "render_children";
+
+  if (import.meta.env.DEV && lastDecisionRef.current !== decision) {
+    lastDecisionRef.current = decision;
+    console.log("[PROTECTED_ROUTE_DECISION]", decision, { pathname: location.pathname, accessLoading, hasSession });
   }
 
-  // Access still loading but session is known — apply timeout
-  if (accessLoading && !timedOut) {
+  // Still checking session (initial load only)
+  if (!sessionChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -78,7 +95,6 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   // Onboarding still pending — redirect to /primeiro-acesso unless already there
-  const isBypassRoute = ONBOARDING_BYPASS.some((p) => location.pathname.startsWith(p));
   if (requiresOnboarding && !isBypassRoute) {
     console.info("[ProtectedRoute] Onboarding pending, redirecting to /primeiro-acesso from:", location.pathname);
     return <Navigate to="/primeiro-acesso" replace />;
