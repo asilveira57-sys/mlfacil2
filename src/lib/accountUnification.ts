@@ -243,23 +243,8 @@ export async function getAllAccounts(): Promise<UnifiedMarketplaceAccount[]> {
  * Get account by seller ID.
  */
 export async function getAccountBySellerId(sellerId: string): Promise<UnifiedMarketplaceAccount | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return null;
-  }
-
-  const { data: mlAccount } = await supabase
-    .from('ml_accounts')
-    .select('*')
-    .eq('user_id', user.id)
-    .eq('ml_user_id', sellerId)
-    .single();
-
-  if (!mlAccount) {
-    return null;
-  }
-
-  return mapMlAccountToUnified(mlAccount);
+  const accounts = await getAllAccounts();
+  return accounts.find(a => a.sellerId === sellerId) ?? null;
 }
 
 /**
