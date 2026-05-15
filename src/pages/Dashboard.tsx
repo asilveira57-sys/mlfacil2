@@ -18,6 +18,7 @@ import { useMLConnectionState } from "@/hooks/useMLConnectionState";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
 import { FeedbackPromptCard } from "@/components/feedback";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 
 function DashboardPlanLimitSection({ companyId }: { companyId?: string | null }) {
   const { limitCheck, loading } = useTenantLimits(companyId || undefined);
@@ -37,6 +38,7 @@ const Dashboard = () => {
   const { planCode } = useCanAccessModule();
   const isZplMode = planCode?.toLowerCase().includes('zpl') ?? false;
   const feedback = useModuleFeedbackIntegration('dashboard-analises');
+  const { isCollaborator } = useCollaboratorAccess();
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -68,7 +70,9 @@ const Dashboard = () => {
   }
 
   const isConnected = connectionInfo.state === 'CONNECTED';
-  const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION' || isZplMode;
+  // Collaborators do not own the ML connection — never prompt them to connect.
+  const isFirstConnection = !isCollaborator && (connectionInfo.state === 'FIRST_CONNECTION' || isZplMode);
+  const hideConnectionUi = isCollaborator && !isConnected;
 
   return (
     <PageContainer 
@@ -76,9 +80,9 @@ const Dashboard = () => {
       subtitle={t('dashboard:subtitle')}
     >
       <div className="p-4 lg:p-6 space-y-6">
-        {isConnected ? (
+        {isConnected || hideConnectionUi ? (
           <>
-            <MLConnectionCard connectionInfo={connectionInfo} />
+            {isConnected && <MLConnectionCard connectionInfo={connectionInfo} />}
             <WidgetHubGrid />
             <ActivationSpeedometer />
             <DashboardPlanLimitSection companyId={activeAccount?.companyId} />
