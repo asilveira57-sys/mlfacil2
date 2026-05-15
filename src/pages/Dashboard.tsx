@@ -38,6 +38,7 @@ const Dashboard = () => {
   const { planCode } = useCanAccessModule();
   const isZplMode = planCode?.toLowerCase().includes('zpl') ?? false;
   const feedback = useModuleFeedbackIntegration('dashboard-analises');
+  const { isCollaborator } = useCollaboratorAccess();
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
