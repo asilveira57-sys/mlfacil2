@@ -17,7 +17,6 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [sessionChecked, setSessionChecked] = useState(false);
   const [hasSession, setHasSession] = useState<boolean | null>(null);
-  const [timedOut, setTimedOut] = useState(false);
   const { requiresOnboarding, loading: accessLoading } = useUserAccess();
   const lastDecisionRef = useRef<string | null>(null);
 
@@ -39,20 +38,6 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
       setSessionChecked(true);
     });
   }, []);
-
-  // Safety timeout: if access check takes too long, fail open (RLS protects data)
-  useEffect(() => {
-    if (!accessLoading) {
-      setTimedOut(false);
-      return;
-    }
-    setTimedOut(false);
-    const t = window.setTimeout(() => {
-      console.warn("[ProtectedRoute] Access check timed out after 6s, failing open");
-      setTimedOut(true);
-    }, 6_000);
-    return () => window.clearTimeout(t);
-  }, [accessLoading]);
 
   // Clean up stale onboarding localStorage when onboarding is done
   useEffect(() => {
