@@ -91,12 +91,36 @@ export function useCollaboratorAccess(): CollaboratorAccess {
         return;
       }
 
-      // Check if user is a company_user with a profile
-      const { data: companyUser } = await supabase
+      // Resolve the user's active company so we pick the correct company_users row.
+      // A user can belong to multiple companies (e.g. their personal one + as collaborator).
+      let activeCompanyId: string | null = null;
+      try {
+        const { data: ctx } = await supabase
+          .from('user_context')
+          .select('active_company_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        activeCompanyId = (ctx as any)?.active_company_id ?? null;
+      } catch { /* ignore */ }
+
+      // Check if user is a company_user with a profile, scoped to the active company when known.
+      let companyUserQuery = supabase
         .from('company_users')
-        .select('id, is_owner, profile_id')
+        .select('id, is_owner, profile_id, company_id')
         .eq('user_id', user.id)
-        .maybeSingle();
+        .eq('status', 'active');
+
+      if (activeCompanyId) {
+        companyUserQuery = companyUserQuery.eq('company_id', activeCompanyId);
+      }
+
+      const { data: companyUsers } = await companyUserQuery;
+      // Prefer the row matching active company; otherwise prefer non-owner (collaborator) row.
+      const companyUser =
+        companyUsers?.find(c => c.company_id === activeCompanyId)
+        || companyUsers?.find(c => !c.is_owner)
+        || companyUsers?.[0]
+        || null;
 
       if (!companyUser) {
         setIsCollaborator(false);
