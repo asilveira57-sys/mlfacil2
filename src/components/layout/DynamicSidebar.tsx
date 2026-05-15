@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import {
   LayoutDashboard, Megaphone, DollarSign, BarChart3, FileText, Tag,
@@ -49,6 +49,12 @@ export function DynamicSidebar() {
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [comingSoonDialog, setComingSoonDialog] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log("[MOUNT] Sidebar");
+    return () => console.log("[UNMOUNT] Sidebar");
+  }, []);
 
   const toggleGroup = (key: string) => {
     setOpenGroups(prev => ({ ...prev, [key]: prev[key] === false ? true : (prev[key] === undefined ? false : !prev[key]) }));
