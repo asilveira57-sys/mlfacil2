@@ -273,7 +273,6 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   });
   const syncAbortRef = useRef(false);
   const lastSyncTimeRef = useRef<number>(0);
-  const hasAutoSyncedRef = useRef(false);
   const isSilentSyncRef = useRef(false);
   const jobPollingRef = useRef(false);
 
@@ -398,9 +397,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
     refetchOnWindowFocus: false,
-    // REGRA: com job ativo, sem refetch destrutivo (mount/reconnect/focus).
-    refetchOnMount: !hasActiveJobV1,
-    refetchOnReconnect: !hasActiveJobV1,
+    // Não refazer fetch automático ao voltar para a aba/rota.
+    // Evita lentidão e perda de contexto durante geração/consulta.
+    refetchOnMount: false,
+    refetchOnReconnect: false,
     placeholderData: (prev: any) => prev,
   });
 
@@ -514,8 +514,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
     enabled: !!sellerId && orders.length > 0,
     staleTime: 60000,
-    refetchOnMount: !hasActiveJobV1,
-    refetchOnReconnect: !hasActiveJobV1,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
     refetchOnWindowFocus: false,
   });
 
@@ -1467,48 +1467,47 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     return () => clearInterval(interval);
   }, [sellerId, refreshShipmentStatuses]);
 
-  // Auto-sync on first load: only fetch last sync time, skip heavy pipeline
-  // The server-side cron (shipping-labels-sync) handles the heavy sync now
+  // Somente consulta metadado do último sync para exibir informação na UI.
+  // Não dispara sync automático ao montar/retornar para a rota.
   useEffect(() => {
-    if (!sellerId || hasAutoSyncedRef.current) return;
-    // Bloqueia auto-sync inicial se há job ativo recuperado.
-    if (hasV1ActiveJob()) return;
+    if (!sellerId) return;
 
-    hasAutoSyncedRef.current = true;
-    
+    let isCancelled = false;
+
     const checkLastSync = async () => {
-      // Check last sync from scheduler (cron job)
       const { data: scheduler } = await supabase
         .from('sync_scheduler')
         .select('last_run_at')
         .eq('job_name', 'shipping-labels-sync')
         .maybeSingle();
-      
+
+      if (isCancelled) return;
+
       if (scheduler?.last_run_at) {
         setLastSyncAt(scheduler.last_run_at);
-      } else {
-        // Fallback: check sync_jobs
-        const { data: lastJob } = await supabase
-          .from('sync_jobs')
-          .select('created_at')
-          .eq('module', 'labels_orders_list')
-          .eq('status', 'success')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        
+        return;
+      }
+
+      const { data: lastJob } = await supabase
+        .from('sync_jobs')
+        .select('created_at')
+        .eq('module', 'labels_orders_list')
+        .eq('status', 'success')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!isCancelled) {
         setLastSyncAt(lastJob?.created_at || null);
-        
-        // If never synced at all, trigger manual sync for first-time setup
-        if (!lastJob?.created_at) {
-          startSyncPipeline(false);
-        }
       }
     };
-    
+
     const timer = setTimeout(checkLastSync, 300);
-    return () => clearTimeout(timer);
-  }, [sellerId, startSyncPipeline]);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [sellerId]);
 
   // Set custom date range helper
   const setDateRange = useCallback((range: DateRange) => {
