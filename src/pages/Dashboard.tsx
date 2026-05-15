@@ -18,6 +18,7 @@ import { useMLConnectionState } from "@/hooks/useMLConnectionState";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
 import { FeedbackPromptCard } from "@/components/feedback";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 
 function DashboardPlanLimitSection({ companyId }: { companyId?: string | null }) {
   const { limitCheck, loading } = useTenantLimits(companyId || undefined);
