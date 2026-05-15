@@ -80,9 +80,9 @@ const Dashboard = () => {
       subtitle={t('dashboard:subtitle')}
     >
       <div className="p-4 lg:p-6 space-y-6">
-        {isConnected ? (
+        {isConnected || hideConnectionUi ? (
           <>
-            <MLConnectionCard connectionInfo={connectionInfo} />
+            {isConnected && <MLConnectionCard connectionInfo={connectionInfo} />}
             <WidgetHubGrid />
             <ActivationSpeedometer />
             <DashboardPlanLimitSection companyId={activeAccount?.companyId} />
