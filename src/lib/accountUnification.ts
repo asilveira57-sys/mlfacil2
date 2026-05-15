@@ -19,7 +19,7 @@ export type ConnectionStatus = 'connected' | 'attention' | 'disconnected' | 'rev
 export interface UnifiedMarketplaceAccount {
   id: string;              // ml_accounts.id
   sellerId: string;        // ml_accounts.ml_user_id
-  userId: string;          // ml_accounts.user_id
+  userId: string;          // ml_accounts.user_id (titular)
   nickname: string | null;
   email: string | null;
   provider: 'mercadolivre';
@@ -27,6 +27,8 @@ export interface UnifiedMarketplaceAccount {
   isActive: boolean;
   isConnected: boolean;
   companyId: string | null; // ml_accounts.company_id
+  /** True when the account is accessed via company membership (collaborator), not ownership. */
+  isInherited?: boolean;
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: string;
