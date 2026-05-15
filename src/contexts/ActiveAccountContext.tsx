@@ -72,6 +72,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       provider: acc.provider,
       status: acc.status,
       companyId: acc.companyId ?? null,
+      isInherited: acc.isInherited ?? false,
       lastApiOkAt: acc.lastApiOkAt,
       lastApiErrorCode: acc.lastApiErrorCode,
       consecutiveFailures: acc.consecutiveFailures,
