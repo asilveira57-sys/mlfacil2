@@ -1,5 +1,4 @@
 import { ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
 import { useShippingEligibility } from '@/hooks/useShippingEligibility';
 import { ShippingBlockedScreen } from './ShippingBlockedScreen';
 
@@ -15,15 +14,9 @@ interface ShippingEligibilityGuardProps {
 export function ShippingEligibilityGuard({ children }: ShippingEligibilityGuardProps) {
   const { eligible, loading, sellerId, reason } = useShippingEligibility();
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[40vh]">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (!eligible) {
+  // Fail-open while validating eligibility so route/auth rechecks never replace
+  // the operational screen with a spinner on tab focus or route return.
+  if (!loading && !eligible) {
     return <ShippingBlockedScreen sellerId={sellerId} reason={reason} />;
   }
 
