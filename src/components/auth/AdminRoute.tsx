@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserRole } from '@/hooks/useUserRole';
 import { toast } from 'sonner';
@@ -10,38 +10,43 @@ interface AdminRouteProps {
 }
 
 /**
- * Route guard component that only allows admin users to access children.
- * Redirects non-admin users to /settings with a toast notification.
+ * Route guard for admin-only routes.
+ *
+ * Fail-open behavior (anti white-screen on tab switch):
+ * - First check: shows spinner only until role is resolved the first time.
+ * - After first resolution: keeps children mounted while role re-validates in
+ *   the background. This prevents remount/spinner when returning to the tab.
+ * - If role flips to non-admin, redirects normally.
  */
 export function AdminRoute({ children }: AdminRouteProps) {
   const { isAdmin, loading } = useUserRole();
   const navigate = useNavigate();
   const [timedOut, setTimedOut] = useState(false);
+  const hasResolvedOnceRef = useRef(false);
+  const wasAdminRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
     console.info('[MOUNT] AdminRoute');
-    return () => {
-      // eslint-disable-next-line no-console
-      console.info('[UNMOUNT] AdminRoute');
-    };
+    return () => console.info('[UNMOUNT] AdminRoute');
   }, []);
 
   useEffect(() => {
     if (!loading) {
+      hasResolvedOnceRef.current = true;
+      wasAdminRef.current = isAdmin;
       setTimedOut(false);
       return;
     }
     setTimedOut(false);
-    const t = window.setTimeout(() => setTimedOut(true), 15_000);
+    const t = window.setTimeout(() => setTimedOut(true), 6_000);
     return () => window.clearTimeout(t);
-  }, [loading]);
+  }, [loading, isAdmin]);
 
   useEffect(() => {
-    if (!loading && !isAdmin) {
+    if (loading) return;
+    if (!isAdmin) {
       if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
         console.warn('[ADMIN] blocked - redirecting to /settings');
       }
       toast.error('Acesso restrito a administradores');
@@ -49,8 +54,8 @@ export function AdminRoute({ children }: AdminRouteProps) {
     }
   }, [loading, isAdmin, navigate]);
 
-  // Show loading state while checking role
-  if (loading) {
+  // First-time check: still loading and never resolved → cheap spinner.
+  if (loading && !hasResolvedOnceRef.current) {
     if (timedOut) {
       return (
         <div className="min-h-screen bg-background flex items-center justify-center p-6">
@@ -79,8 +84,9 @@ export function AdminRoute({ children }: AdminRouteProps) {
     );
   }
 
-  // Don't render anything if not admin (will redirect)
-  if (!isAdmin) {
+  // After first resolution: render children even if a background re-check
+  // is in flight. Only block if we know for sure the user is not admin.
+  if (!isAdmin && hasResolvedOnceRef.current && !loading) {
     return null;
   }
 
