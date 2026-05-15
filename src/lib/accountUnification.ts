@@ -340,6 +340,7 @@ function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplace
     isActive,
     isConnected: (row.is_connected as boolean) ?? true,
     companyId: (row.company_id as string | null) ?? null,
+    isInherited: (row.is_inherited as boolean) ?? false,
     accessToken: row.access_token as string | undefined,
     refreshToken: row.refresh_token as string | undefined,
     expiresAt: row.token_expires_at as string | undefined,
