@@ -14,6 +14,8 @@ export interface ActiveAccount {
   provider: 'mercadolivre';
   status: ConnectionStatus;
   companyId: string | null;
+  /** True when this account is accessed via company membership (collaborator). */
+  isInherited?: boolean;
   // Extended tracking
   lastApiOkAt?: string;
   lastApiErrorCode?: string;
