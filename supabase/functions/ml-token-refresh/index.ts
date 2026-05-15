@@ -55,11 +55,23 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
+    // Authorize: user must own the account OR be an active member of the
+    // company that owns the account (collaborator inheritance).
+    const { data: canUse, error: authzError } = await supabaseAdmin
+      .rpc('can_user_use_ml_account', { _user_id: user.id, _account_id: accountId });
+
+    if (authzError || !canUse) {
+      console.error('[ml-token-refresh] Authorization failed:', authzError);
+      return new Response(
+        JSON.stringify({ error: 'Account not accessible' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { data: account, error: accountError } = await supabaseAdmin
       .from('ml_accounts')
       .select('id, ml_user_id, refresh_token, user_id')
       .eq('id', accountId)
-      .eq('user_id', user.id)  // Security: ensure user owns this account
       .single();
 
     if (accountError || !account) {
