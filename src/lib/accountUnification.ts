@@ -223,18 +223,18 @@ export async function getAllAccounts(): Promise<UnifiedMarketplaceAccount[]> {
     return [];
   }
 
-  const { data: mlAccounts, error } = await supabase
-    .from('ml_accounts')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
+  // Use the security-definer RPC so collaborators inherit ML accounts from the
+  // companies they belong to (without ever exposing tokens to the browser).
+  const { data, error } = await supabase.rpc('get_accessible_ml_accounts');
 
   if (error) {
-    console.error('[accountUnification] Error fetching accounts:', error);
+    console.error('[accountUnification] Error fetching accessible accounts:', error);
     return [];
   }
 
-  return (mlAccounts || []).map(mapMlAccountToUnified);
+  return ((data as any[]) || [])
+    .map(mapMlAccountToUnified)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 /**
