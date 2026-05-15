@@ -144,6 +144,15 @@ export function SettingsLayout() {
                 </TabsList>
               </Tabs>
               {isAdmin && <SettingsMenuEditor />}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLogout}
+                className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Sair</span>
+              </Button>
             </div>
 
             {ActiveComponent ? (
