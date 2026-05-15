@@ -70,7 +70,9 @@ const Dashboard = () => {
   }
 
   const isConnected = connectionInfo.state === 'CONNECTED';
-  const isFirstConnection = connectionInfo.state === 'FIRST_CONNECTION' || isZplMode;
+  // Collaborators do not own the ML connection — never prompt them to connect.
+  const isFirstConnection = !isCollaborator && (connectionInfo.state === 'FIRST_CONNECTION' || isZplMode);
+  const hideConnectionUi = isCollaborator && !isConnected;
 
   return (
     <PageContainer 
