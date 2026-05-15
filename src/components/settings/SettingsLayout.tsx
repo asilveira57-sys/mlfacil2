@@ -1,6 +1,9 @@
-import { useSearchParams } from "react-router-dom";
-import { Settings, LucideIcon } from "lucide-react";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { Settings, LucideIcon, LogOut } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useConfigMenu } from "@/hooks/useConfigMenu";
 import { useUserRole } from "@/hooks/useUserRole";
