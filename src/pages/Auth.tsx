@@ -265,8 +265,16 @@ const Auth = () => {
       });
       if (error) throw error;
       setForgotSent(true);
-    } catch {
-      toast.error("Erro ao enviar e-mail de recuperação.");
+    } catch (err: any) {
+      const msg = String(err?.message || err?.error_description || "");
+      const status = err?.status ?? err?.statusCode;
+      if (status === 429 || /rate limit|too many|over.*email.*rate/i.test(msg)) {
+        toast.error(
+          "Muitas tentativas. Aguarde alguns minutos antes de solicitar um novo e-mail de recuperação."
+        );
+      } else {
+        toast.error("Erro ao enviar e-mail de recuperação. Tente novamente em instantes.");
+      }
     } finally {
       setForgotLoading(false);
     }
