@@ -155,9 +155,16 @@ export function AppShellLayout() {
               </div>
             </header>
 
-            {/* Main Content - Outlet renders the matched route */}
+            {/* Main Content - Outlet renders the matched route.
+                Inner Suspense keeps sidebar/header mounted while lazy modules load. */}
             <main className="flex-1 overflow-auto relative">
-              <Outlet />
+              <Suspense fallback={
+                <div className="flex items-center justify-center py-16" aria-hidden="true">
+                  <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full opacity-60" />
+                </div>
+              }>
+                <Outlet />
+              </Suspense>
               <ModuleNotesOverlay companyId={sellerId} />
               <GlobalExplanatoryCardGate />
             </main>
