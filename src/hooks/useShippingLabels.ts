@@ -277,6 +277,12 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const isSilentSyncRef = useRef(false);
   const jobPollingRef = useRef(false);
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log('[MOUNT] useShippingLabels');
+    return () => console.log('[UNMOUNT] useShippingLabels');
+  }, []);
+
   // Persist filters to sessionStorage on change
   useEffect(() => {
     if (!sellerId) return;
