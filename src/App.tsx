@@ -179,10 +179,11 @@ const App = () => {
       queries: {
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
+        refetchOnMount: false,
+        retryOnMount: false,
         staleTime: Infinity,
         gcTime: 24 * 60 * 60 * 1000,
         retry: 0,
-        refetchOnMount: false,
       },
     },
   }));
