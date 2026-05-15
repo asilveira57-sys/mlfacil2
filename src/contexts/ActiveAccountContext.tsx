@@ -218,16 +218,36 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
       // Get persisted active account
       const persistedId = await getPersistedActiveAccountId(user.id);
-      
-      // Find the active account
-      let active = loadedAccounts.find(a => a.id === persistedId && (a.status === 'connected' || a.status === 'attention'));
-      
-      // If not found or not usable, use first connected/attention account
-      if (!active) {
-        active = loadedAccounts.find(a => a.status === 'connected' || a.status === 'attention');
+
+      // Resolve the user's active company (used to prefer the inherited
+      // company ML account over personal ones for collaborators).
+      let activeCompanyId: string | null = null;
+      try {
+        const { data: ctx } = await supabase
+          .from('user_context')
+          .select('active_company_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        activeCompanyId = (ctx as any)?.active_company_id ?? null;
+      } catch { /* ignore */ }
+
+      const isUsable = (a: ActiveAccount) => a.status === 'connected' || a.status === 'attention';
+
+      // 1) Persisted choice, if still usable
+      let active = loadedAccounts.find(a => a.id === persistedId && isUsable(a));
+
+      // 2) Inherited account of the active company (collaborator path)
+      if (!active && activeCompanyId) {
+        active = loadedAccounts.find(a => a.companyId === activeCompanyId && isUsable(a));
       }
-      
-      // If still not found, use first account
+
+      // 3) Any usable account, preferring inherited (company) over personal
+      if (!active) {
+        active = loadedAccounts.find(a => (a as any).isInherited && isUsable(a))
+          || loadedAccounts.find(isUsable);
+      }
+
+      // 4) Fallback: first account at all
       if (!active && loadedAccounts.length > 0) {
         active = loadedAccounts[0];
       }
