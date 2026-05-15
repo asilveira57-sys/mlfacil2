@@ -19,7 +19,7 @@ export type ConnectionStatus = 'connected' | 'attention' | 'disconnected' | 'rev
 export interface UnifiedMarketplaceAccount {
   id: string;              // ml_accounts.id
   sellerId: string;        // ml_accounts.ml_user_id
-  userId: string;          // ml_accounts.user_id
+  userId: string;          // ml_accounts.user_id (titular)
   nickname: string | null;
   email: string | null;
   provider: 'mercadolivre';
@@ -27,6 +27,8 @@ export interface UnifiedMarketplaceAccount {
   isActive: boolean;
   isConnected: boolean;
   companyId: string | null; // ml_accounts.company_id
+  /** True when the account is accessed via company membership (collaborator), not ownership. */
+  isInherited?: boolean;
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: string;
@@ -223,41 +225,26 @@ export async function getAllAccounts(): Promise<UnifiedMarketplaceAccount[]> {
     return [];
   }
 
-  const { data: mlAccounts, error } = await supabase
-    .from('ml_accounts')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
+  // Use the security-definer RPC so collaborators inherit ML accounts from the
+  // companies they belong to (without ever exposing tokens to the browser).
+  const { data, error } = await supabase.rpc('get_accessible_ml_accounts');
 
   if (error) {
-    console.error('[accountUnification] Error fetching accounts:', error);
+    console.error('[accountUnification] Error fetching accessible accounts:', error);
     return [];
   }
 
-  return (mlAccounts || []).map(mapMlAccountToUnified);
+  return ((data as any[]) || [])
+    .map(mapMlAccountToUnified)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 /**
  * Get account by seller ID.
  */
 export async function getAccountBySellerId(sellerId: string): Promise<UnifiedMarketplaceAccount | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return null;
-  }
-
-  const { data: mlAccount } = await supabase
-    .from('ml_accounts')
-    .select('*')
-    .eq('user_id', user.id)
-    .eq('ml_user_id', sellerId)
-    .single();
-
-  if (!mlAccount) {
-    return null;
-  }
-
-  return mapMlAccountToUnified(mlAccount);
+  const accounts = await getAllAccounts();
+  return accounts.find(a => a.sellerId === sellerId) ?? null;
 }
 
 /**
@@ -338,6 +325,7 @@ function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplace
     isActive,
     isConnected: (row.is_connected as boolean) ?? true,
     companyId: (row.company_id as string | null) ?? null,
+    isInherited: (row.is_inherited as boolean) ?? false,
     accessToken: row.access_token as string | undefined,
     refreshToken: row.refresh_token as string | undefined,
     expiresAt: row.token_expires_at as string | undefined,

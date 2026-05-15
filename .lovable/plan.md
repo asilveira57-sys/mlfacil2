@@ -1,83 +1,128 @@
+## Diagnóstico crítico
 
-# Correção do Pipeline de E-mails
+O problema não é só o cadastro do Wilson; é uma falha de modelo no app:
 
-## Contexto
+- O Wilson está vinculado à Todovino em `company_users`, `workspace_members` e `collaborators`.
+- A preferência de workspace dele aponta para a Todovino.
+- Porém a camada que carrega contas Mercado Livre (`getAllAccounts`) só busca `ml_accounts.user_id = usuário logado`.
+- Como o Wilson conectou uma conta pessoal, o frontend encontra a conta `WILSONLONGO16`, marca ela como ativa e sobrescreve `user_context.active_company_id` para a empresa pessoal dele.
+- A política atual de `ml_accounts` também só permite leitura por dono da conta, então o colaborador nunca “enxerga” a conexão da empresa principal.
 
-Existem dois sistemas de e-mail rodando em paralelo:
-- **Legado** (`email-enqueue-event` → `email_queue` → dispatcher morto) — parado desde 08/abr, com 25 e-mails travados em `queued`.
-- **Novo** (`send-transactional-email` → `enqueue_email` → pgmq → `process-email-queue` cron) — funcionando, mas só 54 envios em 30 dias.
+Em resumo: o sistema está tratando “conta Mercado Livre disponível” como “conta Mercado Livre criada pelo usuário”, quando para colaborador deveria ser “conta Mercado Livre da empresa/workspace em que ele é membro”.
 
-O caso `franciscodesouza1@hotmail.com` é sintoma: a conta foi criada antes da migração, e todos os eventos caíram no pipeline antigo congelado.
+## Regra correta de produto
 
----
+Um colaborador deve:
 
-## Fase A — Parar o sangramento (imediato)
+1. Entrar no workspace/empresa para o qual foi convidado.
+2. Herdar a conexão Mercado Livre titular dessa empresa.
+3. Não precisar conectar conta própria.
+4. Não alternar para contas pessoais dentro do workspace da empresa.
+5. Ter módulos e ações limitados pelo perfil/permissões configurados para o colaborador.
+6. Nunca receber tokens Mercado Livre no navegador.
 
-1. **Drenar os 25 e-mails travados em `email_queue`**
-   - Para cada item com `status='queued'`, mapear o template legado (`marketplace_connected_success`, etc.) para o template equivalente no novo sistema.
-   - Reenfileirar via `enqueue_email()` → fila `transactional_emails`.
-   - Marcar a linha original em `email_queue` como `migrated` (status novo) para preservar histórico sem reprocessar.
+## Solução proposta
 
-2. **Disparo manual para o Francisco (hotmail)**
-   - Invocar `send-transactional-email` com template equivalente a `marketplace_connected_success` (ou welcome) para `franciscodesouza1@hotmail.com`.
-   - Usar `idempotencyKey` do tipo `recovery-marketplace-connected-<user_id>` para evitar duplicidade.
+### 1. Criar uma fonte segura de contas acessíveis
 
-3. **Validação**
-   - Verificar `email_send_log` (deduplicado por `message_id`) confirmando status `sent` para os 25 + Francisco.
+Adicionar uma função de banco/RPC, por exemplo `get_accessible_ml_accounts()`, que retorna apenas metadados seguros da conta Mercado Livre:
 
----
+- `id`
+- `ml_user_id`
+- `nickname`
+- `email`
+- `company_id`
+- `connection_status`
+- `is_active`
+- `is_connected`
+- datas/status de saúde da conexão
 
-## Fase B — Eliminar o pipeline legado (estrutural)
+Sem `access_token` e sem `refresh_token`.
 
-4. **Auditoria de chamadas ao pipeline antigo**
-   - Buscar no código todas as referências a `email-enqueue-event`, `email_queue` (INSERT direto), `enqueueEmailEvent` (confirmar se grava em pgmq ou em `email_queue`).
-   - Listar edge functions afetadas (ex.: `support-notify`, regras de evento, gatilhos de marketplace conectado).
+A função deve retornar:
 
-5. **Migração 1-a-1 dos templates**
-   - Para cada chave em `email_event_rules` ainda apontando ao legado, criar template React Email correspondente em `_shared/transactional-email-templates/` e registrar no `registry.ts`.
-   - Reapontar o gatilho para `supabase.functions.invoke('send-transactional-email', ...)` com `templateName` correto.
+- contas próprias do usuário, quando ele é dono;
+- contas de empresas onde ele é membro ativo em `company_users`;
+- somente contas ativas/conectadas ou em atenção, conforme o uso da UI.
 
-6. **Depreciar `email_queue` / `email_logs`**
-   - Remover INSERTs do código.
-   - Manter as tabelas como read-only para histórico (não dropar).
-   - Adicionar comentário SQL `COMMENT ON TABLE ... IS 'DEPRECATED - read-only history'`.
+Manter a RLS direta de `ml_accounts` restrita ao dono para não expor tokens por consulta direta.
 
----
+### 2. Refatorar a camada de contas do frontend
 
-## Fase C — Monitoramento (preventivo)
+Alterar `src/lib/accountUnification.ts` para que:
 
-7. **Alerta no painel admin (`/admin/emails` → aba "Falhas")**
-   - Card destacando mensagens em `email_send_log` com `status='pending'` há mais de 1h.
-   - Card destacando crescimento da DLQ em pgmq (`transactional_emails_dlq`, `auth_emails_dlq`).
+- `getAllAccounts()` use a nova RPC segura em vez de `ml_accounts.select('*').eq('user_id', user.id)`.
+- `getAccountBySellerId()` e `validateSellerAccess()` também considerem contas herdadas da empresa.
+- A interface `UnifiedMarketplaceAccount` deixe de carregar tokens no frontend.
 
-8. **Verificação automática do cron**
-   - Health check que consulta `cron.job` por `process-email-queue` e marca como crítico se ausente.
-   - Exibir status no painel admin.
+### 3. Corrigir seleção da conta ativa
 
----
+Alterar `src/contexts/ActiveAccountContext.tsx` para:
 
-## Detalhes técnicos
+- Resolver primeiro a empresa/workspace ativa do usuário.
+- Para colaborador, priorizar a conta Mercado Livre da empresa ativa.
+- Ignorar `localStorage.active_account_id` quando ele apontar para conta fora da empresa/workspace ativo.
+- Ao persistir contexto, gravar `active_company_id` da conta herdada correta.
+- Se o usuário for colaborador, não permitir trocar para conta pessoal pelo seletor enquanto estiver no workspace da empresa.
 
-```text
-Antes:
-  evento → email-enqueue-event → INSERT email_queue (queued)
-                                       ↓
-                              [dispatcher morto] ✗
+### 4. Ajustar o seletor de contas
 
-Depois:
-  evento → send-transactional-email → enqueue_email() → pgmq
-                                            ↓
-                              process-email-queue (cron 5s) ✓
-                                            ↓
-                                    email_send_log
-```
+Alterar `src/components/layout/AccountSwitcher.tsx` para:
 
-**Templates legados a migrar:**
-- `marketplace_connected_success` (25 ocorrências travadas)
-- Demais chaves em `email_event_rules` ainda usando pipeline antigo (a ser listado na Fase B passo 4)
+- Mostrar a conta da Todovino como conta ativa para Wilson.
+- Não exibir “Conectar Conta” para colaborador sem conta própria.
+- Opcionalmente indicar visualmente “Conta da empresa” para contas herdadas.
+- Evitar que colaborador gerencie/conecte contas Mercado Livre se o perfil não permitir integrações.
 
----
+### 5. Corrigir refresh de token para conta herdada
 
-## Ordem de execução
+Alterar `supabase/functions/ml-token-refresh/index.ts` para autorizar refresh quando:
 
-Fase A → Fase B → Fase C, sequencialmente. Fase A pode rodar imediatamente após aprovação; B e C iniciam após A validada.
+- o usuário é dono da conta; ou
+- o usuário é membro ativo da empresa (`company_users`) vinculada à conta.
+
+A função deve retornar apenas status de sucesso/erro para o frontend, não o `accessToken`.
+
+### 6. Corrigir fluxo de criação/aceite de colaborador
+
+Ajustar `supabase/functions/collaborator-invite/index.ts` e/ou o fluxo pós-login para que, ao ativar colaborador:
+
+- `user_preferences.active_workspace_id` aponte para o workspace da empresa convidante;
+- `user_context.active_company_id` aponte para a empresa convidante;
+- `user_context.active_marketplace_account_id` aponte para a conta Mercado Livre titular da empresa;
+- o colaborador não seja tratado como owner da empresa pessoal recém-criada quando existir convite ativo.
+
+### 7. Reparar o caso Wilson/Todovino
+
+Após a correção estrutural, aplicar um ajuste de dados para o Wilson:
+
+- `user_context.active_company_id = Todovino`
+- `user_context.active_marketplace_account_id = TODOVINOBR`
+- manter vínculo em `company_users`, `workspace_members` e `collaborators`
+- opcionalmente desativar/ignorar a conta pessoal `WILSONLONGO16` no contexto da Todovino, sem apagá-la
+
+### 8. Validar permissões por perfil
+
+Conferir `useCollaboratorAccess` para que ele busque o `company_users` da empresa ativa, não qualquer registro do usuário. Hoje o Wilson tem duas empresas; uma consulta `.maybeSingle()` sem escopo pode pegar a empresa errada e liberar/bloquear módulos incorretamente.
+
+## Arquivos principais a alterar
+
+- `src/lib/accountUnification.ts`
+- `src/contexts/ActiveAccountContext.tsx`
+- `src/components/layout/AccountSwitcher.tsx`
+- `src/hooks/useCollaboratorAccess.ts`
+- `src/lib/mlTokenRefresh.ts`
+- `supabase/functions/ml-token-refresh/index.ts`
+- possivelmente `supabase/functions/collaborator-invite/index.ts`
+- migração para RPC segura de contas acessíveis
+- ajuste pontual de dados do Wilson
+
+## Resultado esperado
+
+Depois da implementação, ao Wilson logar:
+
+- o topo deve mostrar `TODOVINOBR`, não `WILSONLONGO16`;
+- o dashboard deve considerar a conexão da Todovino como conectada;
+- Wilson não deve ser solicitado a conectar Mercado Livre;
+- os módulos continuam limitados pelo perfil Operacional;
+- chamadas backend que dependem do seller da Todovino deixam de falhar por `user_id` diferente do dono da conexão.

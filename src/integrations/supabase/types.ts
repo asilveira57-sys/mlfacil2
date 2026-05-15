@@ -21396,6 +21396,10 @@ export type Database = {
         Args: { p_company_id: string; p_job_type: string; p_scope: string }
         Returns: Json
       }
+      can_user_use_ml_account: {
+        Args: { _account_id: string; _user_id: string }
+        Returns: boolean
+      }
       check_ml_api_access: { Args: { p_user_id: string }; Returns: Json }
       check_permission: {
         Args: { p_company_id: string; p_feature_key: string; p_user_id: string }
@@ -21449,6 +21453,29 @@ export type Database = {
           p_user_id: string
         }
         Returns: Json
+      }
+      get_accessible_ml_accounts: {
+        Args: never
+        Returns: {
+          company_id: string
+          connection_status: string
+          consecutive_failures: number
+          country_id: string
+          created_at: string
+          email: string
+          id: string
+          is_active: boolean
+          is_connected: boolean
+          is_inherited: boolean
+          last_api_error_at: string
+          last_api_error_code: string
+          last_api_ok_at: string
+          ml_user_id: string
+          nickname: string
+          token_expires_at: string
+          updated_at: string
+          user_id: string
+        }[]
       }
       get_admin_dashboard_stats: { Args: never; Returns: Json }
       get_admin_webhook_logs: { Args: { p_limit?: number }; Returns: Json }
