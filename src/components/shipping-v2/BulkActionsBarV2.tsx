@@ -193,7 +193,3 @@ export function BulkActionsBarV2({
     </div>
   );
 }
-      </div>
-    </div>
-  );
-}
