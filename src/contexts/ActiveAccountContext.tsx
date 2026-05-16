@@ -207,6 +207,17 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      try {
+        const { data } = await (supabase.rpc as any)('activate_own_collaborator_invites');
+        if ((data ?? 0) > 0) {
+          localStorage.removeItem('active_account_id');
+          localStorage.removeItem('active_seller_id');
+          localStorage.removeItem('current_workspace_id');
+        }
+      } catch (err) {
+        console.warn('[ActiveAccountContext] collaborator context sync skipped:', err);
+      }
+
       const loadedAccounts = await loadAccounts();
       setAccounts(loadedAccounts);
       accountsRef.current = loadedAccounts;
@@ -236,12 +247,17 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
       const isUsable = (a: ActiveAccount) => a.status === 'connected' || a.status === 'attention';
 
-      // 1) Persisted choice, if still usable
-      let active = loadedAccounts.find(a => a.id === persistedId && isUsable(a));
+      const inheritedForActiveCompany = activeCompanyId
+        ? loadedAccounts.filter(a => a.isInherited && a.companyId === activeCompanyId && isUsable(a))
+        : [];
 
-      // 2) Inherited account of the active company (collaborator path)
-      if (!active && activeCompanyId) {
-        active = loadedAccounts.find(a => a.companyId === activeCompanyId && isUsable(a));
+      // 1) Collaborator path: company inherited account is authoritative.
+      // Ignore persisted/localStorage personal accounts while inside the invited company.
+      let active = inheritedForActiveCompany[0] || null;
+
+      // 2) Persisted choice, only when not overriding with collaborator inheritance.
+      if (!active) {
+        active = loadedAccounts.find(a => a.id === persistedId && isUsable(a)) || null;
       }
 
       // 3) Any usable account, preferring inherited (company) over personal
@@ -302,6 +318,12 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     const account = accountsRef.current.find(a => a.id === accountId);
     if (!account) {
       toast.error('Conta não encontrada');
+      return false;
+    }
+
+    const inheritedScope = accountsRef.current.find(a => a.isInherited && a.companyId === activeAccount?.companyId);
+    if (inheritedScope && (!account.isInherited || account.companyId !== inheritedScope.companyId)) {
+      toast.error('Colaboradores usam a conta Mercado Livre da empresa principal.');
       return false;
     }
 
