@@ -610,6 +610,44 @@ export function AdminClientes() {
                         <TableCell />
                       </TableRow>
                     ))}
+                    {isExpanded && client.collaborators?.map((collab) => (
+                      <TableRow key={`${client.user_id}-${collab.id}`} className="bg-muted/20">
+                        <TableCell className="pl-12">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                            <div>
+                              <span className="text-sm font-medium">{collab.name}</span>
+                              <p className="text-xs text-muted-foreground">{collab.email}</p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">Colaborador</span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs">Herda {collab.inherited_ml_nickname || collab.inherited_ml_user_id || 'conta principal'}</span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={collab.status === 'active' ? 'default' : 'secondary'} className="text-xs">
+                            {collab.status === 'active' ? 'Ativo' : collab.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">{collab.profile_name || 'Sem perfil'}</span>
+                        </TableCell>
+                        <TableCell>
+                          {collab.last_activity_at || collab.last_sign_in_at ? (
+                            <span className="text-xs text-muted-foreground">
+                              {formatDateTime(collab.last_activity_at || collab.last_sign_in_at)}
+                            </span>
+                          ) : <span className="text-xs text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell />
+                        <TableCell />
+                      </TableRow>
+                    ))}
                   </>
                 );
               })
