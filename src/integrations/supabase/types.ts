@@ -21281,6 +21281,7 @@ export type Database = {
       admin_get_clients_overview: {
         Args: never
         Returns: {
+          collaborators: Json
           company_city: string
           company_document: string
           company_id: string
@@ -21943,6 +21944,10 @@ export type Database = {
       start_user_trial: {
         Args: { p_plan_code?: string; p_user_id: string }
         Returns: string
+      }
+      sync_collaborator_context: {
+        Args: { _user_id: string }
+        Returns: boolean
       }
       sync_visual_group_to_templates: {
         Args: { p_group_id: string }
