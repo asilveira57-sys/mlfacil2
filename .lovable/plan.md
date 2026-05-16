@@ -1,128 +1,147 @@
 ## Diagnóstico crítico
 
-O problema não é só o cadastro do Wilson; é uma falha de modelo no app:
+O erro principal é de modelo, não só do Wilson:
 
-- O Wilson está vinculado à Todovino em `company_users`, `workspace_members` e `collaborators`.
-- A preferência de workspace dele aponta para a Todovino.
-- Porém a camada que carrega contas Mercado Livre (`getAllAccounts`) só busca `ml_accounts.user_id = usuário logado`.
-- Como o Wilson conectou uma conta pessoal, o frontend encontra a conta `WILSONLONGO16`, marca ela como ativa e sobrescreve `user_context.active_company_id` para a empresa pessoal dele.
-- A política atual de `ml_accounts` também só permite leitura por dono da conta, então o colaborador nunca “enxerga” a conexão da empresa principal.
+- A tela **Admin > Clientes** hoje é centrada em `auth.users`; por isso o Wilson aparece como um “cliente” separado.
+- O correto é a tela ser centrada em **empresa/conta principal**: Todovino deve ser uma linha principal, e Wilson deve aparecer como colaborador agregado à Todovino.
+- O Wilson já tem vínculo ativo com a empresa/workspace da Todovino, mas o app ainda aceita a conta pessoal `WILSONLONGO16` como conta ativa porque o contexto persistido/localStorage e a seleção inicial ainda priorizam conta pessoal quando ela existe.
+- A função de contas acessíveis já foi parcialmente criada, mas falta fechar a regra de produto: colaborador não escolhe conta própria dentro da empresa convidante; ele herda a conexão ML titular da empresa.
+- O fluxo de convite/aceite precisa garantir que qualquer colaborador novo ou existente seja vinculado à empresa, workspace, perfil e conta ML principal no mesmo momento em que o acesso é ativado.
 
-Em resumo: o sistema está tratando “conta Mercado Livre disponível” como “conta Mercado Livre criada pelo usuário”, quando para colaborador deveria ser “conta Mercado Livre da empresa/workspace em que ele é membro”.
+## Regra final que vou implementar
 
-## Regra correta de produto
+```text
+Cliente principal / empresa
+└── Conta ML titular conectada
+    └── Colaboradores
+        ├── usam a mesma conexão ML da empresa
+        ├── não aparecem como clientes separados
+        ├── não precisam conectar ML próprio
+        └── têm acesso limitado pelo perfil configurado
+```
 
-Um colaborador deve:
+Para o caso específico:
 
-1. Entrar no workspace/empresa para o qual foi convidado.
-2. Herdar a conexão Mercado Livre titular dessa empresa.
-3. Não precisar conectar conta própria.
-4. Não alternar para contas pessoais dentro do workspace da empresa.
-5. Ter módulos e ações limitados pelo perfil/permissões configurados para o colaborador.
-6. Nunca receber tokens Mercado Livre no navegador.
+```text
+TODOVINO / TODOVINOBR
+└── Wilson Longo / wilson.longo@interfood.com.br
+    ├── colaborador ativo
+    ├── conta ML ativa: TODOVINOBR
+    └── perfil: Operacional
+```
 
-## Solução proposta
+## Plano de correção
 
-### 1. Criar uma fonte segura de contas acessíveis
+### 1. Trocar a listagem admin de usuário para empresa principal
 
-Adicionar uma função de banco/RPC, por exemplo `get_accessible_ml_accounts()`, que retorna apenas metadados seguros da conta Mercado Livre:
+Vou alterar a fonte da tela **Admin > Clientes** para retornar apenas clientes principais/empresas titulares.
 
-- `id`
-- `ml_user_id`
-- `nickname`
-- `email`
-- `company_id`
-- `connection_status`
-- `is_active`
-- `is_connected`
-- datas/status de saúde da conexão
+A linha da Todovino passará a trazer:
 
-Sem `access_token` e sem `refresh_token`.
+- dados do titular da conta;
+- empresa principal;
+- contas Mercado Livre da empresa;
+- colaboradores agregados;
+- status do trial/plano da conta principal;
+- último acesso da empresa, considerando titular e colaboradores.
 
-A função deve retornar:
+Wilson deixará de aparecer como “cliente” separado quando a busca for por Todovino/Interfood/Wilson. Ele aparecerá dentro da Todovino como colaborador.
 
-- contas próprias do usuário, quando ele é dono;
-- contas de empresas onde ele é membro ativo em `company_users`;
-- somente contas ativas/conectadas ou em atenção, conforme o uso da UI.
+### 2. Exibir colaboradores dentro da conta principal
 
-Manter a RLS direta de `ml_accounts` restrita ao dono para não expor tokens por consulta direta.
+Na tela **Admin > Clientes**, vou adicionar uma área de colaboradores por cliente:
 
-### 2. Refatorar a camada de contas do frontend
+- contador de colaboradores na linha principal;
+- expansão da linha mostrando colaboradores;
+- nome, e-mail, status, perfil e último acesso;
+- indicação da conta ML herdada, por exemplo `TODOVINOBR`;
+- busca global encontrando a Todovino também quando pesquisar por `wilson.longo@interfood.com.br`.
 
-Alterar `src/lib/accountUnification.ts` para que:
+### 3. Criar gerenciamento global de colaboradores no Admin
 
-- `getAllAccounts()` use a nova RPC segura em vez de `ml_accounts.select('*').eq('user_id', user.id)`.
-- `getAccountBySellerId()` e `validateSellerAccess()` também considerem contas herdadas da empresa.
-- A interface `UnifiedMarketplaceAccount` deixe de carregar tokens no frontend.
+Dentro da linha/detalhe da empresa principal, o admin poderá:
 
-### 3. Corrigir seleção da conta ativa
+- inserir colaborador;
+- editar nome/e-mail/perfil;
+- reenviar convite;
+- desativar/reativar;
+- excluir/remover vínculo;
+- ver a conta ML principal que o colaborador herdará.
 
-Alterar `src/contexts/ActiveAccountContext.tsx` para:
+Isso vai reaproveitar a lógica já existente em **Configurações > Colaboradores**, mas com escopo administrativo e agrupado por empresa.
 
-- Resolver primeiro a empresa/workspace ativa do usuário.
-- Para colaborador, priorizar a conta Mercado Livre da empresa ativa.
-- Ignorar `localStorage.active_account_id` quando ele apontar para conta fora da empresa/workspace ativo.
-- Ao persistir contexto, gravar `active_company_id` da conta herdada correta.
-- Se o usuário for colaborador, não permitir trocar para conta pessoal pelo seletor enquanto estiver no workspace da empresa.
+### 4. Corrigir seleção da conta ativa no login do colaborador
 
-### 4. Ajustar o seletor de contas
+Vou ajustar o contexto de conta ativa para esta prioridade:
 
-Alterar `src/components/layout/AccountSwitcher.tsx` para:
+1. Se o usuário é colaborador ativo de uma empresa, usar obrigatoriamente a conta ML principal dessa empresa.
+2. Ignorar `localStorage.active_account_id` e `user_context.active_marketplace_account_id` quando apontarem para conta pessoal fora da empresa ativa.
+3. Persistir novamente `active_company_id`, `active_workspace_id` e `active_marketplace_account_id` corretos.
+4. Esconder/bloquear troca para conta pessoal enquanto o usuário estiver no workspace da empresa convidante.
 
-- Mostrar a conta da Todovino como conta ativa para Wilson.
-- Não exibir “Conectar Conta” para colaborador sem conta própria.
-- Opcionalmente indicar visualmente “Conta da empresa” para contas herdadas.
-- Evitar que colaborador gerencie/conecte contas Mercado Livre se o perfil não permitir integrações.
+Isso resolve o Wilson continuar vendo `WILSONLONGO16` mesmo já estando vinculado à Todovino.
 
-### 5. Corrigir refresh de token para conta herdada
+### 5. Fechar a regra de herança no backend
 
-Alterar `supabase/functions/ml-token-refresh/index.ts` para autorizar refresh quando:
+Vou reforçar a função segura de contas acessíveis para retornar, para colaborador:
 
-- o usuário é dono da conta; ou
-- o usuário é membro ativo da empresa (`company_users`) vinculada à conta.
+- a conta ML titular da empresa ativa;
+- metadados seguros da conta;
+- sem tokens no navegador;
+- marcação clara de conta herdada.
 
-A função deve retornar apenas status de sucesso/erro para o frontend, não o `accessToken`.
+Também vou criar/ajustar uma função de reparo de contexto para ser usada no login e no aceite de convite.
 
-### 6. Corrigir fluxo de criação/aceite de colaborador
+### 6. Corrigir convite/aceite de colaborador
 
-Ajustar `supabase/functions/collaborator-invite/index.ts` e/ou o fluxo pós-login para que, ao ativar colaborador:
+No fluxo de convite:
 
-- `user_preferences.active_workspace_id` aponte para o workspace da empresa convidante;
-- `user_context.active_company_id` aponte para a empresa convidante;
-- `user_context.active_marketplace_account_id` aponte para a conta Mercado Livre titular da empresa;
-- o colaborador não seja tratado como owner da empresa pessoal recém-criada quando existir convite ativo.
+- se o e-mail já existe, ele não vira cliente novo;
+- ele é agregado à empresa convidante;
+- `company_users`, `workspace_members`, `collaborators`, `user_context` e `user_preferences` ficam sincronizados;
+- o perfil de colaboração é aplicado na empresa correta;
+- a conta ML ativa passa a ser a conta titular da empresa.
 
-### 7. Reparar o caso Wilson/Todovino
+### 7. Corrigir Wilson imediatamente
 
-Após a correção estrutural, aplicar um ajuste de dados para o Wilson:
+Depois da estrutura, vou aplicar o reparo de dados:
 
-- `user_context.active_company_id = Todovino`
-- `user_context.active_marketplace_account_id = TODOVINOBR`
-- manter vínculo em `company_users`, `workspace_members` e `collaborators`
-- opcionalmente desativar/ignorar a conta pessoal `WILSONLONGO16` no contexto da Todovino, sem apagá-la
+- Wilson continua existindo como usuário autenticado;
+- Wilson deixa de ser tratado como cliente principal na listagem admin;
+- contexto ativo dele passa a apontar para a Todovino;
+- conta ML ativa dele passa a ser `TODOVINOBR`;
+- a conta pessoal `WILSONLONGO16` não será apagada, mas não será usada no contexto da Todovino.
 
-### 8. Validar permissões por perfil
+### 8. Validação
 
-Conferir `useCollaboratorAccess` para que ele busque o `company_users` da empresa ativa, não qualquer registro do usuário. Hoje o Wilson tem duas empresas; uma consulta `.maybeSingle()` sem escopo pode pegar a empresa errada e liberar/bloquear módulos incorretamente.
+Vou validar com consultas e comportamento esperado:
 
-## Arquivos principais a alterar
+- pesquisar `Todovino` mostra Todovino com Wilson como colaborador;
+- pesquisar `wilson.longo@interfood.com.br` encontra a Todovino, não uma linha solta do Wilson;
+- Wilson herda `TODOVINOBR` ao logar;
+- Wilson não é solicitado a conectar Mercado Livre;
+- Wilson continua limitado pelo perfil Operacional;
+- desativar/excluir colaborador remove o acesso à conta ML herdada;
+- titulares continuam vendo e gerenciando suas próprias conexões normalmente.
 
-- `src/lib/accountUnification.ts`
-- `src/contexts/ActiveAccountContext.tsx`
-- `src/components/layout/AccountSwitcher.tsx`
-- `src/hooks/useCollaboratorAccess.ts`
-- `src/lib/mlTokenRefresh.ts`
-- `supabase/functions/ml-token-refresh/index.ts`
-- possivelmente `supabase/functions/collaborator-invite/index.ts`
-- migração para RPC segura de contas acessíveis
-- ajuste pontual de dados do Wilson
+## Arquivos/funções que serão alterados
+
+### Backend Lovable Cloud
+
+- `admin_get_clients_overview`: virar visão agrupada por cliente principal/empresa, com colaboradores agregados.
+- `get_accessible_ml_accounts`: reforçar herança por empresa ativa.
+- Nova função de reparo/sincronização de contexto de colaborador.
+- Políticas/funções de autorização para garantir que colaborador acesse só o que o perfil permite.
+
+### Frontend
+
+- `src/hooks/useAdminClients.ts`: novo formato com colaboradores agregados.
+- `src/pages/admin/AdminClientes.tsx`: exibir e gerenciar colaboradores dentro da empresa principal.
+- `src/contexts/ActiveAccountContext.tsx`: colaborador prioriza conta ML da empresa, nunca a pessoal.
+- `src/components/layout/AccountSwitcher.tsx`: indicar conta herdada e bloquear troca indevida.
+- `src/hooks/useCollaborators.ts`: garantir criação/edição/desativação/exclusão com vínculo de empresa correto.
+- `supabase/functions/collaborator-invite/index.ts`: convite/aceite sincroniza contexto e vínculo com a empresa principal.
 
 ## Resultado esperado
 
-Depois da implementação, ao Wilson logar:
-
-- o topo deve mostrar `TODOVINOBR`, não `WILSONLONGO16`;
-- o dashboard deve considerar a conexão da Todovino como conectada;
-- Wilson não deve ser solicitado a conectar Mercado Livre;
-- os módulos continuam limitados pelo perfil Operacional;
-- chamadas backend que dependem do seller da Todovino deixam de falhar por `user_id` diferente do dono da conexão.
+A Todovino passa a ser o cliente principal. Wilson passa a aparecer e funcionar como colaborador da Todovino, usando `TODOVINOBR` com as permissões do perfil dele, sem virar cliente separado e sem exigir conexão própria de Mercado Livre.
