@@ -22,7 +22,7 @@ import {
   Search, MoreHorizontal, Eye, CalendarPlus, RotateCcw, Ban, CheckCircle, Trash2, RefreshCw,
   Building2, Store, Mail, Phone, CreditCard, Calendar, Shield, ChevronDown, ChevronRight, Clock, Send, Link2,
   ArrowUpDown, ArrowUp, ArrowDown, Replace, KeyRound, MailCheck, MailWarning, Loader2, AlertCircle,
-  Wallet, Repeat,
+  Wallet, Repeat, Users,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -144,7 +144,11 @@ export function AdminClientes() {
         !search ||
         c.full_name?.toLowerCase().includes(search.toLowerCase()) ||
         c.email?.toLowerCase().includes(search.toLowerCase()) ||
-        c.company_name?.toLowerCase().includes(search.toLowerCase());
+        c.company_name?.toLowerCase().includes(search.toLowerCase()) ||
+        c.collaborators?.some((collab) =>
+          collab.name?.toLowerCase().includes(search.toLowerCase()) ||
+          collab.email?.toLowerCase().includes(search.toLowerCase())
+        );
 
       let matchesStatus = true;
       if (statusFilter === 'trial') matchesStatus = c.trial_status === 'active';
@@ -362,6 +366,8 @@ export function AdminClientes() {
                 const days = daysRemaining(client.trial_end_at);
                 const isExpanded = expandedRows.has(client.user_id);
                 const hasMultipleAccounts = client.ml_accounts.length > 1;
+                const hasCollaborators = (client.collaborators?.length || 0) > 0;
+                const isExpandable = hasMultipleAccounts || hasCollaborators;
                 const lastAccess = client.last_activity_at || client.last_sign_in_at;
 
                 const toggleExpand = () => {
@@ -375,15 +381,20 @@ export function AdminClientes() {
 
                 return (
                   <>
-                    <TableRow key={client.user_id} className={hasMultipleAccounts ? 'cursor-pointer' : ''} onClick={hasMultipleAccounts ? toggleExpand : undefined}>
+                    <TableRow key={client.user_id} className={isExpandable ? 'cursor-pointer' : ''} onClick={isExpandable ? toggleExpand : undefined}>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          {hasMultipleAccounts && (
+                          {isExpandable && (
                             isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                           )}
                           <div>
                             <p className="font-medium text-foreground">{client.full_name || '—'}</p>
                             <p className="text-xs text-muted-foreground">{client.email || '—'}</p>
+                            {hasCollaborators && (
+                              <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                                <Users className="h-3 w-3" /> {client.collaborators.length} colaborador(es)
+                              </p>
+                            )}
                           </div>
                         </div>
                       </TableCell>
@@ -594,6 +605,44 @@ export function AdminClientes() {
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
+                        </TableCell>
+                        <TableCell />
+                        <TableCell />
+                      </TableRow>
+                    ))}
+                    {isExpanded && client.collaborators?.map((collab) => (
+                      <TableRow key={`${client.user_id}-${collab.id}`} className="bg-muted/20">
+                        <TableCell className="pl-12">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                            <div>
+                              <span className="text-sm font-medium">{collab.name}</span>
+                              <p className="text-xs text-muted-foreground">{collab.email}</p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">Colaborador</span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs">Herda {collab.inherited_ml_nickname || collab.inherited_ml_user_id || 'conta principal'}</span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={collab.status === 'active' ? 'default' : 'secondary'} className="text-xs">
+                            {collab.status === 'active' ? 'Ativo' : collab.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell />
+                        <TableCell />
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">{collab.profile_name || 'Sem perfil'}</span>
+                        </TableCell>
+                        <TableCell>
+                          {collab.last_activity_at || collab.last_sign_in_at ? (
+                            <span className="text-xs text-muted-foreground">
+                              {formatDateTime(collab.last_activity_at || collab.last_sign_in_at)}
+                            </span>
+                          ) : <span className="text-xs text-muted-foreground">—</span>}
                         </TableCell>
                         <TableCell />
                         <TableCell />

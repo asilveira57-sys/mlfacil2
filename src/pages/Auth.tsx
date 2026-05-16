@@ -123,6 +123,19 @@ const Auth = () => {
   const [resendingVerification, setResendingVerification] = useState(false);
   const [resendCountdown, setResendCountdown] = useState(0);
 
+  const syncCollaboratorContext = async () => {
+    try {
+      const { data } = await (supabase.rpc as any)('activate_own_collaborator_invites');
+      if ((data ?? 0) > 0) {
+        localStorage.removeItem('active_account_id');
+        localStorage.removeItem('active_seller_id');
+        localStorage.removeItem('current_workspace_id');
+      }
+    } catch (err) {
+      console.warn('[Auth] collaborator context sync skipped', err);
+    }
+  };
+
   useEffect(() => {
     if (resendCountdown <= 0) return;
     const timer = setTimeout(() => setResendCountdown((c) => c - 1), 1000);
@@ -162,8 +175,9 @@ const Auth = () => {
         setCheckingSession(false);
       });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_IN" && session) {
+        await syncCollaboratorContext();
         // Always send to /dashboard — ProtectedRoute decides whether to forward
         // to /primeiro-acesso based on the real onboarding state.
         navigate("/dashboard", { replace: true });
@@ -224,6 +238,7 @@ const Auth = () => {
         } catch { /* silent */ }
 
         if (signInData.session) {
+          await syncCollaboratorContext();
           // Route through /dashboard so ProtectedRoute can read the real
           // onboarding state and only redirect to /primeiro-acesso when needed.
           navigate("/dashboard", { replace: true });

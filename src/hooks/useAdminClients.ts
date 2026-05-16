@@ -12,6 +12,26 @@ export interface MlAccountInfo {
   last_activity_at: string | null;
 }
 
+export interface AdminCollaboratorInfo {
+  id: string;
+  auth_user_id: string | null;
+  name: string;
+  email: string;
+  status: 'invited' | 'active' | 'disabled' | 'deleted' | string;
+  profile_id: string | null;
+  profile_name: string | null;
+  workspace_id: string | null;
+  invited_at: string | null;
+  accepted_at: string | null;
+  disabled_at: string | null;
+  deleted_at: string | null;
+  last_sign_in_at: string | null;
+  last_activity_at: string | null;
+  inherited_ml_account_id: string | null;
+  inherited_ml_nickname: string | null;
+  inherited_ml_user_id: string | null;
+}
+
 export interface AdminClient {
   user_id: string;
   full_name: string | null;
@@ -49,6 +69,8 @@ export interface AdminClient {
   entitlement_auto_renew: boolean | null;
   entitlement_tier_name: string | null;
   entitlement_source: string | null;
+  workspace_id: string | null;
+  collaborators: AdminCollaboratorInfo[];
 }
 
 export function useAdminClients() {

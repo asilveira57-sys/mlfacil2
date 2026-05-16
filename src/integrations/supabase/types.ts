@@ -21265,6 +21265,7 @@ export type Database = {
       }
     }
     Functions: {
+      activate_own_collaborator_invites: { Args: never; Returns: number }
       add_admin_by_email: { Args: { p_email: string }; Returns: undefined }
       admin_adjust_trial: {
         Args: {
@@ -21281,6 +21282,7 @@ export type Database = {
       admin_get_clients_overview: {
         Args: never
         Returns: {
+          collaborators: Json
           company_city: string
           company_document: string
           company_id: string
@@ -21313,6 +21315,7 @@ export type Database = {
           trial_status: string
           user_id: string
           whatsapp: string
+          workspace_id: string
         }[]
       }
       admin_reset_onboarding: {
@@ -21943,6 +21946,10 @@ export type Database = {
       start_user_trial: {
         Args: { p_plan_code?: string; p_user_id: string }
         Returns: string
+      }
+      sync_collaborator_context: {
+        Args: { _user_id: string }
+        Returns: boolean
       }
       sync_visual_group_to_templates: {
         Args: { p_group_id: string }
