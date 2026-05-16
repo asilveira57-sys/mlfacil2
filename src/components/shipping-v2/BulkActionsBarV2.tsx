@@ -21,6 +21,7 @@ interface BulkActionsBarV2Props {
   selectedCount: number;
   onClear: () => void;
   onGenerateLabels: (format: 'pdf' | 'zpl', layout: LabelTestLayout) => void;
+  onSeparationReport?: (mode: 'per_order' | 'accumulated') => void;
   isGenerating: boolean;
   generationProgress: GenerationProgress;
   capabilities: SelectionCapabilitiesV2;
@@ -31,6 +32,7 @@ export function BulkActionsBarV2({
   selectedCount,
   onClear,
   onGenerateLabels,
+  onSeparationReport,
   isGenerating,
   generationProgress,
   capabilities,
