@@ -40,9 +40,15 @@ function formatDate(d: string | null) {
   return format(new Date(d), 'dd/MM/yyyy');
 }
 
-function formatDateTime(d: string | null) {
+function formatDateTime(d: string | null | undefined) {
   if (!d) return '—';
-  return format(new Date(d), 'dd/MM/yyyy HH:mm');
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return '—';
+  try {
+    return format(date, 'dd/MM/yyyy HH:mm');
+  } catch {
+    return '—';
+  }
 }
 
 function daysRemaining(trialEnd: string | null) {
