@@ -21265,6 +21265,7 @@ export type Database = {
       }
     }
     Functions: {
+      activate_own_collaborator_invites: { Args: never; Returns: number }
       add_admin_by_email: { Args: { p_email: string }; Returns: undefined }
       admin_adjust_trial: {
         Args: {
