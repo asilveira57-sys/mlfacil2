@@ -1,147 +1,74 @@
-## Diagnóstico crítico
+## O que muda em cada rota
 
-O erro principal é de modelo, não só do Wilson:
+### `/shipping-labels` (Etiquetas de Envio) — VAI MUDAR
+Hoje usa o pipeline antigo (`useShippingLabels` + edge `ml-generate-labels`), que é o que quebra páginas e gera “22 de 24” sem aviso.
 
-- A tela **Admin > Clientes** hoje é centrada em `auth.users`; por isso o Wilson aparece como um “cliente” separado.
-- O correto é a tela ser centrada em **empresa/conta principal**: Todovino deve ser uma linha principal, e Wilson deve aparecer como colaborador agregado à Todovino.
-- O Wilson já tem vínculo ativo com a empresa/workspace da Todovino, mas o app ainda aceita a conta pessoal `WILSONLONGO16` como conta ativa porque o contexto persistido/localStorage e a seleção inicial ainda priorizam conta pessoal quando ela existe.
-- A função de contas acessíveis já foi parcialmente criada, mas falta fechar a regra de produto: colaborador não escolhe conta própria dentro da empresa convidante; ele herda a conexão ML titular da empresa.
-- O fluxo de convite/aceite precisa garantir que qualquer colaborador novo ou existente seja vinculado à empresa, workspace, perfil e conta ML principal no mesmo momento em que o acesso é ativado.
+Vai passar a usar o mesmo motor que o Label Teste já usa hoje:
+- geração via dispatcher `ml-generate-labels-labeltest` (PDF assíncrono em fila + ZPL inline);
+- distribuição segura por envio com fallback per-shipment quando o lote falha;
+- histórico em `meli_print_queue_v2`;
+- recuperação de job travado com banner “Retomar verificação”;
+- mensagens claras de falha parcial: “22 geradas, 2 falharam, envios X e Y, motivo Z”.
 
-## Regra final que vou implementar
+A rota, o nome da tela (“Etiquetas de Envio”) e a navegação continuam iguais. Filtros, seleção, tabela, paginação, drawer de detalhes e tela de configuração de cabeçalho são preservados.
+
+### `/label-teste` (Label Teste V2) — NÃO MUDA
+Permanece exatamente como está hoje: mesma rota, mesma página, badge “TESTE V2”, mesmo histórico, mesmo fluxo. Continua disponível para seus testes.
+
+Os dois passam a usar o mesmo motor por baixo, mas continuam sendo páginas separadas.
+
+### Sandbox — SAI DO MENU
+A entrada `Sandbox` (`/sandbox`) está cadastrada em `system_modules` como módulo ativo. Vou desativá-la via migração para sumir do menu. A tabela `sandbox_company_snapshot` e dados antigos não são apagados.
+
+## Como vou aplicar
+
+### 1. Trocar o motor da página `/shipping-labels`
+Em `src/pages/ShippingLabels.tsx`:
+- substituir o hook `useShippingLabels` por `useShippingLabelsV2`;
+- adotar `BulkActionsBarV2` no lugar do `BulkActionsBar` antigo;
+- adicionar o banner de “Verificação pausada / Retomar verificação” (igual ao Label Teste);
+- adicionar um botão “Histórico” opcional usando `PrintHistoryV2`;
+- preservar título “Etiquetas de Envio”, atalho de configurações de cabeçalho e guard de elegibilidade.
+
+`useShippingLabelsV2` já:
+- usa cache local primeiro (não fica fazendo sync pesado toda vez que entra);
+- bloqueia sync concorrente enquanto há job de geração ativo;
+- faz polling do job e recupera após navegação/reload;
+- registra erros por envio no histórico.
+
+### 2. Polir feedback de erro parcial
+Em `src/components/shipping-v2/BulkActionsBarV2.tsx` e nas chamadas de toast do hook V2:
+- separar visualmente “geradas” x “falharam”;
+- mostrar até 5 IDs com falha e motivo curto;
+- evitar mensagem genérica quando a falha é parcial.
+
+Em `src/components/shipping-v2/PrintHistoryV2.tsx`:
+- expor motivos por envio do `per_shipment_log` para suporte ver depois.
+
+### 3. Não tocar no Label Teste
+`src/pages/LabelTeste.tsx`, `useShippingLabelsV2` e edges `ml-generate-labels-labeltest*` continuam como hoje. Só vão receber os mesmos ajustes de feedback citados acima, porque são componentes compartilhados — o comportamento da página de teste continua igual.
+
+### 4. Manter o motor antigo desativado, sem apagar
+- `useShippingLabels` e `ml-generate-labels` permanecem no projeto, mas a tela oficial deixa de chamá-los.
+- Isso garante rollback rápido se aparecer qualquer regressão na segunda-feira.
+
+### 5. Remover Sandbox do menu
+Migração simples desativando o módulo:
 
 ```text
-Cliente principal / empresa
-└── Conta ML titular conectada
-    └── Colaboradores
-        ├── usam a mesma conexão ML da empresa
-        ├── não aparecem como clientes separados
-        ├── não precisam conectar ML próprio
-        └── têm acesso limitado pelo perfil configurado
+UPDATE system_modules
+SET is_active = false, status = 'hidden'
+WHERE key = 'sistema.sandbox';
 ```
 
-Para o caso específico:
-
-```text
-TODOVINO / TODOVINOBR
-└── Wilson Longo / wilson.longo@interfood.com.br
-    ├── colaborador ativo
-    ├── conta ML ativa: TODOVINOBR
-    └── perfil: Operacional
-```
-
-## Plano de correção
-
-### 1. Trocar a listagem admin de usuário para empresa principal
-
-Vou alterar a fonte da tela **Admin > Clientes** para retornar apenas clientes principais/empresas titulares.
-
-A linha da Todovino passará a trazer:
-
-- dados do titular da conta;
-- empresa principal;
-- contas Mercado Livre da empresa;
-- colaboradores agregados;
-- status do trial/plano da conta principal;
-- último acesso da empresa, considerando titular e colaboradores.
-
-Wilson deixará de aparecer como “cliente” separado quando a busca for por Todovino/Interfood/Wilson. Ele aparecerá dentro da Todovino como colaborador.
-
-### 2. Exibir colaboradores dentro da conta principal
-
-Na tela **Admin > Clientes**, vou adicionar uma área de colaboradores por cliente:
-
-- contador de colaboradores na linha principal;
-- expansão da linha mostrando colaboradores;
-- nome, e-mail, status, perfil e último acesso;
-- indicação da conta ML herdada, por exemplo `TODOVINOBR`;
-- busca global encontrando a Todovino também quando pesquisar por `wilson.longo@interfood.com.br`.
-
-### 3. Criar gerenciamento global de colaboradores no Admin
-
-Dentro da linha/detalhe da empresa principal, o admin poderá:
-
-- inserir colaborador;
-- editar nome/e-mail/perfil;
-- reenviar convite;
-- desativar/reativar;
-- excluir/remover vínculo;
-- ver a conta ML principal que o colaborador herdará.
-
-Isso vai reaproveitar a lógica já existente em **Configurações > Colaboradores**, mas com escopo administrativo e agrupado por empresa.
-
-### 4. Corrigir seleção da conta ativa no login do colaborador
-
-Vou ajustar o contexto de conta ativa para esta prioridade:
-
-1. Se o usuário é colaborador ativo de uma empresa, usar obrigatoriamente a conta ML principal dessa empresa.
-2. Ignorar `localStorage.active_account_id` e `user_context.active_marketplace_account_id` quando apontarem para conta pessoal fora da empresa ativa.
-3. Persistir novamente `active_company_id`, `active_workspace_id` e `active_marketplace_account_id` corretos.
-4. Esconder/bloquear troca para conta pessoal enquanto o usuário estiver no workspace da empresa convidante.
-
-Isso resolve o Wilson continuar vendo `WILSONLONGO16` mesmo já estando vinculado à Todovino.
-
-### 5. Fechar a regra de herança no backend
-
-Vou reforçar a função segura de contas acessíveis para retornar, para colaborador:
-
-- a conta ML titular da empresa ativa;
-- metadados seguros da conta;
-- sem tokens no navegador;
-- marcação clara de conta herdada.
-
-Também vou criar/ajustar uma função de reparo de contexto para ser usada no login e no aceite de convite.
-
-### 6. Corrigir convite/aceite de colaborador
-
-No fluxo de convite:
-
-- se o e-mail já existe, ele não vira cliente novo;
-- ele é agregado à empresa convidante;
-- `company_users`, `workspace_members`, `collaborators`, `user_context` e `user_preferences` ficam sincronizados;
-- o perfil de colaboração é aplicado na empresa correta;
-- a conta ML ativa passa a ser a conta titular da empresa.
-
-### 7. Corrigir Wilson imediatamente
-
-Depois da estrutura, vou aplicar o reparo de dados:
-
-- Wilson continua existindo como usuário autenticado;
-- Wilson deixa de ser tratado como cliente principal na listagem admin;
-- contexto ativo dele passa a apontar para a Todovino;
-- conta ML ativa dele passa a ser `TODOVINOBR`;
-- a conta pessoal `WILSONLONGO16` não será apagada, mas não será usada no contexto da Todovino.
-
-### 8. Validação
-
-Vou validar com consultas e comportamento esperado:
-
-- pesquisar `Todovino` mostra Todovino com Wilson como colaborador;
-- pesquisar `wilson.longo@interfood.com.br` encontra a Todovino, não uma linha solta do Wilson;
-- Wilson herda `TODOVINOBR` ao logar;
-- Wilson não é solicitado a conectar Mercado Livre;
-- Wilson continua limitado pelo perfil Operacional;
-- desativar/excluir colaborador remove o acesso à conta ML herdada;
-- titulares continuam vendo e gerenciando suas próprias conexões normalmente.
-
-## Arquivos/funções que serão alterados
-
-### Backend Lovable Cloud
-
-- `admin_get_clients_overview`: virar visão agrupada por cliente principal/empresa, com colaboradores agregados.
-- `get_accessible_ml_accounts`: reforçar herança por empresa ativa.
-- Nova função de reparo/sincronização de contexto de colaborador.
-- Políticas/funções de autorização para garantir que colaborador acesse só o que o perfil permite.
-
-### Frontend
-
-- `src/hooks/useAdminClients.ts`: novo formato com colaboradores agregados.
-- `src/pages/admin/AdminClientes.tsx`: exibir e gerenciar colaboradores dentro da empresa principal.
-- `src/contexts/ActiveAccountContext.tsx`: colaborador prioriza conta ML da empresa, nunca a pessoal.
-- `src/components/layout/AccountSwitcher.tsx`: indicar conta herdada e bloquear troca indevida.
-- `src/hooks/useCollaborators.ts`: garantir criação/edição/desativação/exclusão com vínculo de empresa correto.
-- `supabase/functions/collaborator-invite/index.ts`: convite/aceite sincroniza contexto e vínculo com a empresa principal.
+Resultado:
+- some do menu;
+- não gera mais 404 acidental;
+- dados históricos preservados.
 
 ## Resultado esperado
 
-A Todovino passa a ser o cliente principal. Wilson passa a aparecer e funcionar como colaborador da Todovino, usando `TODOVINOBR` com as permissões do perfil dele, sem virar cliente separado e sem exigir conexão própria de Mercado Livre.
+- `/shipping-labels` para de quebrar páginas e passa a relatar falhas por envio quando elas acontecerem.
+- `/label-teste` continua funcionando exatamente como hoje, para você comparar.
+- Sandbox some do menu sem efeito colateral.
+- Sem perda de rota, sem perda de histórico, sem mexer no fluxo do Label Teste.

@@ -2,24 +2,25 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
-import { Settings } from 'lucide-react';
+import { Settings, History } from 'lucide-react';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
-import { useShippingLabels, ShippingOrder, LabelLayout } from '@/hooks/useShippingLabels';
+import { useShippingLabelsV2, usePrintHistoryV2 } from '@/hooks/useShippingLabelsV2';
+import type { ShippingOrder, LabelLayout } from '@/hooks/useShippingLabelsV2';
 import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
 import { ShippingPagination } from '@/components/shipping/ShippingPagination';
-import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
-import { useUserRole } from '@/hooks/useUserRole';
+import { BulkActionsBarV2 } from '@/components/shipping-v2/BulkActionsBarV2';
+import { PrintHistoryV2 } from '@/components/shipping-v2/PrintHistoryV2';
 import { supabase } from '@/integrations/supabase/client';
-
 import { useToast } from '@/hooks/use-toast';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparationReport';
 import { useMlApiAccess } from '@/components/access/TrialExpiredBanner';
 import { TrialExpiredScreen } from '@/components/shipping/TrialExpiredScreen';
 import { useUserAccess } from '@/contexts/UserAccessContext';
-import { computeSelectionCapabilities } from '@/lib/shippingLabelRules';
+import { computeCapabilitiesV2, computeSelectionDiagnostics } from '@/lib/labeltestEligibility';
+import type { LabelTestLayout } from '@/lib/labeltestEligibility';
 import { loadFiltersState } from '@/lib/shippingLabelsSession';
 
 export default function ShippingLabels() {
@@ -27,68 +28,37 @@ export default function ShippingLabels() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    console.log('[MOUNT] ShippingLabelsPage');
-    return () => console.log('[UNMOUNT] ShippingLabelsPage');
-  }, []);
-  
-  // Use global active account from context
   const { activeAccount, sellerId, loading: accountLoading, initialized } = useActiveAccount();
-  
+
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Restore logisticFilter from session
+  const [showHistory, setShowHistory] = useState(false);
+
   const restoredLogistic = useMemo(() => {
     if (!sellerId) return 'all';
     const s = loadFiltersState(sellerId);
     return (s?.logisticFilter as 'all' | 'flex' | 'coleta' | 'full') || 'all';
   }, [sellerId]);
   const [logisticFilter, setLogisticFilter] = useState<'all' | 'flex' | 'coleta' | 'full'>(restoredLogistic);
-  const { isAdmin } = useUserRole();
+
   const { allowed: mlAllowed, loading: mlAccessLoading, isTrialExpired } = useMlApiAccess();
   const { flags } = useUserAccess();
   const companyId = activeAccount?.companyId || null;
 
-  // Shipping cutoff
-
-
   const {
-    orders,
-    isLoading,
-    statusFilter,
-    setStatusFilter,
-    periodFilter,
-    setPeriodFilter,
-    customDateRange,
-    setDateRange,
-    currentPage,
-    setCurrentPage,
-    totalCount,
-    totalPages,
-    pageSize,
-    selectedIds,
-    toggleSelection,
-    selectAll,
-    clearSelection,
-    isSyncing,
-    syncPhase,
-    syncProgress,
-    sync,
-    lastSyncAt,
-    statusCounts,
-    generateLabels,
-    isGenerating,
-    generationProgress,
-    searchQuery,
-    setSearchQuery,
-    sortField,
-    sortDirection,
-    toggleSort,
+    orders, isLoading, statusFilter, setStatusFilter,
+    periodFilter, setPeriodFilter, customDateRange, setDateRange,
+    currentPage, setCurrentPage, totalCount, totalPages, pageSize,
+    selectedIds, toggleSelection, selectAll, clearSelection,
+    isSyncing, syncPhase, syncProgress, sync, lastSyncAt, statusCounts,
+    generateLabels, isGenerating, generationProgress,
+    isStalled, resumeStalledRecovery, cancelStalledRecovery,
+    searchQuery, setSearchQuery, sortField, sortDirection, toggleSort,
     orderItems,
-  } = useShippingLabels({ sellerId: sellerId || null });
+  } = useShippingLabelsV2({ sellerId: sellerId || null });
 
-  // Check if account is available
+  const { data: printHistory = [], isLoading: historyLoading } = usePrintHistoryV2(sellerId || null);
+
   useEffect(() => {
     if (!accountLoading && initialized && !activeAccount) {
       toast({
@@ -100,7 +70,6 @@ export default function ShippingLabels() {
     }
   }, [accountLoading, initialized, activeAccount, navigate, toast]);
 
-  // Persist logisticFilter and clear selection when it changes
   useEffect(() => {
     clearSelection();
     if (sellerId) {
@@ -113,39 +82,29 @@ export default function ShippingLabels() {
     }
   }, [logisticFilter, clearSelection, sellerId]);
 
-  // Compute filtered orders based on logistic filter
-  const filteredOrders = logisticFilter === 'all' ? orders : orders.filter(o => {
+  const filteredOrders = logisticFilter === 'all' ? orders : orders.filter((o: ShippingOrder) => {
     if (logisticFilter === 'flex') return o.logistic_type === 'self_service';
     if (logisticFilter === 'full') return o.logistic_type === 'fulfillment';
     return o.logistic_type && o.logistic_type !== 'self_service' && o.logistic_type !== 'fulfillment';
   });
 
-  const handleSelectAll = useCallback(() => {
-    selectAll(filteredOrders);
-  }, [selectAll, filteredOrders]);
-
-  const handleViewDetails = (order: ShippingOrder) => {
-    setSelectedOrder(order);
-    setDrawerOpen(true);
+  const handleSelectAll = useCallback(() => { selectAll(filteredOrders); }, [selectAll, filteredOrders]);
+  const handleViewDetails = (order: ShippingOrder) => { setSelectedOrder(order); setDrawerOpen(true); };
+  const handleGenerateLabels = (format: 'pdf' | 'zpl', layout: LabelTestLayout) => {
+    generateLabels({ format, layout: layout as LabelLayout });
   };
-
-  const handleGenerateLabels = (format: 'pdf' | 'zpl', layout: LabelLayout) => {
-    generateLabels({ format, layout });
-  };
-
   const handleReprintLabel = (shipmentId: string, format: 'pdf' | 'zpl', layout: LabelLayout) => {
     generateLabels({ format, layout, shipmentId });
   };
 
-  // Compute capabilities for selected orders using centralized rules
-  const selectedOrders = orders.filter(o => selectedIds.has(o.id));
-  const capabilities = computeSelectionCapabilities(selectedOrders);
+  const selectedOrders = orders.filter((o: ShippingOrder) => selectedIds.has(o.id));
+  const capabilities = computeCapabilitiesV2(selectedOrders);
+  const diagnostics = computeSelectionDiagnostics(selectedOrders);
 
   const handleSeparationReport = useCallback(async (mode: SeparationMode) => {
-    const selected = orders.filter(o => selectedIds.has(o.id));
+    const selected = orders.filter((o: ShippingOrder) => selectedIds.has(o.id));
     if (selected.length === 0) return;
-    
-    // Load logo as base64 via storage SDK to bypass CORS
+
     let logoBase64: string | null = null;
     try {
       if (companyId) {
@@ -156,7 +115,6 @@ export default function ShippingLabels() {
           .maybeSingle();
         const logoUrl = (data as any)?.logo_url || null;
         if (logoUrl) {
-          // Extract storage path from full URL
           const storageMatch = logoUrl.match(/\/storage\/v1\/object\/public\/(.+)/);
           if (storageMatch) {
             const [bucket, ...pathParts] = storageMatch[1].split('/');
@@ -171,7 +129,6 @@ export default function ShippingLabels() {
               });
             }
           } else {
-            // External URL - try direct fetch
             const resp = await fetch(logoUrl);
             if (resp.ok) {
               const blob = await resp.blob();
@@ -186,7 +143,7 @@ export default function ShippingLabels() {
         }
       }
     } catch { /* use default */ }
-    
+
     await exportSeparationReport({
       orders: selected,
       orderItems,
@@ -197,14 +154,20 @@ export default function ShippingLabels() {
   }, [orders, selectedIds, orderItems, companyId, activeAccount]);
 
   const headerContent = (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={() => navigate('/shipping-labels/header-settings')}
-      title="Configurar cabeçalho"
-    >
-      <Settings className="h-5 w-5" />
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button variant="ghost" size="sm" onClick={() => setShowHistory(!showHistory)} className="gap-1.5">
+        <History className="h-4 w-4" />
+        Histórico
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => navigate('/shipping-labels/header-settings')}
+        title="Configurar cabeçalho"
+      >
+        <Settings className="h-5 w-5" />
+      </Button>
+    </div>
   );
 
   if ((!activeAccount && (accountLoading || !initialized)) || (mlAccessLoading && !flags)) {
@@ -217,24 +180,41 @@ export default function ShippingLabels() {
     );
   }
 
-  // Show friendly expired screen instead of loading data that will fail
-  // CRITICAL: Never block if has_active_subscription is true (paid user)
   const hasActiveSub = flags?.has_active_subscription === true;
   if (!mlAllowed && isTrialExpired && !hasActiveSub) {
     return <TrialExpiredScreen title={t('title')} />;
   }
 
   return (
-    <PageContainer 
-      title={t('title')} 
+    <PageContainer
+      title={t('title')}
       subtitle={activeAccount?.nickname || activeAccount?.email || undefined}
       headerContent={headerContent}
     >
-      {/* Main Content */}
       <main className="container mx-auto px-3 py-3 space-y-3">
+        {isStalled && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 p-3 flex items-center justify-between gap-3">
+            <div className="text-sm text-amber-900 dark:text-amber-100">
+              <strong>Verificação pausada.</strong> A geração ainda pode estar em andamento no servidor. Retome a verificação para continuar acompanhando.
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <Button size="sm" variant="default" onClick={resumeStalledRecovery}>
+                Retomar verificação
+              </Button>
+              <Button size="sm" variant="ghost" onClick={cancelStalledRecovery}>
+                Descartar
+              </Button>
+            </div>
+          </div>
+        )}
 
+        {showHistory && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-muted-foreground">Histórico de Geração</h3>
+            <PrintHistoryV2 jobs={printHistory} isLoading={historyLoading} />
+          </div>
+        )}
 
-        {/* Filters */}
         <ShippingFilters
           statusFilter={statusFilter}
           setStatusFilter={setStatusFilter}
@@ -255,7 +235,6 @@ export default function ShippingLabels() {
           setLogisticFilter={setLogisticFilter}
         />
 
-        {/* Table - shows loading only for initial load, not during sync */}
         <ShippingTable
           orders={filteredOrders}
           selectedIds={selectedIds}
@@ -269,7 +248,6 @@ export default function ShippingLabels() {
           orderItems={orderItems}
         />
 
-        {/* Pagination */}
         <ShippingPagination
           currentPage={currentPage}
           totalPages={totalPages}
@@ -279,8 +257,7 @@ export default function ShippingLabels() {
         />
       </main>
 
-      {/* Bulk Actions Bar */}
-      <BulkActionsBar
+      <BulkActionsBarV2
         selectedCount={selectedIds.size}
         onClear={clearSelection}
         onGenerateLabels={handleGenerateLabels}
@@ -288,9 +265,9 @@ export default function ShippingLabels() {
         isGenerating={isGenerating}
         generationProgress={generationProgress}
         capabilities={capabilities}
+        diagnostics={diagnostics}
       />
 
-      {/* Details Drawer */}
       <OrderDetailsDrawer
         order={selectedOrder}
         open={drawerOpen}

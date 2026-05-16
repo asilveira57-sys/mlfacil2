@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { FileText, Printer, X, Loader2, ChevronDown, AlertTriangle } from 'lucide-react';
+import { FileText, Printer, X, Loader2, ChevronDown, AlertTriangle, ClipboardList } from 'lucide-react';
 import { LabelGenerationProgress, GenerationProgress } from '@/components/shipping/LabelGenerationProgress';
 import type { LabelTestLayout, SelectionCapabilitiesV2, SelectionDiagnostics } from '@/lib/labeltestEligibility';
 import {
@@ -21,6 +21,7 @@ interface BulkActionsBarV2Props {
   selectedCount: number;
   onClear: () => void;
   onGenerateLabels: (format: 'pdf' | 'zpl', layout: LabelTestLayout) => void;
+  onSeparationReport?: (mode: 'per_order' | 'accumulated') => void;
   isGenerating: boolean;
   generationProgress: GenerationProgress;
   capabilities: SelectionCapabilitiesV2;
@@ -31,6 +32,7 @@ export function BulkActionsBarV2({
   selectedCount,
   onClear,
   onGenerateLabels,
+  onSeparationReport,
   isGenerating,
   generationProgress,
   capabilities,
@@ -150,6 +152,32 @@ export function BulkActionsBarV2({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {onSeparationReport && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" size="sm" disabled={isGenerating}>
+                    <ClipboardList className="h-4 w-4 mr-2" />
+                    Separação
+                    <ChevronDown className="h-4 w-4 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="bg-popover">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    Relatório de Separação
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onSeparationReport('per_order')}>
+                    <span className="font-medium">Por pedido</span>
+                    <span className="ml-2 text-xs text-muted-foreground">lista por venda</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onSeparationReport('accumulated')}>
+                    <span className="font-medium">Acumulado</span>
+                    <span className="ml-2 text-xs text-muted-foreground">soma quantidades</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
 
             <Button
               variant="ghost"
