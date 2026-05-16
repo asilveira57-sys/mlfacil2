@@ -21315,6 +21315,7 @@ export type Database = {
           trial_status: string
           user_id: string
           whatsapp: string
+          workspace_id: string
         }[]
       }
       admin_reset_onboarding: {
