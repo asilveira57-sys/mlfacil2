@@ -167,7 +167,6 @@ async function processPreapproval(supabase: any, token: string, preapprovalId: s
   console.log("[Webhook] preapproval", pa.id, pa.status, pa.external_reference);
 
   // Status: pending|authorized|paused|cancelled
-  // For authorized preapprovals, charges arrive via subscription_authorized_payment. Just record state.
   if (pa.status === "cancelled" || pa.status === "paused") {
     await supabase
       .from("tenant_entitlements")
@@ -185,6 +184,38 @@ async function processPreapproval(supabase: any, token: string, preapprovalId: s
       success: true,
       message: `Subscription ${pa.status}`,
       meta: { preapproval_id: pa.id, external_reference: pa.external_reference },
+    });
+    return;
+  }
+
+  // Status authorized: fetch authorized_payments and process each (recurring activation)
+  if (pa.status === "authorized") {
+    try {
+      const searchUrl = `${MP_API_URL}/authorized_payments/search?preapproval_id=${encodeURIComponent(preapprovalId)}&status=approved&limit=50`;
+      const apsRes = await fetch(searchUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (apsRes.ok) {
+        const aps = await apsRes.json();
+        const results = aps.results || aps.elements || [];
+        console.log(`[Webhook] preapproval ${preapprovalId} has ${results.length} authorized payments`);
+        for (const ap of results) {
+          if (ap?.id) {
+            await processAuthorizedPayment(supabase, token, String(ap.id));
+          }
+        }
+      } else {
+        console.error("[Webhook] authorized_payments search failed:", await apsRes.text());
+      }
+    } catch (err) {
+      console.error("[Webhook] preapproval authorized fan-out error:", err);
+    }
+
+    await auditLog(supabase, {
+      level: "info",
+      area: "billing",
+      action: "subscription_authorized",
+      success: true,
+      message: `Subscription authorized`,
+      meta: { preapproval_id: pa.id, external_reference: pa.external_reference, payer_email: pa.payer_email },
     });
   }
 }
