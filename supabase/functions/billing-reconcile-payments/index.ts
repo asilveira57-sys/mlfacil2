@@ -33,19 +33,30 @@ Deno.serve(async (req) => {
   const mpToken = Deno.env.get("MERCADOPAGO_ACCESS_TOKEN");
   const supabase = createClient(supabaseUrl, serviceKey);
 
-  // Auth
-  const cronKey = Deno.env.get("CRON_KEY");
+  // Auth: accept (a) x-cron-key matching CRON_KEY env, (b) x-cron-key matching
+  // the value stored in the vault (`billing_cron_key`), (c) bearer === service key,
+  // (d) bearer JWT belonging to an admin user.
+  const cronKeyEnv = Deno.env.get("CRON_KEY");
   const headerCronKey = req.headers.get("x-cron-key");
   const auth = req.headers.get("Authorization");
   const bearer = auth?.startsWith("Bearer ") ? auth.replace("Bearer ", "") : null;
-  let isAuthed = !!(cronKey && headerCronKey === cronKey) || bearer === serviceKey;
+  let isAuthed = !!(cronKeyEnv && headerCronKey === cronKeyEnv) || bearer === serviceKey;
 
-  if (!isAuthed) {
-    if (bearer) {
-      const { data } = await supabase.auth.getUser(bearer);
-      const email = (data?.user?.email || "").toLowerCase();
-      isAuthed = ADMIN_EMAILS.includes(email);
+  if (!isAuthed && headerCronKey) {
+    try {
+      const { data: vaultKey } = await supabase.rpc("get_billing_cron_key");
+      if (vaultKey && typeof vaultKey === "string" && headerCronKey === vaultKey) {
+        isAuthed = true;
+      }
+    } catch (err) {
+      console.error("[reconcile] vault key lookup failed:", err);
     }
+  }
+
+  if (!isAuthed && bearer) {
+    const { data } = await supabase.auth.getUser(bearer);
+    const email = (data?.user?.email || "").toLowerCase();
+    if (ADMIN_EMAILS.includes(email)) isAuthed = true;
   }
 
   if (!isAuthed) {
