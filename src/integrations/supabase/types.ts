@@ -21482,6 +21482,7 @@ export type Database = {
       }
       get_admin_dashboard_stats: { Args: never; Returns: Json }
       get_admin_webhook_logs: { Args: { p_limit?: number }; Returns: Json }
+      get_billing_cron_key: { Args: never; Returns: string }
       get_cancelled_orders_summary: {
         Args: { p_date_from: string; p_date_to: string; p_seller_id: string }
         Returns: Json
