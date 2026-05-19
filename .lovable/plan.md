@@ -1,50 +1,45 @@
-## Diagnóstico
+## Objetivo
 
-O caso da MK Modas não foi lançado porque o pagamento aprovado não chegou à tabela interna de pagamentos nem gerou `tenant_entitlements`.
+No módulo **ZPL Converter** (`/zpl-converter`), oferecer dois botões de geração:
 
-O principal problema encontrado é na rotina automática de reconciliação: ela está agendada a cada 5 minutos, mas está chamando a função com uma credencial antiga/incorreta (`email_queue_service_role_key`). As chamadas recentes retornam `401`, então a rotina aparenta executar, mas não processa nenhum pagamento desde 04/05.
+1. **Converter e Baixar PDF (Padrão)** — mantém a ordem original como vem da API/arquivo, como já funciona hoje.
+2. **Converter e Baixar PDF (Ordem Alfabética)** — ordena as etiquetas pelo nome do destinatário antes de montar o PDF.
 
-Também identifiquei um segundo ponto de fragilidade: pagamentos por assinatura recorrente podem chegar pelo Mercado Pago como `preapproval`/assinatura autorizada, e hoje o fluxo depende muito do formato do webhook recebido. Se o webhook não vier como pagamento direto, o período pode não ser ativado.
+Não há risco para o fluxo atual: a ordenação acontece apenas em memória, após o split das etiquetas (`splitZPLByType`) e antes da renderização. O pipeline (Labelary → jsPDF, modos PDF Padrão/Vetorial, histórico, timer, singleton de job) permanece intacto.
 
-## Plano de correção
+## Mudanças
 
-1. **Corrigir a rotina automática de reconciliação**
-   - Atualizar o agendamento `billing-reconcile-payments-5min` para chamar a função com `x-cron-key` e/ou service key correta.
-   - Remover a dependência da secret de e-mail para cobrança.
-   - Garantir que a chamada retorne sucesso real, não apenas “cron executou”.
+### 1. `src/pages/ZPLConverter.tsx`
+- Adicionar parâmetro `sortMode: 'original' | 'alpha'` em `convertZPLtoPDF`.
+- Após `splitZPLByType(...)`, se `sortMode === 'alpha'`, ordenar o array `labels` usando uma função `extractRecipientName(zpl)` + `localeCompare('pt-BR', { sensitivity: 'base' })`.
+- Substituir o botão único por dois botões lado a lado:
+  - Botão primário: **"Converter e Baixar PDF (Padrão)"**
+  - Botão secundário (variant `outline`): **"Converter e Baixar PDF (Ordem Alfabética)"** com tooltip explicando que ordena pelo nome do destinatário.
+- Ambos respeitam o mesmo estado `isConverting` e o singleton de job.
 
-2. **Fortalecer a reconciliação de pagamentos recorrentes**
-   - Ajustar `billing-reconcile-payments` para buscar e processar pagamentos recentes do Mercado Pago de forma independente do webhook.
-   - Para pagamentos sem `external_reference`, cruzar por:
-     - e-mail do pagador;
-     - valor pago;
-     - checkout recente do usuário;
-     - assinatura/preapproval criada recentemente.
-   - Registrar claramente quando um pagamento ficou sem vínculo, em vez de sumir silenciosamente.
+### 2. Nova função utilitária `extractRecipientName(zplBlock: string): string`
+Pode viver em `src/lib/zplRecipient.ts` (novo arquivo) para manter `ZPLConverter.tsx` limpo.
 
-3. **Corrigir o webhook para assinatura**
-   - Melhorar `mercadopago-webhook` para tratar `preapproval` e pagamentos autorizados de assinatura de forma mais resiliente.
-   - Quando vier um evento de assinatura, buscar o pagamento real e processar via `rpc_process_mp_payment`.
-   - Garantir que o `external_reference` da assinatura seja preservado no processamento.
+Heurística (em ordem de prioridade, primeira que casar vence):
+1. Procurar campo precedido por marcador típico de destinatário: regex tolerante a variações como `^FDDESTINAT[ÁA]RIO[:\s]*([^\^]+)\^FS` ou linha imediatamente após um `^FD` contendo "Destinatário"/"Para"/"Cliente".
+2. Heurística por estrutura: extrair todos os `^FDxxx^FS`, filtrar tokens curtos (≤2 chars), descartar valores que sejam apenas dígitos, códigos de barras (`>;`, `>:` no início — GS1), datas, CEPs (8 dígitos), URLs, e strings com `MERCADO LIVRE`/`SHOPEE`/`FULL`/`REMETENTE`. Pegar o primeiro token alfabético "longo" (>= 6 chars) que tenha pelo menos um espaço (nomes próprios geralmente têm dois ou mais).
+3. Fallback: primeiro `^FD` textual da etiqueta.
+4. Fallback final: string `"\uFFFF"` (joga para o fim do sort, garantindo determinismo).
 
-4. **Registrar o pagamento da MK Modas agora**
-   - Processar manualmente o pagamento `159834233904` da MK Modas.
-   - Lançar o plano `Veterano - veterano-mensal` para o tenant `6bbc333b-47b5-451c-a051-d32c3bfae0ec`.
-   - Ativar o período mensal a partir do pagamento aprovado.
-   - Atualizar o acesso do usuário para `payment_status = active`.
+Normalização para comparação: `.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toUpperCase()`.
 
-5. **Validar depois da correção**
-   - Rodar a reconciliação manualmente e confirmar que ela retorna sucesso.
-   - Conferir que a MK Modas aparece com assinatura ativa.
-   - Conferir que a rotina agendada deixa de retornar `401` nos registros de HTTP.
+### 3. Comportamento preservado
+- O preview (primeira etiqueta) passa a refletir a primeira da ordem escolhida.
+- Histórico de reimpressão continua salvando o `zplCode` original (não reordenado), para que o usuário possa reimprimir e escolher a ordem novamente.
+- Estimativa de tempo, progresso e PDF Vetorial/Padrão funcionam igual.
 
-## Arquivos e banco envolvidos
+## Por que é seguro
 
-- `supabase/functions/billing-reconcile-payments/index.ts`
-- `supabase/functions/mercadopago-webhook/index.ts`
-- Migração para corrigir o agendamento da reconciliação
-- Ajuste direto de dados para lançar o período da MK Modas
+- A reordenação ocorre **antes** de qualquer chamada ao Labelary; cada bloco ZPL (`^XA...^XZ`) continua íntegro.
+- Nenhuma alteração no backend, no singleton de job, ou no fluxo do Ship Label.
+- Se a heurística não encontrar nome em alguma etiqueta, ela vai para o fim do PDF — nada se perde.
 
-## Resultado esperado
+## Arquivos afetados
 
-Depois disso, pagamentos aprovados deixam de depender exclusivamente do webhook: se o Mercado Pago falhar no envio, atrasar ou mandar em outro formato, a reconciliação automática captura o pagamento e lança o período do cliente sem precisar acionar o suporte.
+- `src/lib/zplRecipient.ts` (novo)
+- `src/pages/ZPLConverter.tsx` (UI dos dois botões + parâmetro de ordenação)
