@@ -613,7 +613,36 @@ export function AdminClientes() {
                           )}
                         </TableCell>
                         <TableCell />
-                        <TableCell />
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            disabled={refreshingAccountId === acc.id}
+                            onClick={async () => {
+                              setRefreshingAccountId(acc.id);
+                              try {
+                                const { data, error } = await supabase.functions.invoke('admin-ml-token-refresh', {
+                                  body: { accountId: acc.id },
+                                });
+                                if (error) throw error;
+                                if (data?.success) {
+                                  toast.success(`Token renovado: ${data.nickname || data.seller}`);
+                                } else {
+                                  toast.error(`Falha: ${data?.error_code || data?.error || 'erro desconhecido'}`);
+                                }
+                              } catch (e: any) {
+                                toast.error(`Erro: ${e?.message || 'desconhecido'}`);
+                              } finally {
+                                setRefreshingAccountId(null);
+                              }
+                            }}
+                          >
+                            {refreshingAccountId === acc.id
+                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              : <><RefreshCw className="h-3 w-3 mr-1" />Renovar token</>}
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                     {isExpanded && client.collaborators?.map((collab) => (
