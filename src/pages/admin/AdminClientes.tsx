@@ -83,6 +83,7 @@ export function AdminClientes() {
   })();
   const [search, setSearch] = useState(initialPersisted?.search ?? '');
   const [statusFilter, setStatusFilter] = useState(initialPersisted?.statusFilter ?? 'all');
+  const [refreshingAccountId, setRefreshingAccountId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(initialPersisted?.currentPage ?? 1);
   const PAGE_SIZE = 20;
 
