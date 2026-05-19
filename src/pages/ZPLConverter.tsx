@@ -14,6 +14,7 @@ import jsPDF from "jspdf";
 import { useDropzone } from "react-dropzone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LABEL_TYPES, FULL_PRODUTO_SUBTYPES, splitZPLByType, detectLabelCount } from "@/hooks/useZPLSettings";
+import { sortLabelsAlphabetically } from "@/lib/zplRecipient";
 import { ZPLTimer } from "@/components/ZPLTimer";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useZPLTimeEstimate } from "@/hooks/useZPLTimeEstimate";
@@ -250,7 +251,7 @@ export default function ZPLConverter() {
     return blobs;
   };
 
-  const convertZPLtoPDF = async () => {
+  const convertZPLtoPDF = async (sortMode: 'original' | 'alpha' = 'original') => {
     console.log('[ZPL] convertZPLtoPDF clicked', {
       hasCode: !!zplCode.trim(),
       labelType: selectedLabelType,
@@ -319,7 +320,10 @@ export default function ZPLConverter() {
           const scale = getQualityScale(quality);
           const useVectorPdf = snapOutputFormat === 'pdf_vector';
 
-          const labels = splitZPLByType(snapZplCode, snapLabelType);
+          let labels = splitZPLByType(snapZplCode, snapLabelType);
+          if (sortMode === 'alpha') {
+            labels = sortLabelsAlphabetically(labels);
+          }
 
           if (labels.length === 0) {
             throw new Error("Nenhuma etiqueta encontrada no código ZPL");
@@ -713,14 +717,32 @@ export default function ZPLConverter() {
                   </div>
                 )}
 
-                <Button
-                  onClick={convertZPLtoPDF}
-                  disabled={isConverting || !selectedLabelType}
-                  className="w-full"
-                  size="lg"
-                >
-                  {isConverting ? "Convertendo..." : <><Download className="mr-2 h-4 w-4" /> Converter e Baixar PDF</>}
-                </Button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Button
+                    onClick={() => convertZPLtoPDF('original')}
+                    disabled={isConverting || !selectedLabelType}
+                    size="lg"
+                  >
+                    {isConverting ? "Convertendo..." : <><Download className="mr-2 h-4 w-4" /> Converter e Baixar PDF (Padrão)</>}
+                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          onClick={() => convertZPLtoPDF('alpha')}
+                          disabled={isConverting || !selectedLabelType}
+                          size="lg"
+                          variant="outline"
+                        >
+                          {isConverting ? "Convertendo..." : <><Download className="mr-2 h-4 w-4" /> Converter e Baixar PDF (Ordem Alfabética)</>}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs">
+                        <p className="text-xs">Ordena as etiquetas pelo nome do destinatário (A→Z) antes de gerar o PDF.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
 
                 {jobState.phase === 'ready' && jobState.pendingDownload && (
                   <div className="rounded-md border border-primary/40 bg-primary/5 p-3 flex items-center justify-between gap-3">
