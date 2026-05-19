@@ -320,7 +320,10 @@ export default function ZPLConverter() {
           const scale = getQualityScale(quality);
           const useVectorPdf = snapOutputFormat === 'pdf_vector';
 
-          const labels = splitZPLByType(snapZplCode, snapLabelType);
+          let labels = splitZPLByType(snapZplCode, snapLabelType);
+          if (sortMode === 'alpha') {
+            labels = sortLabelsAlphabetically(labels);
+          }
 
           if (labels.length === 0) {
             throw new Error("Nenhuma etiqueta encontrada no código ZPL");
