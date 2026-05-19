@@ -251,7 +251,7 @@ export default function ZPLConverter() {
     return blobs;
   };
 
-  const convertZPLtoPDF = async () => {
+  const convertZPLtoPDF = async (sortMode: 'original' | 'alpha' = 'original') => {
     console.log('[ZPL] convertZPLtoPDF clicked', {
       hasCode: !!zplCode.trim(),
       labelType: selectedLabelType,
