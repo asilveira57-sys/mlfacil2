@@ -717,14 +717,32 @@ export default function ZPLConverter() {
                   </div>
                 )}
 
-                <Button
-                  onClick={convertZPLtoPDF}
-                  disabled={isConverting || !selectedLabelType}
-                  className="w-full"
-                  size="lg"
-                >
-                  {isConverting ? "Convertendo..." : <><Download className="mr-2 h-4 w-4" /> Converter e Baixar PDF</>}
-                </Button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Button
+                    onClick={() => convertZPLtoPDF('original')}
+                    disabled={isConverting || !selectedLabelType}
+                    size="lg"
+                  >
+                    {isConverting ? "Convertendo..." : <><Download className="mr-2 h-4 w-4" /> Converter e Baixar PDF (Padrão)</>}
+                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          onClick={() => convertZPLtoPDF('alpha')}
+                          disabled={isConverting || !selectedLabelType}
+                          size="lg"
+                          variant="outline"
+                        >
+                          {isConverting ? "Convertendo..." : <><Download className="mr-2 h-4 w-4" /> Converter e Baixar PDF (Ordem Alfabética)</>}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs">
+                        <p className="text-xs">Ordena as etiquetas pelo nome do destinatário (A→Z) antes de gerar o PDF.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
 
                 {jobState.phase === 'ready' && jobState.pendingDownload && (
                   <div className="rounded-md border border-primary/40 bg-primary/5 p-3 flex items-center justify-between gap-3">
