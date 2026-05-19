@@ -14,6 +14,7 @@ import jsPDF from "jspdf";
 import { useDropzone } from "react-dropzone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LABEL_TYPES, FULL_PRODUTO_SUBTYPES, splitZPLByType, detectLabelCount } from "@/hooks/useZPLSettings";
+import { sortLabelsAlphabetically } from "@/lib/zplRecipient";
 import { ZPLTimer } from "@/components/ZPLTimer";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useZPLTimeEstimate } from "@/hooks/useZPLTimeEstimate";
