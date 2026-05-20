@@ -263,9 +263,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
       const isUsable = (a: ActiveAccount) => a.status === 'connected' || a.status === 'attention';
 
-      const inheritedForActiveCompany = activeCompanyId
-        ? loadedAccounts.filter(a => a.isInherited && a.companyId === activeCompanyId && isUsable(a))
-        : [];
+      const inheritedForActiveCompany = loadedAccounts.filter(a => a.isInherited && isUsable(a));
 
       // 1) Collaborator path: company inherited account is authoritative.
       // Ignore persisted/localStorage personal accounts while inside the invited company.
@@ -337,8 +335,8 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    const inheritedScope = accountsRef.current.find(a => a.isInherited && a.companyId === activeAccount?.companyId);
-    if (inheritedScope && (!account.isInherited || account.companyId !== inheritedScope.companyId)) {
+    const inheritedScope = accountsRef.current.find(a => a.isInherited);
+    if (inheritedScope && !account.isInherited) {
       toast.error('Colaboradores usam a conta Mercado Livre da empresa principal.');
       return false;
     }
