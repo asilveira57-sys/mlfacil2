@@ -62,6 +62,14 @@ const PrimeiroAcesso = () => {
   const { registerEvent } = useOnboardingEvents();
   const { createSnapshot, logJourneyEvent } = useJourneySnapshot();
 
+  // Collaborators never go through first-access onboarding — bounce them home.
+  const { isCollaborator, isLoading: collabLoading } = useCollaboratorAccess();
+  useEffect(() => {
+    if (!collabLoading && isCollaborator) {
+      navigate("/", { replace: true });
+    }
+  }, [collabLoading, isCollaborator, navigate]);
+
   const [state, setState] = useState<OnboardingState>(loadState);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
