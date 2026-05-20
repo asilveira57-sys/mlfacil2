@@ -84,6 +84,8 @@ export function AccountSwitcher() {
   }
 
   if (accounts.length === 0) {
+    // Collaborators cannot connect ML accounts — they inherit from the titular.
+    if (isCollaborator) return null;
     return (
       <Button 
         variant="outline" 
