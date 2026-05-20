@@ -1,5 +1,70 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import * as React from "npm:react@18.3.1";
+import { renderAsync } from "npm:@react-email/components@0.0.22";
+import { InviteEmail } from "../_shared/email-templates/invite.tsx";
+
+const SITE_NAME = "MKTP Fácil";
+const SENDER_DOMAIN = "notify.notifica.mktpfacil.com";
+const FROM_DOMAIN = "notifica.mktpfacil.com";
+
+async function enqueueInviteEmail(
+  admin: ReturnType<typeof createClient>,
+  recipient: string,
+  actionLink: string,
+) {
+  const html = await renderAsync(
+    React.createElement(InviteEmail, {
+      siteName: SITE_NAME,
+      siteUrl: `https://${FROM_DOMAIN}`,
+      confirmationUrl: actionLink,
+    }),
+  );
+  const text = await renderAsync(
+    React.createElement(InviteEmail, {
+      siteName: SITE_NAME,
+      siteUrl: `https://${FROM_DOMAIN}`,
+      confirmationUrl: actionLink,
+    }),
+    { plainText: true },
+  );
+
+  const messageId = crypto.randomUUID();
+  await admin.from("email_send_log").insert({
+    message_id: messageId,
+    template_name: "invite",
+    recipient_email: recipient,
+    status: "pending",
+  });
+
+  const { error } = await admin.rpc("enqueue_email", {
+    queue_name: "auth_emails",
+    payload: {
+      run_id: crypto.randomUUID(),
+      message_id: messageId,
+      to: recipient,
+      from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
+      sender_domain: SENDER_DOMAIN,
+      subject: "Você foi convidado",
+      html,
+      text,
+      purpose: "transactional",
+      label: "invite",
+      queued_at: new Date().toISOString(),
+    },
+  });
+
+  if (error) {
+    await admin.from("email_send_log").insert({
+      message_id: messageId,
+      template_name: "invite",
+      recipient_email: recipient,
+      status: "failed",
+      error_message: `enqueue_email failed: ${error.message}`,
+    });
+    throw new Error(`Falha ao enfileirar email: ${error.message}`);
+  }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
