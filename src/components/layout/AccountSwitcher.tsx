@@ -35,6 +35,7 @@ export function AccountSwitcher() {
     setActiveAccount,
     refreshAccounts,
   } = useActiveAccount();
+  const { isCollaborator } = useCollaboratorAccess();
   
   const [switching, setSwitching] = useState(false);
   const [syncing, setSyncing] = useState(false);
