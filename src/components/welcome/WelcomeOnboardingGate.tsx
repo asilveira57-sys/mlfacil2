@@ -5,6 +5,7 @@ import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useCurrentUserId } from '@/hooks/useCurrentUserId';
 import { useActiveOnboardingFlow } from '@/hooks/useWelcomeOnboarding';
 import { useUserAccess } from '@/contexts/UserAccessContext';
+import { useCollaboratorAccess } from '@/hooks/useCollaboratorAccess';
 import { WelcomeOnboardingModal } from './WelcomeOnboardingModal';
 import { supabase } from '@/integrations/supabase/client';
 
