@@ -60,7 +60,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     ? "checking_session"
     : !hasSession
       ? "redirect_auth"
-      : requiresOnboarding && !isBypassRoute
+      : requiresOnboarding && !isBypassRoute && !isCollaborator
         ? "redirect_onboarding"
         : "render_children";
 
