@@ -85,7 +85,8 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   // Onboarding still pending — redirect to /primeiro-acesso unless already there
-  if (requiresOnboarding && !isBypassRoute) {
+  // Collaborators are exempt: they inherit the titular's onboarding state.
+  if (requiresOnboarding && !isBypassRoute && !isCollaborator) {
     console.info("[ProtectedRoute] Onboarding pending, redirecting to /primeiro-acesso from:", location.pathname);
     return <Navigate to="/primeiro-acesso" replace />;
   }
