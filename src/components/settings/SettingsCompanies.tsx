@@ -68,6 +68,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { CompanyLogoSection } from "./CompanyLogoSection";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { useCollaboratorAccess as useCollaboratorAccessHook } from "@/hooks/useCollaboratorAccess";
+import { Info } from "lucide-react";
 
 interface MarketplaceAccount {
   id: string;
