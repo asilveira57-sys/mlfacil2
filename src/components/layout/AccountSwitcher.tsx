@@ -173,15 +173,18 @@ export function AccountSwitcher() {
           </DropdownMenuItem>
         ))}
         
-        <DropdownMenuSeparator />
-        
-        <DropdownMenuItem 
-          onClick={() => navigate('/settings')}
-          className="gap-2"
-        >
-          <Settings className="h-4 w-4" />
-          Gerenciar Contas
-        </DropdownMenuItem>
+        {!isCollaborator && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem 
+              onClick={() => navigate('/settings')}
+              className="gap-2"
+            >
+              <Settings className="h-4 w-4" />
+              Gerenciar Contas
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
