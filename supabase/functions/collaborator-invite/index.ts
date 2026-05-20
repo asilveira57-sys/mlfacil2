@@ -12,6 +12,7 @@ async function enqueueInviteEmail(
   admin: ReturnType<typeof createClient>,
   recipient: string,
   actionLink: string,
+  idempotencyKey: string,
 ) {
   const html = await renderAsync(
     React.createElement(InviteEmail, {
@@ -40,7 +41,6 @@ async function enqueueInviteEmail(
   const { error } = await admin.rpc("enqueue_email", {
     queue_name: "auth_emails",
     payload: {
-      run_id: crypto.randomUUID(),
       message_id: messageId,
       to: recipient,
       from: `${SITE_NAME} <noreply@${FROM_DOMAIN}>`,
@@ -50,6 +50,7 @@ async function enqueueInviteEmail(
       text,
       purpose: "transactional",
       label: "invite",
+      idempotency_key: idempotencyKey,
       queued_at: new Date().toISOString(),
     },
   });
@@ -202,6 +203,7 @@ serve(async (req) => {
         supabase,
         collab.email,
         linkData.properties.action_link,
+        `collaborator-invite-${collab.id}-${Date.now()}`,
       );
       emailDispatched = true;
       log("invite email enqueued for existing user", { email: collab.email });
