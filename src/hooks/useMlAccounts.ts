@@ -10,8 +10,8 @@ export interface MlAccount {
   email: string | null;
   is_active: boolean;
   is_connected: boolean;
-  access_token: string;
-  refresh_token: string;
+  access_token?: string;
+  refresh_token?: string;
   token_expires_at: string;
   connection_status?: string;
   is_inherited?: boolean;
