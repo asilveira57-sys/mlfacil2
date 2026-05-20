@@ -5,6 +5,7 @@ import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useCurrentUserId } from '@/hooks/useCurrentUserId';
 import { useActiveOnboardingFlow } from '@/hooks/useWelcomeOnboarding';
 import { useUserAccess } from '@/contexts/UserAccessContext';
+import { useCollaboratorAccess } from '@/hooks/useCollaboratorAccess';
 import { WelcomeOnboardingModal } from './WelcomeOnboardingModal';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -43,6 +44,7 @@ export function WelcomeOnboardingGate() {
   const userId = useCurrentUserId();
   const { activeAccount } = useActiveAccount();
   const { requiresOnboarding, loading: accessLoading } = useUserAccess();
+  const { isCollaborator } = useCollaboratorAccess();
   const [dismissed, setDismissed] = useState(false);
 
   // Block Welcome Cards for users who completed /primeiro-acesso onboarding
@@ -52,9 +54,10 @@ export function WelcomeOnboardingGate() {
   const sellerId = activeAccount?.sellerId ?? null;
 
   // Fallback: if no companyId from active account, fetch user's primary company
+  // Skip entirely for collaborators — they don't have their own company.
   const { data: fallbackCompanyId } = useUserPrimaryCompany(
     userId,
-    !!accountCompanyId // skip if we already have it
+    isCollaborator || !!accountCompanyId
   );
 
   const companyId = accountCompanyId || fallbackCompanyId || null;
@@ -66,9 +69,12 @@ export function WelcomeOnboardingGate() {
     EXCLUDED_PREFIXES.some((p) => location.pathname.startsWith(p));
 
   const { data: flowData, isLoading } = useActiveOnboardingFlow(
-    isExcluded ? null : userId,
-    isExcluded ? null : companyId
+    isExcluded || isCollaborator ? null : userId,
+    isExcluded || isCollaborator ? null : companyId
   );
+
+  // Collaborators never see the welcome flow — it belongs to the titular.
+  if (isCollaborator) return null;
 
   if (isExcluded || onboardingCompleted || isLoading || !flowData || dismissed || !userId || !companyId) {
     return null;

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Settings, LucideIcon, LogOut } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -7,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useConfigMenu } from "@/hooks/useConfigMenu";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SettingsMenuEditor } from "@/components/settings/SettingsMenuEditor";
 import * as LucideIcons from "lucide-react";
@@ -84,6 +86,7 @@ export function SettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { menuItems, isLoading, error } = useConfigMenu();
   const { isAdmin } = useUserRole();
+  const { isCollaborator } = useCollaboratorAccess();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -102,11 +105,35 @@ export function SettingsLayout() {
   // Use DB items (flat, already sorted with mensagem-do-dia last)
   // Fallback only on actual error
   const useFallback = !isLoading && menuItems.length === 0;
-  const tabItems = useFallback
+  const allTabItems = useFallback
     ? FALLBACK_ITEMS.map(f => ({ id: f.slug, slug: f.slug, name: f.name, icon: f.icon }))
     : menuItems.map(i => ({ id: i.id, slug: i.slug, name: i.name, icon: i.icon }));
 
-  const activeSlug = searchParams.get("section") || tabItems[0]?.slug || "perfil";
+  // Collaborators cannot manage companies, ML accounts, collaborators,
+  // access profiles, plan/billing or daily message — those belong to the titular.
+  const HIDDEN_FOR_COLLAB = new Set([
+    "empresas-contas",
+    "colaboradores",
+    "perfis-acesso",
+    "plano",
+    "faturamento",
+    "mensagem-do-dia",
+  ]);
+  const tabItems = isCollaborator
+    ? allTabItems.filter(i => !HIDDEN_FOR_COLLAB.has(i.slug))
+    : allTabItems;
+
+  const requestedSlug = searchParams.get("section");
+  const activeSlug = requestedSlug && tabItems.some(i => i.slug === requestedSlug)
+    ? requestedSlug
+    : tabItems[0]?.slug || "perfil";
+
+  // If a collaborator landed on a hidden section via URL, send them to the first visible tab.
+  useEffect(() => {
+    if (isCollaborator && requestedSlug && !tabItems.some(i => i.slug === requestedSlug) && tabItems.length > 0) {
+      setSearchParams({ section: tabItems[0].slug }, { replace: true });
+    }
+  }, [isCollaborator, requestedSlug, tabItems, setSearchParams]);
 
   const setActiveSlug = (slug: string) => {
     setSearchParams({ section: slug }, { replace: true });

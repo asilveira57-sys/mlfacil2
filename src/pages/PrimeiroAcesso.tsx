@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserAccess } from "@/contexts/UserAccessContext";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import { useOnboardingEvents } from "@/hooks/useOnboardingEvents";
 import { useJourneySnapshot } from "@/hooks/useJourneySnapshot";
 import {
@@ -61,6 +62,14 @@ const PrimeiroAcesso = () => {
   const { loading: accessLoading, isAuthenticated, requiresOnboarding, updateOnboarding, selectPlan, refetch } = useUserAccess();
   const { registerEvent } = useOnboardingEvents();
   const { createSnapshot, logJourneyEvent } = useJourneySnapshot();
+
+  // Collaborators never go through first-access onboarding — bounce them home.
+  const { isCollaborator, isLoading: collabLoading } = useCollaboratorAccess();
+  useEffect(() => {
+    if (!collabLoading && isCollaborator) {
+      navigate("/", { replace: true });
+    }
+  }, [collabLoading, isCollaborator, navigate]);
 
   const [state, setState] = useState<OnboardingState>(loadState);
   const [loading, setLoading] = useState(true);

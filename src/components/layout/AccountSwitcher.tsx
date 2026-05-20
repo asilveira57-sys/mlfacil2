@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useActiveAccount, ActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useCollaboratorAccess } from '@/hooks/useCollaboratorAccess';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -34,6 +35,7 @@ export function AccountSwitcher() {
     setActiveAccount,
     refreshAccounts,
   } = useActiveAccount();
+  const { isCollaborator } = useCollaboratorAccess();
   
   const [switching, setSwitching] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -82,6 +84,8 @@ export function AccountSwitcher() {
   }
 
   if (accounts.length === 0) {
+    // Collaborators cannot connect ML accounts — they inherit from the titular.
+    if (isCollaborator) return null;
     return (
       <Button 
         variant="outline" 
@@ -169,15 +173,18 @@ export function AccountSwitcher() {
           </DropdownMenuItem>
         ))}
         
-        <DropdownMenuSeparator />
-        
-        <DropdownMenuItem 
-          onClick={() => navigate('/settings')}
-          className="gap-2"
-        >
-          <Settings className="h-4 w-4" />
-          Gerenciar Contas
-        </DropdownMenuItem>
+        {!isCollaborator && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem 
+              onClick={() => navigate('/settings')}
+              className="gap-2"
+            >
+              <Settings className="h-4 w-4" />
+              Gerenciar Contas
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

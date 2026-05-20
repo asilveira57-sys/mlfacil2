@@ -68,6 +68,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { CompanyLogoSection } from "./CompanyLogoSection";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { useCollaboratorAccess as useCollaboratorAccessHook } from "@/hooks/useCollaboratorAccess";
+import { Info } from "lucide-react";
 
 interface MarketplaceAccount {
   id: string;
@@ -107,6 +109,7 @@ interface BillingData {
 }
 
 const SettingsCompanies = () => {
+  const { isCollaborator, isLoading: collabLoading } = useCollaboratorAccessHook();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<MarketplaceAccount[]>([]);
   const [erpConfigs, setErpConfigs] = useState<Record<string, ErpConfig>>({});
@@ -739,11 +742,26 @@ const SettingsCompanies = () => {
     );
   };
 
-  if (loading) {
+  if (loading || collabLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
+    );
+  }
+
+  if (isCollaborator) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center space-y-3">
+          <Info className="h-10 w-10 mx-auto text-muted-foreground" />
+          <h3 className="text-base font-medium">Gerenciamento restrito ao titular</h3>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+            Você é colaborador desta empresa. Apenas o titular pode cadastrar empresas e conectar contas do Mercado Livre.
+            A conexão já está disponível para você usar nos módulos liberados pelo seu perfil de acesso.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
