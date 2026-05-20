@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserAccess } from "@/contexts/UserAccessContext";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import { Loader2 } from "lucide-react";
 
 // Routes that should NOT trigger the onboarding redirect
@@ -12,12 +13,16 @@ const ONBOARDING_BYPASS = ["/primeiro-acesso", "/sincronizando", "/reconnecting"
  * - No session → redirect to /auth
  * - Session + onboarding pending → redirect to /primeiro-acesso
  * - Session + onboarding done → render children
+ *
+ * Collaborators never go through /primeiro-acesso — they inherit the
+ * titular's company context and land straight on the dashboard.
  */
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [sessionChecked, setSessionChecked] = useState(false);
   const [hasSession, setHasSession] = useState<boolean | null>(null);
   const { requiresOnboarding, loading: accessLoading } = useUserAccess();
+  const { isCollaborator } = useCollaboratorAccess();
   const lastDecisionRef = useRef<string | null>(null);
 
   useEffect(() => {
