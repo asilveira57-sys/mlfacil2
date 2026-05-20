@@ -74,6 +74,12 @@ export function useUserAccessState(): UseUserAccessStateReturn {
 
       setIsAuthenticated(true);
 
+      // Ensure collaborator context is activated before reading access flags.
+      // This makes inherited ML connection/onboarding state available on first paint.
+      try {
+        await (supabase.rpc as any)('activate_own_collaborator_invites');
+      } catch { /* non-blocking */ }
+
       // Call the combined RPC function
       const { data, error: rpcError } = await supabase.rpc('get_user_status');
 
