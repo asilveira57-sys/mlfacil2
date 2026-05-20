@@ -116,6 +116,22 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     
     const currentAccounts = accountsList || accountsRef.current;
     const account = currentAccounts.find(a => a.id === accountId);
+    let activeCompanyId = account?.companyId || null;
+
+    // Collaborator accounts can inherit a ML token from a different company of
+    // the titular. Never overwrite user_context.active_company_id with the
+    // token's company, otherwise RBAC sees the collaborator outside the invited
+    // company and onboarding/connection gates regress.
+    if (account?.isInherited) {
+      try {
+        const { data: ctx } = await supabase
+          .from('user_context')
+          .select('active_company_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        activeCompanyId = (ctx as { active_company_id?: string | null } | null)?.active_company_id || activeCompanyId;
+      } catch { /* keep fallback */ }
+    }
     
     // Save to localStorage for immediate access (primary fast-path)
     localStorage.setItem('active_account_id', accountId);
@@ -129,7 +145,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         {
           user_id: userId,
           active_marketplace_account_id: accountId,
-          active_company_id: account?.companyId || null,
+          active_company_id: activeCompanyId,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
@@ -208,7 +224,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const { data } = await (supabase.rpc as any)('activate_own_collaborator_invites');
+        const { data } = await supabase.rpc('activate_own_collaborator_invites');
         if ((data ?? 0) > 0) {
           localStorage.removeItem('active_account_id');
           localStorage.removeItem('active_seller_id');
@@ -242,14 +258,12 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
           .select('active_company_id')
           .eq('user_id', user.id)
           .maybeSingle();
-        activeCompanyId = (ctx as any)?.active_company_id ?? null;
+        activeCompanyId = (ctx as { active_company_id?: string | null } | null)?.active_company_id ?? null;
       } catch { /* ignore */ }
 
       const isUsable = (a: ActiveAccount) => a.status === 'connected' || a.status === 'attention';
 
-      const inheritedForActiveCompany = activeCompanyId
-        ? loadedAccounts.filter(a => a.isInherited && a.companyId === activeCompanyId && isUsable(a))
-        : [];
+      const inheritedForActiveCompany = loadedAccounts.filter(a => a.isInherited && isUsable(a));
 
       // 1) Collaborator path: company inherited account is authoritative.
       // Ignore persisted/localStorage personal accounts while inside the invited company.
@@ -262,7 +276,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
       // 3) Any usable account, preferring inherited (company) over personal
       if (!active) {
-        active = loadedAccounts.find(a => (a as any).isInherited && isUsable(a))
+        active = loadedAccounts.find(a => a.isInherited && isUsable(a))
           || loadedAccounts.find(isUsable);
       }
 
@@ -321,8 +335,8 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    const inheritedScope = accountsRef.current.find(a => a.isInherited && a.companyId === activeAccount?.companyId);
-    if (inheritedScope && (!account.isInherited || account.companyId !== inheritedScope.companyId)) {
+    const inheritedScope = accountsRef.current.find(a => a.isInherited);
+    if (inheritedScope && !account.isInherited) {
       toast.error('Colaboradores usam a conta Mercado Livre da empresa principal.');
       return false;
     }

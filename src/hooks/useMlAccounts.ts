@@ -10,10 +10,11 @@ export interface MlAccount {
   email: string | null;
   is_active: boolean;
   is_connected: boolean;
-  access_token: string;
-  refresh_token: string;
+  access_token?: string;
+  refresh_token?: string;
   token_expires_at: string;
   connection_status?: string;
+  is_inherited?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -41,23 +42,20 @@ export function useMlAccounts(options: UseMlAccountsOptions = {}) {
     queryFn: async (): Promise<MlAccount[]> => {
       if (!userId) return [];
       
-      let query = supabase
-        .from('ml_accounts')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      // Only filter by connection_status if explicitly requested
-      // Do NOT filter by is_active - that flag is for "enabled/disabled" not "selected"
-      if (onlyConnected) {
-        query = query.eq('is_connected', true)
-          .in('connection_status', ['connected', 'attention']);
-      }
-
-      const { data, error } = await query;
+      // Use the same source as ActiveAccountContext so collaborators inherit the
+      // titular ML token instead of looking disconnected because ml_accounts.user_id
+      // belongs to the owner.
+      const { data, error } = await supabase.rpc('get_accessible_ml_accounts');
 
       if (error) throw error;
-      return (data || []) as MlAccount[];
+      const accounts = ((data || []) as MlAccount[]).filter((account) => {
+        if (!onlyConnected) return true;
+        return account.is_connected && ['connected', 'attention'].includes(account.connection_status || '');
+      });
+
+      return accounts.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
     },
     enabled: !!userId,
   });

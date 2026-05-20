@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import type { MLConnectionState, MLConnectionInfo } from "@/hooks/useMLConnectionState";
 
 interface MLConnectionCardProps {
@@ -31,8 +32,10 @@ interface MLConnectionCardProps {
 
 export function MLConnectionCard({ connectionInfo }: MLConnectionCardProps) {
   const { state } = connectionInfo;
+  const { isCollaborator } = useCollaboratorAccess();
 
   if (!state) return null;
+  if (isCollaborator && (state === "FIRST_CONNECTION" || state === "RECONNECT_REQUIRED")) return null;
 
   switch (state) {
     case "FIRST_CONNECTION":
@@ -91,11 +94,12 @@ function FirstConnectionCard() {
       } else {
         throw new Error("URL de autorização não recebida");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("[MLConnectionCard] Connect error:", error);
+      const message = error instanceof Error ? error.message : "Não foi possível iniciar a conexão";
       toast({
         title: "Erro ao conectar",
-        description: error?.message || "Não foi possível iniciar a conexão",
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -334,11 +338,12 @@ function ReconnectRequiredCard() {
       } else {
         throw new Error("URL de autorização não recebida");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("[MLConnectionCard] Reconnect error:", error);
+      const message = error instanceof Error ? error.message : "Não foi possível iniciar a reconexão";
       toast({
         title: "Erro ao reconectar",
-        description: error?.message || "Não foi possível iniciar a reconexão",
+        description: message,
         variant: "destructive",
       });
     } finally {

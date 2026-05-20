@@ -234,9 +234,9 @@ export async function getAllAccounts(): Promise<UnifiedMarketplaceAccount[]> {
     return [];
   }
 
-  return ((data as any[]) || [])
-    .map(mapMlAccountToUnified)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // Preserve RPC ordering: for collaborators it prioritizes the inherited
+  // titular account chosen in user_context before any other owner accounts.
+  return ((data as any[]) || []).map(mapMlAccountToUnified);
 }
 
 /**
