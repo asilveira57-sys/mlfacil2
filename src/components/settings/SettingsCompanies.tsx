@@ -742,11 +742,26 @@ const SettingsCompanies = () => {
     );
   };
 
-  if (loading) {
+  if (loading || collabLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
+    );
+  }
+
+  if (isCollaborator) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center space-y-3">
+          <Info className="h-10 w-10 mx-auto text-muted-foreground" />
+          <h3 className="text-base font-medium">Gerenciamento restrito ao titular</h3>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+            Você é colaborador desta empresa. Apenas o titular pode cadastrar empresas e conectar contas do Mercado Livre.
+            A conexão já está disponível para você usar nos módulos liberados pelo seu perfil de acesso.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
