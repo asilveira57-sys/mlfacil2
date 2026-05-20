@@ -107,6 +107,7 @@ interface BillingData {
 }
 
 const SettingsCompanies = () => {
+  const { isCollaborator, isLoading: collabLoading } = useCollaboratorAccessHook();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<MarketplaceAccount[]>([]);
   const [erpConfigs, setErpConfigs] = useState<Record<string, ErpConfig>>({});
