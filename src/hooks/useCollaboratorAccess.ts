@@ -103,19 +103,20 @@ export function useCollaboratorAccess(): CollaboratorAccess {
         activeCompanyId = (ctx as any)?.active_company_id ?? null;
       } catch { /* ignore */ }
 
-      // Check if user is a company_user with a profile, scoped to the active company when known.
-      let companyUserQuery = supabase
+      // Fetch ALL active company_user rows for this user (do NOT pre-filter by active_company_id).
+      // active_company_id may point to a company where the user has no row (e.g. a titular's
+      // secondary company viewed via inheritance). In that case we must still honor the user's
+      // collaborator restrictions instead of falling through to "__all__".
+      const { data: companyUsers } = await supabase
         .from('company_users')
         .select('id, is_owner, profile_id, company_id')
         .eq('user_id', user.id)
         .eq('status', 'active');
 
-      if (activeCompanyId) {
-        companyUserQuery = companyUserQuery.eq('company_id', activeCompanyId);
-      }
-
-      const { data: companyUsers } = await companyUserQuery;
-      // Prefer the row matching active company; otherwise prefer non-owner (collaborator) row.
+      // Priority:
+      // 1. Row matching the active company (explicit context)
+      // 2. ANY non-owner row (collaborator) — most restrictive, ensures permissions are enforced
+      // 3. Any remaining row (owner of own workspace)
       const companyUser =
         companyUsers?.find(c => c.company_id === activeCompanyId)
         || companyUsers?.find(c => !c.is_owner)
