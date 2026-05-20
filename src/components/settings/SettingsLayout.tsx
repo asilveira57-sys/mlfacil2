@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useConfigMenu } from "@/hooks/useConfigMenu";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SettingsMenuEditor } from "@/components/settings/SettingsMenuEditor";
 import * as LucideIcons from "lucide-react";
