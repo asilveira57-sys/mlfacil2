@@ -116,6 +116,22 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     
     const currentAccounts = accountsList || accountsRef.current;
     const account = currentAccounts.find(a => a.id === accountId);
+    let activeCompanyId = account?.companyId || null;
+
+    // Collaborator accounts can inherit a ML token from a different company of
+    // the titular. Never overwrite user_context.active_company_id with the
+    // token's company, otherwise RBAC sees the collaborator outside the invited
+    // company and onboarding/connection gates regress.
+    if (account?.isInherited) {
+      try {
+        const { data: ctx } = await supabase
+          .from('user_context')
+          .select('active_company_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        activeCompanyId = (ctx as any)?.active_company_id || activeCompanyId;
+      } catch { /* keep fallback */ }
+    }
     
     // Save to localStorage for immediate access (primary fast-path)
     localStorage.setItem('active_account_id', accountId);
@@ -129,7 +145,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         {
           user_id: userId,
           active_marketplace_account_id: accountId,
-          active_company_id: account?.companyId || null,
+          active_company_id: activeCompanyId,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
