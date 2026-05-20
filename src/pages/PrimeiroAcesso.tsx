@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserAccess } from "@/contexts/UserAccessContext";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import { useOnboardingEvents } from "@/hooks/useOnboardingEvents";
 import { useJourneySnapshot } from "@/hooks/useJourneySnapshot";
 import {
