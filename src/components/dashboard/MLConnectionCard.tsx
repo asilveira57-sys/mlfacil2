@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import type { MLConnectionState, MLConnectionInfo } from "@/hooks/useMLConnectionState";
 
 interface MLConnectionCardProps {
@@ -31,8 +32,10 @@ interface MLConnectionCardProps {
 
 export function MLConnectionCard({ connectionInfo }: MLConnectionCardProps) {
   const { state } = connectionInfo;
+  const { isCollaborator } = useCollaboratorAccess();
 
   if (!state) return null;
+  if (isCollaborator && (state === "FIRST_CONNECTION" || state === "RECONNECT_REQUIRED")) return null;
 
   switch (state) {
     case "FIRST_CONNECTION":
