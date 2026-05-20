@@ -1,45 +1,98 @@
-## Objetivo
+# Acesso de Colaborador — Correções
 
-No módulo **ZPL Converter** (`/zpl-converter`), oferecer dois botões de geração:
+Cliente de teste: `adeconex2@gmail.com` (colaborador da empresa titular).
 
-1. **Converter e Baixar PDF (Padrão)** — mantém a ordem original como vem da API/arquivo, como já funciona hoje.
-2. **Converter e Baixar PDF (Ordem Alfabética)** — ordena as etiquetas pelo nome do destinatário antes de montar o PDF.
+## O que deve acontecer com um colaborador
 
-Não há risco para o fluxo atual: a ordenação acontece apenas em memória, após o split das etiquetas (`splitZPLByType`) e antes da renderização. O pipeline (Labelary → jsPDF, modos PDF Padrão/Vetorial, histórico, timer, singleton de job) permanece intacto.
+1. **Nunca pode conectar conta Mercado Livre.** Todos os botões/CTAs de "Conectar Conta", "Nova Empresa" e "Conectar conta ML a esta empresa" precisam ficar ocultos no painel do colaborador.
+2. **Herda a conexão (token) da conta titular** automaticamente, sem precisar fazer nada.
+3. **Acesso aos módulos é limitado pelo Perfil de Acesso** atribuído pelo titular (já existe via `profile_permissions`).
+4. **Não passa por Primeiro Acesso nem Boas-Vindas.** Ao entrar, vai direto para o Dashboard com a empresa do titular já ativa.
 
-## Mudanças
+## Diagnóstico atual
 
-### 1. `src/pages/ZPLConverter.tsx`
-- Adicionar parâmetro `sortMode: 'original' | 'alpha'` em `convertZPLtoPDF`.
-- Após `splitZPLByType(...)`, se `sortMode === 'alpha'`, ordenar o array `labels` usando uma função `extractRecipientName(zpl)` + `localeCompare('pt-BR', { sensitivity: 'base' })`.
-- Substituir o botão único por dois botões lado a lado:
-  - Botão primário: **"Converter e Baixar PDF (Padrão)"**
-  - Botão secundário (variant `outline`): **"Converter e Baixar PDF (Ordem Alfabética)"** com tooltip explicando que ordena pelo nome do destinatário.
-- Ambos respeitam o mesmo estado `isConverting` e o singleton de job.
+- `useCollaboratorAccess` já identifica `isCollaborator` corretamente via `company_users` (não-owner) + `user_context.active_company_id`.
+- `ActiveAccountContext` chama `activate_own_collaborator_invites` e prioriza a conta ML herdada (`isInherited`) da empresa ativa — a herança do token já funciona no backend (RPC `get_accessible_ml_accounts`).
+- **Problema 1 (botões de conectar):** os componentes abaixo renderizam CTAs de conexão para qualquer usuário, inclusive colaborador:
+  - `src/components/layout/AccountSwitcher.tsx` (botão "Conectar Conta" no header)
+  - `src/components/settings/SettingsCompanies.tsx` (aba "Empresas e Contas" inteira: "Nova Empresa", "Conectar conta ML a esta empresa")
+  - `src/components/dashboard/MLConnectionCard.tsx`, `MLNotConnectedBanner.tsx`, `DashboardOnboarding.tsx`, `ActivationSpeedometer.tsx` (cards/CTAs no Dashboard)
+  - `src/components/access/AccountConnectionWarning.tsx` (warning genérico em várias páginas)
+  - `src/pages/Promocoes.tsx`, `src/pages/Publicidade.tsx`, `src/pages/ShippingLabels.tsx`, `src/pages/financeiro/FinanceiroIntegracoes.tsx`, `src/pages/LabelHeaderSettings.tsx` (CTAs "Conectar Conta" embutidos)
+  - `src/components/settings/SettingsLayout.tsx` (aba "Empresas / Contas" deve sumir para colaborador)
+- **Problema 2 (Primeiro Acesso e Welcome):**
+  - `ProtectedRoute` redireciona para `/primeiro-acesso` sempre que `requiresOnboarding=true`. Para colaborador isso não deve disparar: o colaborador não tem onboarding próprio; ele entra no contexto da empresa do titular.
+  - `WelcomeOnboardingGate` mostra o modal de boas-vindas com base em `requiresOnboarding` da empresa — para colaborador, deve ser ignorado.
 
-### 2. Nova função utilitária `extractRecipientName(zplBlock: string): string`
-Pode viver em `src/lib/zplRecipient.ts` (novo arquivo) para manter `ZPLConverter.tsx` limpo.
+## Solução
 
-Heurística (em ordem de prioridade, primeira que casar vence):
-1. Procurar campo precedido por marcador típico de destinatário: regex tolerante a variações como `^FDDESTINAT[ÁA]RIO[:\s]*([^\^]+)\^FS` ou linha imediatamente após um `^FD` contendo "Destinatário"/"Para"/"Cliente".
-2. Heurística por estrutura: extrair todos os `^FDxxx^FS`, filtrar tokens curtos (≤2 chars), descartar valores que sejam apenas dígitos, códigos de barras (`>;`, `>:` no início — GS1), datas, CEPs (8 dígitos), URLs, e strings com `MERCADO LIVRE`/`SHOPEE`/`FULL`/`REMETENTE`. Pegar o primeiro token alfabético "longo" (>= 6 chars) que tenha pelo menos um espaço (nomes próprios geralmente têm dois ou mais).
-3. Fallback: primeiro `^FD` textual da etiqueta.
-4. Fallback final: string `"\uFFFF"` (joga para o fim do sort, garantindo determinismo).
+### 1. Hook único de "é colaborador?"
 
-Normalização para comparação: `.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toUpperCase()`.
+Reaproveitar `useCollaboratorAccess().isCollaborator` (já estável). Onde precisar de checagem síncrona em locais sem React, usar um helper `isCollaboratorOfActiveCompany()` baseado em `company_users` + `user_context` (já temos a query).
 
-### 3. Comportamento preservado
-- O preview (primeira etiqueta) passa a refletir a primeira da ordem escolhida.
-- Histórico de reimpressão continua salvando o `zplCode` original (não reordenado), para que o usuário possa reimprimir e escolher a ordem novamente.
-- Estimativa de tempo, progresso e PDF Vetorial/Padrão funcionam igual.
+Opcional: expor um booleano `isCollaborator` em `UserAccessContext` para que `ProtectedRoute`, `WelcomeOnboardingGate` e demais gates consumam sem refetch (uma única fonte).
 
-## Por que é seguro
+### 2. Ocultar todos os CTAs de conexão para colaborador
 
-- A reordenação ocorre **antes** de qualquer chamada ao Labelary; cada bloco ZPL (`^XA...^XZ`) continua íntegro.
-- Nenhuma alteração no backend, no singleton de job, ou no fluxo do Ship Label.
-- Se a heurística não encontrar nome em alguma etiqueta, ela vai para o fim do PDF — nada se perde.
+Adicionar guarda `if (isCollaborator) return null;` (ou esconder o botão específico) em:
 
-## Arquivos afetados
+- `AccountSwitcher.tsx` → esconder botão "Conectar Conta" do header; manter o seletor de conta apenas em leitura.
+- `SettingsLayout.tsx` → filtrar `empresas-contas` do array de abas quando `isCollaborator`. Se a URL cair em `?section=empresas-contas`, redirecionar para `?section=perfil`.
+- `SettingsCompanies.tsx` → bloquear com estado "Você é colaborador desta empresa. Apenas o titular pode gerenciar contas Mercado Livre." (mensagem padronizada, sem botões).
+- `MLConnectionCard.tsx`, `MLNotConnectedBanner.tsx`, `DashboardOnboarding.tsx`, `ActivationSpeedometer.tsx`, `AccountConnectionWarning.tsx` → não renderizar CTA de "Conectar"; mostrar estado informativo "Conexão gerenciada pelo titular".
+- `Promocoes.tsx`, `Publicidade.tsx`, `ShippingLabels.tsx`, `FinanceiroIntegracoes.tsx`, `LabelHeaderSettings.tsx` → substituir botão "Conectar Conta" por mensagem informativa quando colaborador.
 
-- `src/lib/zplRecipient.ts` (novo)
-- `src/pages/ZPLConverter.tsx` (UI dos dois botões + parâmetro de ordenação)
+### 3. Pular Primeiro Acesso e Welcome para colaborador
+
+- `ProtectedRoute.tsx`: se `isCollaborator`, ignorar `requiresOnboarding` e nunca redirecionar para `/primeiro-acesso`. Se ele entrar manualmente em `/primeiro-acesso`, redirecionar para `/` (Dashboard).
+- `WelcomeOnboardingGate.tsx`: retornar `null` quando `isCollaborator`.
+- `PrimeiroAcesso.tsx`: ao montar, se `isCollaborator`, redirecionar imediatamente para `/`.
+
+Esses três pontos garantem o item 4 do pedido.
+
+### 4. Garantia da herança (item 2)
+
+A herança já existe via `get_accessible_ml_accounts` + `ActiveAccountContext`. Vou validar no teste com `adeconex2@gmail.com`:
+
+- `company_users` da Interfood com `user_id = adeconex2`, `is_owner=false`, `status=active`, `profile_id` setado.
+- `user_context.active_company_id` apontando para a empresa da Interfood (o `activate_own_collaborator_invites` faz isso no login).
+- `ml_accounts` da Interfood com `company_id` igual à empresa.
+
+Se algum desses pontos faltar no usuário de teste, ajusto via correção pontual no `activate_own_collaborator_invites` ou seed dos dados, sem alterar lógica geral.
+
+## Detalhes técnicos
+
+- Nenhuma migração de banco é necessária — RPCs e tabelas já suportam herança.
+- Mudanças são todas em frontend (gating de UI + redirects de rota).
+- Mantém compatibilidade com titular: titular continua vendo todos os CTAs.
+- A aba **Perfis de Acesso** (criação de perfis) permanece visível só para titular/admin (já é hoje); a aba **Colaboradores** também.
+
+## Arquivos a editar
+
+```text
+src/contexts/UserAccessContext.tsx              (expor isCollaborator)
+src/components/auth/ProtectedRoute.tsx          (bypass onboarding p/ colab)
+src/components/welcome/WelcomeOnboardingGate.tsx(retornar null p/ colab)
+src/pages/PrimeiroAcesso.tsx                    (redirect p/ colab)
+src/components/layout/AccountSwitcher.tsx       (esconder Conectar Conta)
+src/components/settings/SettingsLayout.tsx      (filtrar aba empresas-contas)
+src/components/settings/SettingsCompanies.tsx   (bloqueio com mensagem)
+src/components/dashboard/MLConnectionCard.tsx
+src/components/dashboard/MLNotConnectedBanner.tsx
+src/components/dashboard/DashboardOnboarding.tsx
+src/components/dashboard/ActivationSpeedometer.tsx
+src/components/access/AccountConnectionWarning.tsx
+src/pages/Promocoes.tsx
+src/pages/Publicidade.tsx
+src/pages/ShippingLabels.tsx
+src/pages/financeiro/FinanceiroIntegracoes.tsx
+src/pages/LabelHeaderSettings.tsx
+```
+
+## Validação com adeconex2@gmail.com
+
+1. Login → cai direto no Dashboard (sem `/primeiro-acesso`, sem modal de boas-vindas).
+2. Header não mostra "Conectar Conta"; seletor de contas mostra apenas a conta ML da Interfood.
+3. `/settings` não exibe aba "Empresas / Contas".
+4. Páginas Promoções, Publicidade, Etiquetas e Financeiro funcionam usando o token herdado da Interfood, sem CTA de conexão.
+5. Módulos respeitam o Perfil de Acesso configurado pelo titular.
