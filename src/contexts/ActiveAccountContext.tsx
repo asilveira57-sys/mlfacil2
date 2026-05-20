@@ -129,7 +129,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
           .select('active_company_id')
           .eq('user_id', userId)
           .maybeSingle();
-        activeCompanyId = (ctx as any)?.active_company_id || activeCompanyId;
+        activeCompanyId = (ctx as { active_company_id?: string | null } | null)?.active_company_id || activeCompanyId;
       } catch { /* keep fallback */ }
     }
     
@@ -224,7 +224,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const { data } = await (supabase.rpc as any)('activate_own_collaborator_invites');
+        const { data } = await supabase.rpc('activate_own_collaborator_invites');
         if ((data ?? 0) > 0) {
           localStorage.removeItem('active_account_id');
           localStorage.removeItem('active_seller_id');
@@ -258,7 +258,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
           .select('active_company_id')
           .eq('user_id', user.id)
           .maybeSingle();
-        activeCompanyId = (ctx as any)?.active_company_id ?? null;
+        activeCompanyId = (ctx as { active_company_id?: string | null } | null)?.active_company_id ?? null;
       } catch { /* ignore */ }
 
       const isUsable = (a: ActiveAccount) => a.status === 'connected' || a.status === 'attention';
@@ -276,7 +276,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
       // 3) Any usable account, preferring inherited (company) over personal
       if (!active) {
-        active = loadedAccounts.find(a => (a as any).isInherited && isUsable(a))
+        active = loadedAccounts.find(a => a.isInherited && isUsable(a))
           || loadedAccounts.find(isUsable);
       }
 
