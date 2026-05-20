@@ -1,6 +1,7 @@
 import { BarChart3, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 
 interface Props {
   onConnect: () => void;
@@ -12,6 +13,10 @@ interface Props {
  * Designed to feel like a helpful suggestion, not an error.
  */
 export function MLNotConnectedBanner({ onConnect }: Props) {
+  const { isCollaborator } = useCollaboratorAccess();
+
+  if (isCollaborator) return null;
+
   return (
     <Card className="border border-border/60 bg-card shadow-sm">
       <CardContent className="p-6 flex flex-col sm:flex-row items-center gap-4">
