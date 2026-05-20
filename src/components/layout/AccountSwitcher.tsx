@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useActiveAccount, ActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useCollaboratorAccess } from '@/hooks/useCollaboratorAccess';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
