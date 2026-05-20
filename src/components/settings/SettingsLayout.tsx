@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Settings, LucideIcon, LogOut } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
