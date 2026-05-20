@@ -77,8 +77,10 @@ export function useUserAccessState(): UseUserAccessStateReturn {
       // Ensure collaborator context is activated before reading access flags.
       // This makes inherited ML connection/onboarding state available on first paint.
       try {
-        await (supabase.rpc as any)('activate_own_collaborator_invites');
-      } catch { /* non-blocking */ }
+        await supabase.rpc('activate_own_collaborator_invites');
+      } catch {
+        void 0;
+      }
 
       // Call the combined RPC function
       const { data, error: rpcError } = await supabase.rpc('get_user_status');
@@ -117,14 +119,14 @@ export function useUserAccessState(): UseUserAccessStateReturn {
         setIsAuthenticated(false);
         initialLoadDoneRef.current = false;
         // Clear persisted React Query cache to prevent stale data on next login
-        try { localStorage.removeItem('mlfacil-rq-cache'); } catch {}
+        try { localStorage.removeItem('mlfacil-rq-cache'); } catch { void 0; }
       } else if (event === 'SIGNED_IN' && !initialLoadDoneRef.current) {
         // Clear stale persisted cache from previous sessions — prevents white screen
         // when logging in on a window that still has old cached user/onboarding data
         try {
           localStorage.removeItem('mlfacil-rq-cache');
           localStorage.removeItem('mktp_onboarding_progress');
-        } catch {}
+        } catch { void 0; }
         initialLoadDoneRef.current = false;
         // Re-fetch after login so ProtectedRoute sees correct requiresOnboarding
         fetchStatus();
@@ -237,6 +239,10 @@ export function useUserAccessState(): UseUserAccessStateReturn {
   const state = status?.state || null;
   const flags = status?.feature_flags || null;
   const selectedPlan = status?.selected_plan || null;
+  const extendedFlags = flags as (FeatureFlags & {
+    billing_complete?: boolean;
+    requires_billing?: boolean;
+  }) | null;
 
   return {
     // Data
@@ -267,7 +273,7 @@ export function useUserAccessState(): UseUserAccessStateReturn {
     mlApiAccessAllowed: flags?.ml_api_access_allowed ?? false,
     mlApiAccessReason: flags?.ml_api_access_reason ?? null,
     mlApiAccessMessage: flags?.ml_api_access_message ?? null,
-    billingComplete: (flags as any)?.billing_complete ?? false,
-    requiresBilling: (flags as any)?.requires_billing ?? false,
+    billingComplete: extendedFlags?.billing_complete ?? false,
+    requiresBilling: extendedFlags?.requires_billing ?? false,
   };
 }
