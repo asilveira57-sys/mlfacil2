@@ -191,11 +191,10 @@ const Auth = () => {
         setCheckingSession(false);
       });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session) {
-        await syncCollaboratorContext();
-        // Always send to /dashboard — ProtectedRoute decides whether to forward
-        // to /primeiro-acesso based on the real onboarding state.
+        // Fire-and-forget; não bloqueia o redirect.
+        syncCollaboratorContext().catch(() => void 0);
         navigate("/dashboard", { replace: true });
       } else if (event === "SIGNED_OUT") {
         setCheckingSession(false);
@@ -242,21 +241,21 @@ const Auth = () => {
           }
         } catch { /* silent */ }
       } else if (signInData?.user) {
-        // Log successful login
-        try {
-          await supabase.from('security_events').insert([{
-            user_id: signInData.user.id,
-            event_type: 'login',
-            user_agent: navigator.userAgent,
-            success: true,
-            metadata: { login_at: new Date().toISOString() },
-          }]);
-        } catch { /* silent */ }
+        // Log successful login (fire-and-forget — não pode bloquear o redirect)
+        supabase.from('security_events').insert([{
+          user_id: signInData.user.id,
+          event_type: 'login',
+          user_agent: navigator.userAgent,
+          success: true,
+          metadata: { login_at: new Date().toISOString() },
+        }]).then(() => void 0, () => void 0);
 
         if (signInData.session) {
-          await syncCollaboratorContext();
-          // Route through /dashboard so ProtectedRoute can read the real
-          // onboarding state and only redirect to /primeiro-acesso when needed.
+          // Fire-and-forget: a RPC de sync de colaborador roda em paralelo
+          // e NÃO bloqueia o redirect. O onAuthStateChange também navega ao
+          // receber SIGNED_IN; isso evita o "Entrando..." travado caso a RPC
+          // esteja lenta ou em concorrência consigo mesma.
+          syncCollaboratorContext().catch(() => void 0);
           navigate("/dashboard", { replace: true });
         }
       }
