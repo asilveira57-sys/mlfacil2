@@ -191,11 +191,10 @@ const Auth = () => {
         setCheckingSession(false);
       });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session) {
-        await syncCollaboratorContext();
-        // Always send to /dashboard — ProtectedRoute decides whether to forward
-        // to /primeiro-acesso based on the real onboarding state.
+        // Fire-and-forget; não bloqueia o redirect.
+        syncCollaboratorContext().catch(() => void 0);
         navigate("/dashboard", { replace: true });
       } else if (event === "SIGNED_OUT") {
         setCheckingSession(false);
