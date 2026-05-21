@@ -1,98 +1,61 @@
-# Acesso de Colaborador — Correções
+# Correção cirúrgica: "pagamento aprovado, plano não ativa"
 
-Cliente de teste: `adeconex2@gmail.com` (colaborador da empresa titular).
+## Diagnóstico (verificado em produção)
 
-## O que deve acontecer com um colaborador
+Verifiquei os 4 clientes dos seus prints e mais os 15 últimos pagamentos aprovados no banco:
 
-1. **Nunca pode conectar conta Mercado Livre.** Todos os botões/CTAs de "Conectar Conta", "Nova Empresa" e "Conectar conta ML a esta empresa" precisam ficar ocultos no painel do colaborador.
-2. **Herda a conexão (token) da conta titular** automaticamente, sem precisar fazer nada.
-3. **Acesso aos módulos é limitado pelo Perfil de Acesso** atribuído pelo titular (já existe via `profile_permissions`).
-4. **Não passa por Primeiro Acesso nem Boas-Vindas.** Ao entrar, vai direto para o Dashboard com a empresa do titular já ativa.
+| Cliente | Pagamento | DB: payment_status | DB: entitlement | Tier |
+|---|---|---|---|---|
+| naturallispinhal | 160191397948 (R$ 669,90) | active | active até 20/ago | 1.501–3.000 |
+| rodrigojarussi | 159478683185 (R$ 149,90) | active | active até 21/jun | 701–1.500 |
+| arpretiautopecas | 160132709894 (R$ 44,90) | active | active até 20/jun | 51–300 |
+| mkmodas | 159834233904 (R$ 44,90) | active | active até 18/jun | Veterano |
 
-## Diagnóstico atual
+**100% dos pagamentos aprovados nos últimos 30 dias têm entitlement ativo no banco.** O webhook do Mercado Pago, o `rpc_process_mp_payment` e a criação de `tenant_entitlements` estão funcionando.
 
-- `useCollaboratorAccess` já identifica `isCollaborator` corretamente via `company_users` (não-owner) + `user_context.active_company_id`.
-- `ActiveAccountContext` chama `activate_own_collaborator_invites` e prioriza a conta ML herdada (`isInherited`) da empresa ativa — a herança do token já funciona no backend (RPC `get_accessible_ml_accounts`).
-- **Problema 1 (botões de conectar):** os componentes abaixo renderizam CTAs de conexão para qualquer usuário, inclusive colaborador:
-  - `src/components/layout/AccountSwitcher.tsx` (botão "Conectar Conta" no header)
-  - `src/components/settings/SettingsCompanies.tsx` (aba "Empresas e Contas" inteira: "Nova Empresa", "Conectar conta ML a esta empresa")
-  - `src/components/dashboard/MLConnectionCard.tsx`, `MLNotConnectedBanner.tsx`, `DashboardOnboarding.tsx`, `ActivationSpeedometer.tsx` (cards/CTAs no Dashboard)
-  - `src/components/access/AccountConnectionWarning.tsx` (warning genérico em várias páginas)
-  - `src/pages/Promocoes.tsx`, `src/pages/Publicidade.tsx`, `src/pages/ShippingLabels.tsx`, `src/pages/financeiro/FinanceiroIntegracoes.tsx`, `src/pages/LabelHeaderSettings.tsx` (CTAs "Conectar Conta" embutidos)
-  - `src/components/settings/SettingsLayout.tsx` (aba "Empresas / Contas" deve sumir para colaborador)
-- **Problema 2 (Primeiro Acesso e Welcome):**
-  - `ProtectedRoute` redireciona para `/primeiro-acesso` sempre que `requiresOnboarding=true`. Para colaborador isso não deve disparar: o colaborador não tem onboarding próprio; ele entra no contexto da empresa do titular.
-  - `WelcomeOnboardingGate` mostra o modal de boas-vindas com base em `requiresOnboarding` da empresa — para colaborador, deve ser ignorado.
+## Causa raiz (frontend, não backend)
 
-## Solução
+O hook `src/hooks/useUserAccessState.ts` só chama `get_user_status` em três momentos:
 
-### 1. Hook único de "é colaborador?"
+1. Primeiro mount
+2. Evento `SIGNED_IN`
+3. Quando alguém chama `refetch()` manualmente
 
-Reaproveitar `useCollaboratorAccess().isCollaborator` (já estável). Onde precisar de checagem síncrona em locais sem React, usar um helper `isCollaboratorOfActiveCompany()` baseado em `company_users` + `user_context` (já temos a query).
+Ele **ignora propositalmente** `TOKEN_REFRESHED` e mudanças de visibilidade para evitar cascata em troca de aba. E o `success_url` do checkout é `${origin}/auth?payment=success` — mas **nem `Auth.tsx` nem nenhum componente** trata esse query param.
 
-Opcional: expor um booleano `isCollaborator` em `UserAccessContext` para que `ProtectedRoute`, `WelcomeOnboardingGate` e demais gates consumam sem refetch (uma única fonte).
+Resultado: o cliente paga no Mercado Pago (que normalmente abre em nova aba/popup), volta para a aba do app que ainda tem o estado React anterior (`requires_payment=true`, `payment_status='trial'/'free'`), e continua vendo o paywall — mesmo com o entitlement já gravado. Ele clica em "pagar" de novo, recebe rejeição (cartão / antifraude por duplicidade), e abre suporte dizendo "todo pagamento dá erro".
 
-### 2. Ocultar todos os CTAs de conexão para colaborador
+Confirma com os próprios dados: o tenant `5cad373a` (naturallispinhal) tem **3 tentativas** de pagamento em sequência no mesmo dia — uma aprovada e duas rejeitadas logo depois (160191086340, 160191408292). Padrão clássico de re-tentativa após paywall não atualizar.
 
-Adicionar guarda `if (isCollaborator) return null;` (ou esconder o botão específico) em:
+## Correção (cirúrgica, somente frontend)
 
-- `AccountSwitcher.tsx` → esconder botão "Conectar Conta" do header; manter o seletor de conta apenas em leitura.
-- `SettingsLayout.tsx` → filtrar `empresas-contas` do array de abas quando `isCollaborator`. Se a URL cair em `?section=empresas-contas`, redirecionar para `?section=perfil`.
-- `SettingsCompanies.tsx` → bloquear com estado "Você é colaborador desta empresa. Apenas o titular pode gerenciar contas Mercado Livre." (mensagem padronizada, sem botões).
-- `MLConnectionCard.tsx`, `MLNotConnectedBanner.tsx`, `DashboardOnboarding.tsx`, `ActivationSpeedometer.tsx`, `AccountConnectionWarning.tsx` → não renderizar CTA de "Conectar"; mostrar estado informativo "Conexão gerenciada pelo titular".
-- `Promocoes.tsx`, `Publicidade.tsx`, `ShippingLabels.tsx`, `FinanceiroIntegracoes.tsx`, `LabelHeaderSettings.tsx` → substituir botão "Conectar Conta" por mensagem informativa quando colaborador.
+### 1) `src/hooks/useUserAccessState.ts`
+- Adicionar listener de `visibilitychange` + `focus` com throttling (≥ 8 s) para refetchar `get_user_status` quando o usuário volta para a aba do app vindo do MP.
+- Adicionar listener do evento custom `billing:payment-success` que dispara `refetch()` imediato (sem throttle).
+- Manter o `TOKEN_REFRESHED` ignorado para não regredir a memória de tab-switch cascade.
 
-### 3. Pular Primeiro Acesso e Welcome para colaborador
+### 2) `src/pages/Auth.tsx`
+- Ler `searchParams.get("payment")`. Se for `success`:
+  - Disparar `window.dispatchEvent(new Event("billing:payment-success"))`.
+  - Mostrar toast "Pagamento confirmado — ativando seu plano…".
+  - Se já há sessão, redirecionar para `/` (a ProtectedRoute leva ao destino certo).
+  - Se não há sessão, manter na tela de login com mensagem clara para fazer login para acessar o plano ativado.
 
-- `ProtectedRoute.tsx`: se `isCollaborator`, ignorar `requiresOnboarding` e nunca redirecionar para `/primeiro-acesso`. Se ele entrar manualmente em `/primeiro-acesso`, redirecionar para `/` (Dashboard).
-- `WelcomeOnboardingGate.tsx`: retornar `null` quando `isCollaborator`.
-- `PrimeiroAcesso.tsx`: ao montar, se `isCollaborator`, redirecionar imediatamente para `/`.
+### 3) `src/pages/Planos.tsx` (linha 95–97)
+- No mesmo `useEffect` onde já trata `payment=success`, disparar também `billing:payment-success` e fazer `navigate("/", { replace: true })` após 1,5 s.
 
-Esses três pontos garantem o item 4 do pedido.
+### 4) (opcional, hardening) `src/hooks/useTierOffers.ts` e `useTenantCheckout.ts`
+- Trocar `success_url` de `/auth?payment=success` para `/?payment=success` quando o usuário **já estiver logado** no momento do checkout. Evita a parada na tela de Auth quando a sessão ainda existe.
 
-### 4. Garantia da herança (item 2)
+## Fora de escopo (não mexer)
 
-A herança já existe via `get_accessible_ml_accounts` + `ActiveAccountContext`. Vou validar no teste com `adeconex2@gmail.com`:
+- Webhook `mercadopago-webhook` — funcionando.
+- `rpc_process_mp_payment`, `rpc_activate_entitlement`, `rpc_renew_entitlement` — funcionando.
+- `get_user_status` / `get_user_feature_flags` — funcionando (self-healing de payment_status já existe).
+- Nenhuma migration de banco.
 
-- `company_users` da Interfood com `user_id = adeconex2`, `is_owner=false`, `status=active`, `profile_id` setado.
-- `user_context.active_company_id` apontando para a empresa da Interfood (o `activate_own_collaborator_invites` faz isso no login).
-- `ml_accounts` da Interfood com `company_id` igual à empresa.
+## Validação após o deploy
 
-Se algum desses pontos faltar no usuário de teste, ajusto via correção pontual no `activate_own_collaborator_invites` ou seed dos dados, sem alterar lógica geral.
-
-## Detalhes técnicos
-
-- Nenhuma migração de banco é necessária — RPCs e tabelas já suportam herança.
-- Mudanças são todas em frontend (gating de UI + redirects de rota).
-- Mantém compatibilidade com titular: titular continua vendo todos os CTAs.
-- A aba **Perfis de Acesso** (criação de perfis) permanece visível só para titular/admin (já é hoje); a aba **Colaboradores** também.
-
-## Arquivos a editar
-
-```text
-src/contexts/UserAccessContext.tsx              (expor isCollaborator)
-src/components/auth/ProtectedRoute.tsx          (bypass onboarding p/ colab)
-src/components/welcome/WelcomeOnboardingGate.tsx(retornar null p/ colab)
-src/pages/PrimeiroAcesso.tsx                    (redirect p/ colab)
-src/components/layout/AccountSwitcher.tsx       (esconder Conectar Conta)
-src/components/settings/SettingsLayout.tsx      (filtrar aba empresas-contas)
-src/components/settings/SettingsCompanies.tsx   (bloqueio com mensagem)
-src/components/dashboard/MLConnectionCard.tsx
-src/components/dashboard/MLNotConnectedBanner.tsx
-src/components/dashboard/DashboardOnboarding.tsx
-src/components/dashboard/ActivationSpeedometer.tsx
-src/components/access/AccountConnectionWarning.tsx
-src/pages/Promocoes.tsx
-src/pages/Publicidade.tsx
-src/pages/ShippingLabels.tsx
-src/pages/financeiro/FinanceiroIntegracoes.tsx
-src/pages/LabelHeaderSettings.tsx
-```
-
-## Validação com adeconex2@gmail.com
-
-1. Login → cai direto no Dashboard (sem `/primeiro-acesso`, sem modal de boas-vindas).
-2. Header não mostra "Conectar Conta"; seletor de contas mostra apenas a conta ML da Interfood.
-3. `/settings` não exibe aba "Empresas / Contas".
-4. Páginas Promoções, Publicidade, Etiquetas e Financeiro funcionam usando o token herdado da Interfood, sem CTA de conexão.
-5. Módulos respeitam o Perfil de Acesso configurado pelo titular.
+1. Logar como `naturallispinhal@gmail.com`, abrir DevTools, confirmar que `get_user_status` retorna `has_active_subscription: true` na primeira chamada (já hoje retorna).
+2. Simular: deixar a aba em segundo plano por 1 minuto, voltar — observar nova chamada a `get_user_status` no Network.
+3. Reproduzir o fluxo completo de checkout num tenant de teste — confirmar que ao retornar de `/auth?payment=success` o usuário cai no dashboard com plano ativo sem F5.
