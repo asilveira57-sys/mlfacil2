@@ -134,7 +134,36 @@ export function useUserAccessState(): UseUserAccessStateReturn {
       // TOKEN_REFRESHED is intentionally ignored to avoid tab-switch cascades
     });
 
-    return () => subscription.unsubscribe();
+    // ─── Auto-refresh on tab focus (post-payment hand-off) ───
+    // When a user returns from the Mercado Pago tab/popup, the entitlement is
+    // already gravado no backend mas o estado React ainda tem o snapshot anterior
+    // ao pagamento, mantendo o paywall na tela. Throttle ≥8s evita a cascata
+    // descrita acima em trocas frequentes de aba.
+    let lastFocusRefetch = 0;
+    const focusRefetch = () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - lastFocusRefetch < 8_000) return;
+      lastFocusRefetch = now;
+      fetchStatus();
+    };
+    window.addEventListener('visibilitychange', focusRefetch);
+    window.addEventListener('focus', focusRefetch);
+
+    // ─── Refetch imediato após pagamento aprovado ───
+    // Disparado por /auth e /planos quando o redirect de sucesso do MP chega.
+    const onPaymentSuccess = () => {
+      lastFocusRefetch = Date.now();
+      fetchStatus();
+    };
+    window.addEventListener('billing:payment-success', onPaymentSuccess);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('visibilitychange', focusRefetch);
+      window.removeEventListener('focus', focusRefetch);
+      window.removeEventListener('billing:payment-success', onPaymentSuccess);
+    };
   }, [fetchStatus]);
 
   useEffect(() => {
