@@ -146,6 +146,22 @@ const Auth = () => {
     let isActive = true;
     let resolved = false;
 
+    // ─── Hand-off pós-pagamento Mercado Pago ───
+    // MP redireciona para /auth?payment=success ao concluir. Disparamos o evento
+    // para forçar refetch do get_user_status no useUserAccessState e levamos o
+    // usuário (se já logado) direto ao dashboard com toast de confirmação.
+    const paymentParam = searchParams.get("payment");
+    if (paymentParam === "success") {
+      try { window.dispatchEvent(new Event("billing:payment-success")); } catch { void 0; }
+      toast.success("Pagamento confirmado!", {
+        description: "Ativando seu plano… isso leva alguns segundos.",
+      });
+    } else if (paymentParam === "failure") {
+      toast.error("Pagamento não concluído", {
+        description: "Houve um problema com seu pagamento. Tente novamente.",
+      });
+    }
+
     const timeoutId = window.setTimeout(() => {
       if (!isActive || resolved) return;
       console.warn("[Auth] Session check timed out after 5s, showing login form");

@@ -94,8 +94,15 @@ const Planos = () => {
   useEffect(() => {
     const paymentStatus = searchParams.get("payment");
     if (paymentStatus === "failure") toast.error("Pagamento não concluído", { description: "Houve um problema com seu pagamento. Tente novamente." });
-    if (paymentStatus === "success") toast.success("Pagamento processado!", { description: "Seu plano foi ativado com sucesso." });
-  }, [searchParams]);
+    if (paymentStatus === "success") {
+      toast.success("Pagamento processado!", { description: "Seu plano foi ativado com sucesso." });
+      // Força o useUserAccessState a refetchar imediatamente — o entitlement já
+      // existe no banco mas o React ainda tem o estado pré-pagamento em cache.
+      try { window.dispatchEvent(new Event("billing:payment-success")); } catch { void 0; }
+      const t = window.setTimeout(() => navigate("/", { replace: true }), 1500);
+      return () => window.clearTimeout(t);
+    }
+  }, [searchParams, navigate]);
 
   const selectedTier = useMemo(() => tiers.find(t => t.code === selectedTierCode) || null, [tiers, selectedTierCode]);
 
