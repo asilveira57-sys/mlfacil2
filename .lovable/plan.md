@@ -1,61 +1,52 @@
-# Correção cirúrgica: "pagamento aprovado, plano não ativa"
+## Diagnóstico — instabilidade real encontrada
 
-## Diagnóstico (verificado em produção)
+Lovable Cloud (banco/auth) está **saudável**. Mas o log do Postgres mostra 3 erros se repetindo nos últimos minutos, e dois deles explicam direto o que o cliente está sentindo:
 
-Verifiquei os 4 clientes dos seus prints e mais os 15 últimos pagamentos aprovados no banco:
+| # | Erro no banco | Frequência | Impacto |
+|---|---|---|---|
+| 1 | `column ml_accounts.seller_id does not exist` | recorrente | **Bloqueia o sync automático de vendas no login** |
+| 2 | `column meli_shipments_cache.date_created does not exist` | mais frequente (~20/min) | Quebra revalidação de envios travados + polui logs |
+| 3 | `invalid input syntax for type uuid: "1411095727"` | menor | Algum lugar passando ML user_id numérico onde se espera UUID |
 
-| Cliente | Pagamento | DB: payment_status | DB: entitlement | Tier |
-|---|---|---|---|---|
-| naturallispinhal | 160191397948 (R$ 669,90) | active | active até 20/ago | 1.501–3.000 |
-| rodrigojarussi | 159478683185 (R$ 149,90) | active | active até 21/jun | 701–1.500 |
-| arpretiautopecas | 160132709894 (R$ 44,90) | active | active até 20/jun | 51–300 |
-| mkmodas | 159834233904 (R$ 44,90) | active | active até 18/jun | Veterano |
+### Causa #1 — por que as vendas não puxam
 
-**100% dos pagamentos aprovados nos últimos 30 dias têm entitlement ativo no banco.** O webhook do Mercado Pago, o `rpc_process_mp_payment` e a criação de `tenant_entitlements` estão funcionando.
+`src/hooks/usePostLoginPrefetch.ts` (linha 109) consulta:
+```ts
+.from('ml_accounts').select('id, seller_id, nickname')
+```
+A coluna correta é **`ml_user_id`** (confirmei no schema). A consulta retorna erro, o array `accounts` fica vazio, e o disparo de `ml-sync-orders` no login **simplesmente nunca acontece** — exatamente o sintoma do cliente.
 
-## Causa raiz (frontend, não backend)
+### Causa #2 — flood de erros no banco
 
-O hook `src/hooks/useUserAccessState.ts` só chama `get_user_status` em três momentos:
+`supabase/functions/shipping-status-sync/index.ts` (linha 283):
+```ts
+.or(`last_sync_at.lt.${stale24hCutoff},date_created.lt.${created5dCutoff}`)
+```
+A tabela `meli_shipments_cache` **não tem `date_created`** (só `last_sync_at`). Cada execução do cron de envios derruba a query.
 
-1. Primeiro mount
-2. Evento `SIGNED_IN`
-3. Quando alguém chama `refetch()` manualmente
+### Sobre o `/ajuste-preco` não carregar
 
-Ele **ignora propositalmente** `TOKEN_REFRESHED` e mudanças de visibilidade para evitar cascata em troca de aba. E o `success_url` do checkout é `${origin}/auth?payment=success` — mas **nem `Auth.tsx` nem nenhum componente** trata esse query param.
+A edge function `ml-price-adjustment` está **correta** (usa `ml_user_id`). O motivo provável de "0 de 0" é que o cliente está com filtro/conta sem retorno OU o token ML expirou. Vou validar isso após o fix #1, porque o pre-fetch quebrado também invalida caches em cascata.
 
-Resultado: o cliente paga no Mercado Pago (que normalmente abre em nova aba/popup), volta para a aba do app que ainda tem o estado React anterior (`requires_payment=true`, `payment_status='trial'/'free'`), e continua vendo o paywall — mesmo com o entitlement já gravado. Ele clica em "pagar" de novo, recebe rejeição (cartão / antifraude por duplicidade), e abre suporte dizendo "todo pagamento dá erro".
+---
 
-Confirma com os próprios dados: o tenant `5cad373a` (naturallispinhal) tem **3 tentativas** de pagamento em sequência no mesmo dia — uma aprovada e duas rejeitadas logo depois (160191086340, 160191408292). Padrão clássico de re-tentativa após paywall não atualizar.
+## Correção cirúrgica (mínima, só o necessário)
 
-## Correção (cirúrgica, somente frontend)
+### Fix 1 — `src/hooks/usePostLoginPrefetch.ts`
+Trocar `seller_id` por `ml_user_id` no `select` e no acesso `account.seller_id` → `account.ml_user_id`. Nenhuma outra alteração de lógica.
 
-### 1) `src/hooks/useUserAccessState.ts`
-- Adicionar listener de `visibilitychange` + `focus` com throttling (≥ 8 s) para refetchar `get_user_status` quando o usuário volta para a aba do app vindo do MP.
-- Adicionar listener do evento custom `billing:payment-success` que dispara `refetch()` imediato (sem throttle).
-- Manter o `TOKEN_REFRESHED` ignorado para não regredir a memória de tab-switch cascade.
+### Fix 2 — `supabase/functions/shipping-status-sync/index.ts`
+Remover o trecho `,date_created.lt.${created5dCutoff}` do `.or(...)` na linha 283, mantendo apenas `last_sync_at.lt.${stale24hCutoff}`. Remover também a variável `created5dCutoff` se ficar órfã.
 
-### 2) `src/pages/Auth.tsx`
-- Ler `searchParams.get("payment")`. Se for `success`:
-  - Disparar `window.dispatchEvent(new Event("billing:payment-success"))`.
-  - Mostrar toast "Pagamento confirmado — ativando seu plano…".
-  - Se já há sessão, redirecionar para `/` (a ProtectedRoute leva ao destino certo).
-  - Se não há sessão, manter na tela de login com mensagem clara para fazer login para acessar o plano ativado.
+### Fix 3 — investigação do UUID "1411095727"
+Após aplicar os dois acima, observar 10 min de logs. Esse erro pode ser efeito colateral do #1 (algum hook caindo num fallback ruim). Se persistir, abro fix dedicado — não vou mexer às cegas agora.
 
-### 3) `src/pages/Planos.tsx` (linha 95–97)
-- No mesmo `useEffect` onde já trata `payment=success`, disparar também `billing:payment-success` e fazer `navigate("/", { replace: true })` após 1,5 s.
+---
 
-### 4) (opcional, hardening) `src/hooks/useTierOffers.ts` e `useTenantCheckout.ts`
-- Trocar `success_url` de `/auth?payment=success` para `/?payment=success` quando o usuário **já estiver logado** no momento do checkout. Evita a parada na tela de Auth quando a sessão ainda existe.
+## Validação
 
-## Fora de escopo (não mexer)
+1. Após deploy, abrir logs Postgres: os 2 erros de coluna devem zerar.
+2. Conferir nos edge logs que `ml-sync-orders` é invocado no próximo login do cliente.
+3. Pedir ao cliente para recarregar `/ajuste-preco` — se ainda vier "0 de 0", checo conexão ML dele (token/conta titular).
 
-- Webhook `mercadopago-webhook` — funcionando.
-- `rpc_process_mp_payment`, `rpc_activate_entitlement`, `rpc_renew_entitlement` — funcionando.
-- `get_user_status` / `get_user_feature_flags` — funcionando (self-healing de payment_status já existe).
-- Nenhuma migration de banco.
-
-## Validação após o deploy
-
-1. Logar como `naturallispinhal@gmail.com`, abrir DevTools, confirmar que `get_user_status` retorna `has_active_subscription: true` na primeira chamada (já hoje retorna).
-2. Simular: deixar a aba em segundo plano por 1 minuto, voltar — observar nova chamada a `get_user_status` no Network.
-3. Reproduzir o fluxo completo de checkout num tenant de teste — confirmar que ao retornar de `/auth?payment=success` o usuário cai no dashboard com plano ativo sem F5.
+Mudanças são pontuais e não tocam regra de negócio nem RLS.
