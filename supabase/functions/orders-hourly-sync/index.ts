@@ -18,8 +18,10 @@ const JOB_NAME = 'orders-hourly-sync';
 const LOCK_TTL_MINUTES = 15;
 const SYNC_HOURS = 48; // Last 48 hours
 const BATCH_SIZE = 50;
-const DELAY_BETWEEN_REQUESTS_MS = 200;
-const DELAY_BETWEEN_ACCOUNTS_MS = 1000;
+const DELAY_BETWEEN_REQUESTS_MS = 250;
+const DELAY_BETWEEN_ACCOUNTS_MS = 1500;
+const MAX_429_RETRIES = 4;
+const MAX_ORDERS_PER_ACCOUNT = 50000; // safety cap, NOT a business limit
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
