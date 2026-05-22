@@ -253,18 +253,33 @@ async function processAccount(
   const accessToken = account.access_token;
   const cutoff = new Date(Date.now() - lookbackHours * 3600000).toISOString();
 
-  // 1. Get recent orders with shipment_id
-  const { data: orders, error: ordError } = await supabase
-    .from("meli_orders_cache")
-    .select("order_id, shipment_id")
-    .eq("seller_id", sellerId)
-    .not("order_status", "in", "(cancelled)")
-    .not("shipment_id", "is", null)
-    .gte("created_at_meli", cutoff)
-    .order("created_at_meli", { ascending: false })
-    .limit(1000);
+  // 1. Get recent orders with shipment_id — paginação completa (sem limite artificial)
+  const orders: { order_id: string; shipment_id: string | null }[] = [];
+  const PAGE = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("meli_orders_cache")
+      .select("order_id, shipment_id")
+      .eq("seller_id", sellerId)
+      .not("order_status", "in", "(cancelled)")
+      .not("shipment_id", "is", null)
+      .gte("created_at_meli", cutoff)
+      .order("created_at_meli", { ascending: false })
+      .range(from, from + PAGE - 1);
 
-  if (ordError || !orders || orders.length === 0) {
+    if (error) {
+      console.error(`[shipping-labels-sync] orders fetch error for ${sellerId}:`, error);
+      stats.errors++;
+      break;
+    }
+    if (!data || data.length === 0) break;
+    orders.push(...(data as any));
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+
+  if (orders.length === 0) {
     stats.skipped++;
     return;
   }
