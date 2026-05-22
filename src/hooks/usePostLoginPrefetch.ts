@@ -106,7 +106,7 @@ async function triggerBackgroundOrderSync() {
     // Get all active ML accounts for this user
     const { data: accounts } = await (supabase as any)
       .from('ml_accounts')
-      .select('id, seller_id, nickname')
+      .select('id, ml_user_id, nickname')
       .eq('user_id', session.user.id)
       .eq('is_active', true);
 
@@ -123,7 +123,7 @@ async function triggerBackgroundOrderSync() {
     const dateTo = formatDate(now, '23:59:59.999');
 
     for (const account of accounts) {
-      const sellerId = account.seller_id;
+      const sellerId = account.ml_user_id;
       if (!sellerId || !canSyncAccount(sellerId)) {
         if (import.meta.env.DEV) {
           console.info(`[Prefetch] Skipping sync for ${account.nickname || sellerId} (cooldown)`);
