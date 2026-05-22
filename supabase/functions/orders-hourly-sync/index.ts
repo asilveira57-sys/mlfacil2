@@ -192,28 +192,59 @@ serve(async (req) => {
               })
               .eq('id', account.id);
           } else {
-            console.log(`[hourly-sync] Token refresh failed for ${account.ml_user_id}, skipping`);
+            console.log(`[hourly-sync] Token refresh failed for ${account.ml_user_id}, marking attention and skipping`);
+            await supabaseAdmin
+              .from('ml_accounts')
+              .update({
+                connection_status: 'attention',
+                last_api_error_code: 'TOKEN_REFRESH_FAILED',
+                last_api_error_at: new Date().toISOString(),
+                consecutive_failures: (account as any).consecutive_failures
+                  ? (account as any).consecutive_failures + 1
+                  : 1,
+              })
+              .eq('id', account.id);
             stats.accounts_failed++;
             continue;
           }
         }
 
-        // Fetch recent orders
+        // Fetch recent orders — full pagination, no artificial limit
         let allOrders: any[] = [];
         let offset = 0;
         let hasMore = true;
+        let totalFromApi = 0;
+        let accountFailed = false;
 
         const baseUrl = `https://api.mercadolibre.com/orders/search?seller=${account.ml_user_id}&sort=date_desc&order.date_created.from=${encodeURIComponent(dateFrom)}&order.date_created.to=${encodeURIComponent(dateTo)}`;
 
-        while (hasMore) {
+        while (hasMore && !accountFailed) {
           const url = `${baseUrl}&offset=${offset}&limit=${BATCH_SIZE}`;
-          
-          const response = await fetch(url, {
-            headers: { 'Authorization': `Bearer ${accessToken}` },
-          });
 
-          if (!response.ok) {
-            if (response.status === 401) {
+          let response: Response | null = null;
+          let attempt429 = 0;
+          let attempt401 = 0;
+
+          // Inner retry loop for 429 / 401
+          while (true) {
+            response = await fetch(url, {
+              headers: { 'Authorization': `Bearer ${accessToken}` },
+            });
+
+            if (response.ok) break;
+
+            // 429 — rate limit. Backoff and retry.
+            if (response.status === 429 && attempt429 < MAX_429_RETRIES) {
+              const waitMs = 2000 * Math.pow(2, attempt429); // 2s, 4s, 8s, 16s
+              console.warn(`[hourly-sync] 429 for ${account.ml_user_id}, waiting ${waitMs}ms (attempt ${attempt429 + 1}/${MAX_429_RETRIES})`);
+              await sleep(waitMs);
+              attempt429++;
+              continue;
+            }
+
+            // 401 — try one token refresh
+            if (response.status === 401 && attempt401 === 0) {
+              attempt401++;
               const refreshResult = await refreshMercadoLibreToken(account.refresh_token);
               if (refreshResult.success && refreshResult.access_token) {
                 accessToken = refreshResult.access_token;
@@ -228,24 +259,36 @@ serve(async (req) => {
                 continue;
               }
             }
-            console.error(`[hourly-sync] ML API error for ${account.ml_user_id}:`, response.status);
+
+            // Give up on this account but keep job alive for others
+            console.error(`[hourly-sync] ML API error for ${account.ml_user_id}: ${response.status} (offset=${offset})`);
+            accountFailed = true;
             break;
           }
 
+          if (accountFailed || !response || !response.ok) break;
+
           const data = await response.json();
           const orders = data.results || [];
+          totalFromApi = data.paging?.total || totalFromApi;
           allOrders = [...allOrders, ...orders];
 
-          if (orders.length < BATCH_SIZE) {
+          if (orders.length < BATCH_SIZE || (totalFromApi > 0 && allOrders.length >= totalFromApi)) {
             hasMore = false;
           } else {
             offset += BATCH_SIZE;
             await sleep(DELAY_BETWEEN_REQUESTS_MS);
           }
 
-          if (allOrders.length >= 1000) {
+          if (allOrders.length >= MAX_ORDERS_PER_ACCOUNT) {
+            console.warn(`[hourly-sync] Safety cap reached for ${account.ml_user_id} (${MAX_ORDERS_PER_ACCOUNT})`);
             hasMore = false;
           }
+        }
+
+        if (accountFailed) {
+          stats.accounts_failed++;
+          continue;
         }
 
         if (allOrders.length === 0) {
