@@ -260,7 +260,7 @@ Deno.serve(async (req) => {
 
     const now = Date.now();
     const stale24hCutoff = new Date(now - 24 * 3600 * 1000).toISOString();
-    const created5dCutoff = new Date(now - 5 * 24 * 3600 * 1000).toISOString();
+    // note: meli_shipments_cache has no date_created column; use last_sync_at as staleness signal
     const shipped7dCutoff = new Date(now - 7 * 24 * 3600 * 1000).toISOString();
 
     for (const account of accounts) {
@@ -280,7 +280,7 @@ Deno.serve(async (req) => {
           .eq("seller_id", account.ml_user_id)
           .eq("shipment_status", "ready_to_ship")
           .in("shipment_substatus", ["printed", "ready_for_pickup"])
-          .or(`last_sync_at.lt.${stale24hCutoff},date_created.lt.${created5dCutoff}`)
+          .lt("last_sync_at", stale24hCutoff)
           .order("last_sync_at", { ascending: true, nullsFirst: true })
           .limit(MAX_STALE_PER_ACCOUNT);
 
