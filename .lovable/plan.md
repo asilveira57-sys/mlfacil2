@@ -1,52 +1,83 @@
-## Diagnóstico — instabilidade real encontrada
+## Análise — onde está indo seu dinheiro no fim de semana
 
-Lovable Cloud (banco/auth) está **saudável**. Mas o log do Postgres mostra 3 erros se repetindo nos últimos minutos, e dois deles explicam direto o que o cliente está sentindo:
+Levantei todos os cron jobs ativos no banco. Os que **rodam sábado/domingo mesmo sem ninguém usar** e consomem invocações + CPU do Cloud:
 
-| # | Erro no banco | Frequência | Impacto |
+| Job | Frequência atual | Roda fim de semana? | Necessário sáb-pm/dom? |
 |---|---|---|---|
-| 1 | `column ml_accounts.seller_id does not exist` | recorrente | **Bloqueia o sync automático de vendas no login** |
-| 2 | `column meli_shipments_cache.date_created does not exist` | mais frequente (~20/min) | Quebra revalidação de envios travados + polui logs |
-| 3 | `invalid input syntax for type uuid: "1411095727"` | menor | Algum lugar passando ML user_id numérico onde se espera UUID |
+| `orders-hourly-sync` | a cada hora (24/7) | sim | **não** — webhook já cobre venda nova |
+| `shipping-status-sync-optimized` | a cada 15 min, 7h-22h | sim | **não** — ninguém imprime etiqueta |
+| `ml-sync-messages-worker` | a cada 15 min, 7h-22h | sim | **não** — ninguém responde |
+| `qa-messages-polling-day` | a cada 12 min, 7h-22h | sim | **não** |
+| `trends-collect-seller-daytime` | a cada hora :15, 7h-22h | sim | **não** crítico |
+| `trends-alerts-engine-daytime` | a cada hora :30, 8h-22h | sim | **não** crítico |
+| `trends-collect-public-6h` | a cada 6h | sim | pode reduzir |
+| `shipping-labels-sync-incremental` | 30/30min seg-sáb | só até sáb | já OK |
+| `radiography-nightly-collection` | 5h diário | sim | manter (roda madrugada, barato e útil) |
+| `billing-reconcile-payments-5min` | a cada 5 min (24/7) | sim | **manter** — integridade financeira |
+| `ml-webhook-ingest` | sob demanda (push do ML) | sim | **manter** — é o que garante "tempo real" |
 
-### Causa #1 — por que as vendas não puxam
-
-`src/hooks/usePostLoginPrefetch.ts` (linha 109) consulta:
-```ts
-.from('ml_accounts').select('id, seller_id, nickname')
-```
-A coluna correta é **`ml_user_id`** (confirmei no schema). A consulta retorna erro, o array `accounts` fica vazio, e o disparo de `ml-sync-orders` no login **simplesmente nunca acontece** — exatamente o sintoma do cliente.
-
-### Causa #2 — flood de erros no banco
-
-`supabase/functions/shipping-status-sync/index.ts` (linha 283):
-```ts
-.or(`last_sync_at.lt.${stale24hCutoff},date_created.lt.${created5dCutoff}`)
-```
-A tabela `meli_shipments_cache` **não tem `date_created`** (só `last_sync_at`). Cada execução do cron de envios derruba a query.
-
-### Sobre o `/ajuste-preco` não carregar
-
-A edge function `ml-price-adjustment` está **correta** (usa `ml_user_id`). O motivo provável de "0 de 0" é que o cliente está com filtro/conta sem retorno OU o token ML expirou. Vou validar isso após o fix #1, porque o pre-fetch quebrado também invalida caches em cascata.
+**Conta rápida do que dá pra cortar** (janela sáb 13h → seg 5h ≈ 40h):
+- Hoje, só os 4 jobs grandes (orders + shipping + messages + qa) disparam **~640 execuções** nessa janela, cada uma percorrendo N contas. É o grosso do seu gasto de fim de semana.
+- Estimativa: dá pra cortar **60–75% do consumo de Cloud no sábado/domingo**, o que bate com seus US$ 5/dia → meta de economia de US$ 25–40/mês.
 
 ---
 
-## Correção cirúrgica (mínima, só o necessário)
+## Proposta — "Modo Fim de Semana"
 
-### Fix 1 — `src/hooks/usePostLoginPrefetch.ts`
-Trocar `seller_id` por `ml_user_id` no `select` e no acesso `account.seller_id` → `account.ml_user_id`. Nenhuma outra alteração de lógica.
+Janela de baixa atividade (horário de Brasília, UTC-3):
+- **Sábado 13:00 → Segunda 05:00**
 
-### Fix 2 — `supabase/functions/shipping-status-sync/index.ts`
-Remover o trecho `,date_created.lt.${created5dCutoff}` do `.or(...)` na linha 283, mantendo apenas `last_sync_at.lt.${stale24hCutoff}`. Remover também a variável `created5dCutoff` se ficar órfã.
+Estratégia em 3 camadas, sem desligar nada que quebre a ferramenta:
 
-### Fix 3 — investigação do UUID "1411095727"
-Após aplicar os dois acima, observar 10 min de logs. Esse erro pode ser efeito colateral do #1 (algum hook caindo num fallback ruim). Se persistir, abro fix dedicado — não vou mexer às cegas agora.
+### Camada 1 — Pausar jobs não essenciais na janela
+Reescrever o `schedule` dos crons abaixo para **não rodar** na janela:
+
+| Job | Schedule novo (UTC) | Efeito |
+|---|---|---|
+| `orders-hourly-sync` | `30 * * * 1-5` + `30 0-15 * * 6` + `30 8-23 * * 1` | roda seg-sex normal, sáb só até 12h BRT, volta seg 5h BRT |
+| `shipping-status-sync-optimized` | `*/15 10-22 * * 1-5` + `*/15 10-15 * * 6` | idem |
+| `ml-sync-messages-worker` | `*/15 10-22 * * 1-5` + `*/15 10-15 * * 6` | idem |
+| `qa-messages-polling-day` | `*/12 10-22 * * 1-5` + `*/12 10-15 * * 6` | idem |
+| `trends-collect-seller-daytime` | `15 10-22 * * 1-5` | desliga sáb/dom inteiro |
+| `trends-alerts-engine-daytime` | `30 11-22 * * 1-5` | idem |
+
+**Rede de segurança:** o `ml-webhook-ingest` continua ativo. Se entrar venda/pergunta no fim de semana, o webhook do ML grava normal — só não fazemos *polling* redundante.
+
+### Camada 2 — "Catch-up" na segunda 05h
+Adicionar **1 execução única** de cada job pausado às 05:00 BRT de segunda (08:00 UTC), garantindo que qualquer coisa que o webhook tenha perdido seja reconciliada antes do cliente entrar.
+- `orders-hourly-sync` com `mode: "weekend_catchup"` e `lookback_hours: 48`.
+- `shipping-status-sync` rodando uma varredura ampla.
+- `ml-sync-messages` puxando últimas 48h.
+
+Custo: ~3 invocações longas, muito mais barato que 160 invocações curtas no fim de semana.
+
+### Camada 3 — Botão de override manual
+Adicionar uma flag no painel admin (`weekend_mode_enabled`, default ON) para você desligar a economia manualmente caso precise rodar algo no domingo. Sem deploy, sem migração extra.
 
 ---
 
-## Validação
+## O que NÃO mexer (intencional)
 
-1. Após deploy, abrir logs Postgres: os 2 erros de coluna devem zerar.
-2. Conferir nos edge logs que `ml-sync-orders` é invocado no próximo login do cliente.
-3. Pedir ao cliente para recarregar `/ajuste-preco` — se ainda vier "0 de 0", checo conexão ML dele (token/conta titular).
+- `billing-reconcile-payments-5min` — integridade de pagamento, mantém 24/7.
+- `ml-webhook-ingest` — push do ML, custo só quando há evento real.
+- `radiography-nightly-collection`, `retrospective-engine-daily`, `seller-periodic-snapshots-daily` — rodam de madrugada (3h–6h), custo baixo, geram relatórios que o cliente vê na segunda.
+- `process-email-queue` (5s) — só dispara HTTP **se houver email na fila** (já tem guard SQL). Sem tráfego = sem custo.
 
-Mudanças são pontuais e não tocam regra de negócio nem RLS.
+---
+
+## Validação que vou fazer depois de aplicar
+
+1. Rodar query no `cron.job` confirmando os 6 schedules novos.
+2. Conferir no `queue_execution_log` e logs Postgres que sábado pós-13h tem volume ~zero.
+3. Comparar consumo Cloud da próxima semana vs. esta.
+4. Se algum cliente reclamar de defasagem na segunda manhã, o catch-up das 5h já cobre.
+
+---
+
+## Detalhes técnicos (resumo)
+
+- Mudanças concentradas em **1 migração SQL** atualizando 6 entradas em `cron.job` via `cron.unschedule` + `cron.schedule` (não posso `UPDATE` direto porque `pg_cron` exige o helper).
+- Adição da flag em `system_settings` (tabela já existe) + leitura opcional no início de cada edge function pausável (`if weekend_mode && is_weekend_window) return early`).
+- Nenhuma alteração em: geração de etiqueta, ajuste de preço, webhooks, billing, autenticação.
+
+Posso seguir com a implementação assim que você aprovar.
