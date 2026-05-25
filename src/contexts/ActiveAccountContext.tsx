@@ -79,9 +79,17 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  // Get persisted active account from user_context or localStorage
+  // Get persisted active account.
+  // PRIORITY: localStorage (per-device/per-browser) > user_context (per-user fallback).
+  // This guarantees that switching accounts on one device/browser never propagates to
+  // another device — multi-user / multi-account workflows stay isolated per session.
+  // The DB row is only consulted when this browser has never made a choice before.
   const getPersistedActiveAccountId = useCallback(async (userId: string): Promise<string | null> => {
-    // Try user_context first
+    // 1) localStorage first — per-browser, never cross-device
+    const local = localStorage.getItem('active_account_id');
+    if (local) return local;
+
+    // 2) Fallback to user_context for first-time sessions on this device
     const { data: context, error } = await supabase
       .from('user_context')
       .select('active_marketplace_account_id')
@@ -93,12 +101,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       console.debug('[CTX] user_context lookup error (ignored)', error.message);
     }
 
-    if (context?.active_marketplace_account_id) {
-      return context.active_marketplace_account_id;
-    }
-
-    // Fallback to localStorage (for compatibility)
-    return localStorage.getItem('active_account_id');
+    return context?.active_marketplace_account_id ?? null;
   }, []);
 
   // Persist active account - uses ref to avoid dependency on accounts state
