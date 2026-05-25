@@ -526,7 +526,8 @@ Deno.serve(async (req) => {
       },
     });
 
-    await markDone(supabase, stats);
+    if (!targetSellerId) await markDone(supabase, stats);
+
 
     return new Response(JSON.stringify({ status: "completed", stats, duration_ms: durationMs }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
