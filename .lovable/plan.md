@@ -1,83 +1,42 @@
-## Análise — onde está indo seu dinheiro no fim de semana
+## Contexto
 
-Levantei todos os cron jobs ativos no banco. Os que **rodam sábado/domingo mesmo sem ninguém usar** e consomem invocações + CPU do Cloud:
+O sistema **já foi desenhado** para que cada usuário tenha sua própria conta ativa: a seleção é persistida em `user_context` filtrada por `user_id`, e o `localStorage` (`active_account_id`, `active_seller_id`) é por navegador. Em teoria, o Rafa (titular) e a Sâmila (colaboradora) — que são `auth.users` diferentes — não deveriam interferir um no outro ao trocar de conta.
 
-| Job | Frequência atual | Roda fim de semana? | Necessário sáb-pm/dom? |
-|---|---|---|---|
-| `orders-hourly-sync` | a cada hora (24/7) | sim | **não** — webhook já cobre venda nova |
-| `shipping-status-sync-optimized` | a cada 15 min, 7h-22h | sim | **não** — ninguém imprime etiqueta |
-| `ml-sync-messages-worker` | a cada 15 min, 7h-22h | sim | **não** — ninguém responde |
-| `qa-messages-polling-day` | a cada 12 min, 7h-22h | sim | **não** |
-| `trends-collect-seller-daytime` | a cada hora :15, 7h-22h | sim | **não** crítico |
-| `trends-alerts-engine-daytime` | a cada hora :30, 8h-22h | sim | **não** crítico |
-| `trends-collect-public-6h` | a cada 6h | sim | pode reduzir |
-| `shipping-labels-sync-incremental` | 30/30min seg-sáb | só até sáb | já OK |
-| `radiography-nightly-collection` | 5h diário | sim | manter (roda madrugada, barato e útil) |
-| `billing-reconcile-payments-5min` | a cada 5 min (24/7) | sim | **manter** — integridade financeira |
-| `ml-webhook-ingest` | sob demanda (push do ML) | sim | **manter** — é o que garante "tempo real" |
+O sintoma relatado (Sâmila alterna no PC dela e muda também no PC do Rafa) indica um vazamento entre sessões. Antes de mudar código, precisamos confirmar **onde** está o vazamento, porque existem 3 hipóteses plausíveis e cada uma exige uma correção diferente.
 
-**Conta rápida do que dá pra cortar** (janela sáb 13h → seg 5h ≈ 40h):
-- Hoje, só os 4 jobs grandes (orders + shipping + messages + qa) disparam **~640 execuções** nessa janela, cada uma percorrendo N contas. É o grosso do seu gasto de fim de semana.
-- Estimativa: dá pra cortar **60–75% do consumo de Cloud no sábado/domingo**, o que bate com seus US$ 5/dia → meta de economia de US$ 25–40/mês.
+## Hipóteses a investigar
 
----
+1. **`ml_accounts.is_active` sendo mutado globalmente.** Embora o `setActiveAccount` no front não escreva nesse campo, alguma edge function ou trigger pode estar marcando `is_active=true` na linha compartilhada (Sâmila e Rafa enxergam as mesmas linhas de `ml_accounts` porque pertencem ao mesmo titular). Se sim, qualquer hook que lê `is_active` passa a refletir a escolha do último que alternou.
+2. **`user_context` compartilhado por engano.** A função `get_accessible_ml_accounts` ou alguma RPC pode estar lendo `active_marketplace_account_id` do **titular** (Rafa) mesmo quando o caller é o colaborador (Sâmila), fazendo a tela da Sâmila "puxar" a escolha do Rafa — e vice-versa.
+3. **Cache/realtime cruzado.** Um canal `postgres_changes` em `ml_accounts` ou `user_context` sem filtro por `user_id` pode estar disparando `invalidateQueries` na sessão errada quando o outro usuário troca.
 
-## Proposta — "Modo Fim de Semana"
+## Plano
 
-Janela de baixa atividade (horário de Brasília, UTC-3):
-- **Sábado 13:00 → Segunda 05:00**
+### Passo 1 — Diagnóstico no banco (somente leitura)
+- Consultar `user_context` das duas contas (Rafa e Sâmila) antes e depois de uma troca para confirmar se cada `user_id` tem sua própria linha intacta.
+- Consultar `ml_accounts` (RAFA_STORE e HOME DIVERSE) e observar se `is_active` muda quando qualquer um dos dois alterna.
+- Listar triggers em `ml_accounts` e `user_context` que possam propagar `is_active`/`active_marketplace_account_id` entre linhas.
+- Inspecionar a função `get_accessible_ml_accounts` e qualquer RPC usada pelo `AccountSwitcher` para confirmar que ela usa `auth.uid()` do caller (e não o `user_id` do titular) ao resolver a conta ativa.
 
-Estratégia em 3 camadas, sem desligar nada que quebre a ferramenta:
+### Passo 2 — Diagnóstico no código
+- Procurar em `src/` e `supabase/functions/` por escritas a `ml_accounts.is_active` que não estejam ligadas explicitamente ao fluxo de conexão/desconexão da conta.
+- Procurar por subscriptions de realtime (`channel(...).on('postgres_changes', ... 'ml_accounts'|'user_context' ...)`) e validar se há filtro `user_id=eq.${auth.uid()}`.
+- Confirmar que `useUserContext`, `useMlAccounts` e `ActiveAccountContext` derivam tudo a partir do `auth.getUser()` do navegador atual.
 
-### Camada 1 — Pausar jobs não essenciais na janela
-Reescrever o `schedule` dos crons abaixo para **não rodar** na janela:
+### Passo 3 — Correções (definidas após o diagnóstico)
+Conforme o resultado do Passo 1/2, aplicar **uma** das correções:
+- **(Hipótese 1)** Remover/condicionar a escrita em `ml_accounts.is_active` no fluxo de troca, ou migrar de vez para `is_active` deprecado — passando a depender só de `user_context.active_marketplace_account_id` (que já é por `user_id`).
+- **(Hipótese 2)** Ajustar a RPC para usar `auth.uid()` ao buscar o contexto ativo, em vez de qualquer `user_id` herdado do titular. Garantir que o filtro de `inheritedForActiveCompany` no `ActiveAccountContext` resolva a empresa com base no `user_context` do colaborador, não do titular.
+- **(Hipótese 3)** Adicionar filtro `user_id=eq.${auth.uid()}` nas subscriptions de realtime ou remover a invalidação global em prol de invalidação por chave.
 
-| Job | Schedule novo (UTC) | Efeito |
-|---|---|---|
-| `orders-hourly-sync` | `30 * * * 1-5` + `30 0-15 * * 6` + `30 8-23 * * 1` | roda seg-sex normal, sáb só até 12h BRT, volta seg 5h BRT |
-| `shipping-status-sync-optimized` | `*/15 10-22 * * 1-5` + `*/15 10-15 * * 6` | idem |
-| `ml-sync-messages-worker` | `*/15 10-22 * * 1-5` + `*/15 10-15 * * 6` | idem |
-| `qa-messages-polling-day` | `*/12 10-22 * * 1-5` + `*/12 10-15 * * 6` | idem |
-| `trends-collect-seller-daytime` | `15 10-22 * * 1-5` | desliga sáb/dom inteiro |
-| `trends-alerts-engine-daytime` | `30 11-22 * * 1-5` | idem |
+### Passo 4 — Validação
+- Simular o cenário: Rafa logado em uma sessão com RAFA_STORE ativa; Sâmila logada em outra sessão alternando entre RAFA_STORE e HOME DIVERSE. Confirmar via console/DB que o `user_context` do Rafa não muda e a tela dele continua estável.
+- Confirmar o inverso (Rafa alterna, Sâmila não é afetada).
 
-**Rede de segurança:** o `ml-webhook-ingest` continua ativo. Se entrar venda/pergunta no fim de semana, o webhook do ML grava normal — só não fazemos *polling* redundante.
+## Detalhes técnicos
+- Arquivos prováveis de toque: `src/contexts/ActiveAccountContext.tsx`, `src/lib/accountUnification.ts`, função SQL `get_accessible_ml_accounts`, e edge functions que escrevem em `ml_accounts`.
+- Nenhuma mudança de schema é esperada **se** a causa for Hipótese 2 ou 3. Para Hipótese 1, possível migração simples de UPDATE removendo a coluna como gatilho de "conta ativa".
+- Sem impacto em RBAC: titular continua dono das contas ML; colaboradora continua herdando apenas as contas da empresa do titular.
 
-### Camada 2 — "Catch-up" na segunda 05h
-Adicionar **1 execução única** de cada job pausado às 05:00 BRT de segunda (08:00 UTC), garantindo que qualquer coisa que o webhook tenha perdido seja reconciliada antes do cliente entrar.
-- `orders-hourly-sync` com `mode: "weekend_catchup"` e `lookback_hours: 48`.
-- `shipping-status-sync` rodando uma varredura ampla.
-- `ml-sync-messages` puxando últimas 48h.
-
-Custo: ~3 invocações longas, muito mais barato que 160 invocações curtas no fim de semana.
-
-### Camada 3 — Botão de override manual
-Adicionar uma flag no painel admin (`weekend_mode_enabled`, default ON) para você desligar a economia manualmente caso precise rodar algo no domingo. Sem deploy, sem migração extra.
-
----
-
-## O que NÃO mexer (intencional)
-
-- `billing-reconcile-payments-5min` — integridade de pagamento, mantém 24/7.
-- `ml-webhook-ingest` — push do ML, custo só quando há evento real.
-- `radiography-nightly-collection`, `retrospective-engine-daily`, `seller-periodic-snapshots-daily` — rodam de madrugada (3h–6h), custo baixo, geram relatórios que o cliente vê na segunda.
-- `process-email-queue` (5s) — só dispara HTTP **se houver email na fila** (já tem guard SQL). Sem tráfego = sem custo.
-
----
-
-## Validação que vou fazer depois de aplicar
-
-1. Rodar query no `cron.job` confirmando os 6 schedules novos.
-2. Conferir no `queue_execution_log` e logs Postgres que sábado pós-13h tem volume ~zero.
-3. Comparar consumo Cloud da próxima semana vs. esta.
-4. Se algum cliente reclamar de defasagem na segunda manhã, o catch-up das 5h já cobre.
-
----
-
-## Detalhes técnicos (resumo)
-
-- Mudanças concentradas em **1 migração SQL** atualizando 6 entradas em `cron.job` via `cron.unschedule` + `cron.schedule` (não posso `UPDATE` direto porque `pg_cron` exige o helper).
-- Adição da flag em `system_settings` (tabela já existe) + leitura opcional no início de cada edge function pausável (`if weekend_mode && is_weekend_window) return early`).
-- Nenhuma alteração em: geração de etiqueta, ajuste de preço, webhooks, billing, autenticação.
-
-Posso seguir com a implementação assim que você aprovar.
+## Pergunta antes de implementar
+Posso prosseguir com o diagnóstico (Passos 1 e 2 são apenas leitura, sem alterar nada) e voltar com o resultado + a correção exata da hipótese vencedora? Ou você prefere que eu já aplique a correção mais provável (Hipótese 1 — parar de usar `ml_accounts.is_active` como "conta ativa") direto?
