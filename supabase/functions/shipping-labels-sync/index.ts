@@ -433,57 +433,65 @@ Deno.serve(async (req) => {
   const timer = syncStartTimer();
   const stats: SyncStats = { accounts: 0, shipments_synced: 0, shipments_updated: 0, invoices_synced: 0, errors: 0, skipped: 0 };
 
-  // Parse body for mode
+  // Parse body for mode and optional seller_id (sync pontual)
   let mode = "incremental"; // default: last 6 hours
+  let targetSellerId: string | null = null;
   try {
     const body = await req.json();
     if (body?.mode === "full") mode = "full";
+    if (body?.seller_id) targetSellerId = String(body.seller_id);
   } catch { /* no body = incremental */ }
 
   const lookbackHours = mode === "full" ? 7 * 24 : 6; // 7 days or 6 hours
 
   try {
-    // Acquire lock
-    const { data: scheduler } = await supabase
-      .from("sync_scheduler")
-      .select("status, last_run_at")
-      .eq("job_name", "shipping-labels-sync")
-      .maybeSingle();
+    // Acquire lock (apenas para syncs globais — sync pontual de 1 seller ignora o lock)
+    if (!targetSellerId) {
+      const { data: scheduler } = await supabase
+        .from("sync_scheduler")
+        .select("status, last_run_at")
+        .eq("job_name", "shipping-labels-sync")
+        .maybeSingle();
 
-    if (scheduler?.status === "running") {
-      const lastRun = scheduler.last_run_at ? new Date(scheduler.last_run_at).getTime() : 0;
-      if (Date.now() - lastRun < 10 * 60 * 1000) {
-        return new Response(JSON.stringify({ status: "skipped", reason: "already_running" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      if (scheduler?.status === "running") {
+        const lastRun = scheduler.last_run_at ? new Date(scheduler.last_run_at).getTime() : 0;
+        if (Date.now() - lastRun < 10 * 60 * 1000) {
+          return new Response(JSON.stringify({ status: "skipped", reason: "already_running" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
-    }
 
-    await supabase.from("sync_scheduler").upsert({
-      job_name: "shipping-labels-sync",
-      status: "running",
-      last_run_at: new Date().toISOString(),
-    }, { onConflict: "job_name" });
+      await supabase.from("sync_scheduler").upsert({
+        job_name: "shipping-labels-sync",
+        status: "running",
+        last_run_at: new Date().toISOString(),
+      }, { onConflict: "job_name" });
+    }
 
     await logSyncEvent(supabase, {
       action: "sync_started",
       entityType: "shipping_labels_sync",
-      metadata: { module: "shipping_labels_sync", scope: mode },
+      metadata: { module: "shipping_labels_sync", scope: mode, seller_id: targetSellerId },
     });
 
-    // Get all active accounts
-    const { data: accounts, error: accError } = await supabase
+    // Get active accounts (todos, ou filtrado por seller_id quando informado)
+    let accountsQuery = supabase
       .from("ml_accounts")
       .select("id, ml_user_id, user_id, access_token")
       .eq("is_active", true);
+    if (targetSellerId) accountsQuery = accountsQuery.eq("ml_user_id", targetSellerId);
+
+    const { data: accounts, error: accError } = await accountsQuery;
 
     if (accError || !accounts || accounts.length === 0) {
-      console.log("[shipping-labels-sync] No active accounts");
-      await markDone(supabase, stats);
-      return new Response(JSON.stringify({ status: "idle", stats }), {
+      console.log(`[shipping-labels-sync] No active accounts${targetSellerId ? ` for seller ${targetSellerId}` : ""}`);
+      if (!targetSellerId) await markDone(supabase, stats);
+      return new Response(JSON.stringify({ status: "idle", stats, seller_id: targetSellerId }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
 
     console.log(`[shipping-labels-sync] Processing ${accounts.length} accounts, mode=${mode}, lookback=${lookbackHours}h`);
 
