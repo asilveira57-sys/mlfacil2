@@ -79,9 +79,17 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  // Get persisted active account from user_context or localStorage
+  // Get persisted active account.
+  // PRIORITY: localStorage (per-device/per-browser) > user_context (per-user fallback).
+  // This guarantees that switching accounts on one device/browser never propagates to
+  // another device — multi-user / multi-account workflows stay isolated per session.
+  // The DB row is only consulted when this browser has never made a choice before.
   const getPersistedActiveAccountId = useCallback(async (userId: string): Promise<string | null> => {
-    // Try user_context first
+    // 1) localStorage first — per-browser, never cross-device
+    const local = localStorage.getItem('active_account_id');
+    if (local) return local;
+
+    // 2) Fallback to user_context for first-time sessions on this device
     const { data: context, error } = await supabase
       .from('user_context')
       .select('active_marketplace_account_id')
@@ -93,12 +101,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       console.debug('[CTX] user_context lookup error (ignored)', error.message);
     }
 
-    if (context?.active_marketplace_account_id) {
-      return context.active_marketplace_account_id;
-    }
-
-    // Fallback to localStorage (for compatibility)
-    return localStorage.getItem('active_account_id');
+    return context?.active_marketplace_account_id ?? null;
   }, []);
 
   // Persist active account - uses ref to avoid dependency on accounts state
@@ -265,20 +268,37 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
       const inheritedForActiveCompany = loadedAccounts.filter(a => a.isInherited && isUsable(a));
 
-      // 1) Collaborator path: company inherited account is authoritative.
-      // Ignore persisted/localStorage personal accounts while inside the invited company.
-      let active = inheritedForActiveCompany[0] || null;
+      let active: ActiveAccount | null = null;
 
-      // 2) Persisted choice, only when not overriding with collaborator inheritance.
-      if (!active) {
-        active = loadedAccounts.find(a => a.id === persistedId && isUsable(a)) || null;
+      // 1) Honor the per-device persisted choice FIRST, for both titulares and
+      //    collaborators. This is what keeps each browser/computer independent
+      //    when the same user (or different users sharing the titular's accounts)
+      //    work simultaneously.
+      if (persistedId) {
+        const persistedAcc = loadedAccounts.find(a => a.id === persistedId && isUsable(a)) || null;
+        // For collaborators, only accept persisted choice if it's an inherited
+        // account from the company they belong to (security boundary).
+        if (persistedAcc) {
+          if (inheritedForActiveCompany.length > 0) {
+            if (persistedAcc.isInherited) active = persistedAcc;
+          } else {
+            active = persistedAcc;
+          }
+        }
+      }
+
+      // 2) Collaborator fallback: first inherited account from the invited company.
+      if (!active && inheritedForActiveCompany.length > 0) {
+        active = inheritedForActiveCompany[0];
       }
 
       // 3) Any usable account, preferring inherited (company) over personal
       if (!active) {
         active = loadedAccounts.find(a => a.isInherited && isUsable(a))
-          || loadedAccounts.find(isUsable);
+          || loadedAccounts.find(isUsable)
+          || null;
       }
+
 
       // 4) Fallback: first account at all
       if (!active && loadedAccounts.length > 0) {
