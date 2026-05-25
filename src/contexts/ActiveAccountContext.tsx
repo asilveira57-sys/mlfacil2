@@ -268,20 +268,37 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
       const inheritedForActiveCompany = loadedAccounts.filter(a => a.isInherited && isUsable(a));
 
-      // 1) Collaborator path: company inherited account is authoritative.
-      // Ignore persisted/localStorage personal accounts while inside the invited company.
-      let active = inheritedForActiveCompany[0] || null;
+      let active: ActiveAccount | null = null;
 
-      // 2) Persisted choice, only when not overriding with collaborator inheritance.
-      if (!active) {
-        active = loadedAccounts.find(a => a.id === persistedId && isUsable(a)) || null;
+      // 1) Honor the per-device persisted choice FIRST, for both titulares and
+      //    collaborators. This is what keeps each browser/computer independent
+      //    when the same user (or different users sharing the titular's accounts)
+      //    work simultaneously.
+      if (persistedId) {
+        const persistedAcc = loadedAccounts.find(a => a.id === persistedId && isUsable(a)) || null;
+        // For collaborators, only accept persisted choice if it's an inherited
+        // account from the company they belong to (security boundary).
+        if (persistedAcc) {
+          if (inheritedForActiveCompany.length > 0) {
+            if (persistedAcc.isInherited) active = persistedAcc;
+          } else {
+            active = persistedAcc;
+          }
+        }
+      }
+
+      // 2) Collaborator fallback: first inherited account from the invited company.
+      if (!active && inheritedForActiveCompany.length > 0) {
+        active = inheritedForActiveCompany[0];
       }
 
       // 3) Any usable account, preferring inherited (company) over personal
       if (!active) {
         active = loadedAccounts.find(a => a.isInherited && isUsable(a))
-          || loadedAccounts.find(isUsable);
+          || loadedAccounts.find(isUsable)
+          || null;
       }
+
 
       // 4) Fallback: first account at all
       if (!active && loadedAccounts.length > 0) {
