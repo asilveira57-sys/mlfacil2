@@ -1,42 +1,59 @@
-## Contexto
+## Diagnóstico
 
-O sistema **já foi desenhado** para que cada usuário tenha sua própria conta ativa: a seleção é persistida em `user_context` filtrada por `user_id`, e o `localStorage` (`active_account_id`, `active_seller_id`) é por navegador. Em teoria, o Rafa (titular) e a Sâmila (colaboradora) — que são `auth.users` diferentes — não deveriam interferir um no outro ao trocar de conta.
+Os dois pedidos existem em `meli_orders_cache` (pack_ids `2000013130005017` e `2000013128814913`, sincronizados hoje), mas **não existe NENHUM registro** em `meli_shipments_cache` para o seller TODOVINOBR (538218315). Sem o cache de shipments, a UI marca todas as vendas como "Sincronizando…" e nada aparece em "Para imprimir" / "Envios de hoje".
 
-O sintoma relatado (Sâmila alterna no PC dela e muda também no PC do Rafa) indica um vazamento entre sessões. Antes de mudar código, precisamos confirmar **onde** está o vazamento, porque existem 3 hipóteses plausíveis e cada uma exige uma correção diferente.
+Causa raiz: os jobs de sincronização de envios estão **travados** em `sync_scheduler`:
 
-## Hipóteses a investigar
+| job_name | status | last_run_at |
+|---|---|---|
+| shipping-status-sync | running (travado) | 23/05 21:15 |
+| shipping-labels-sync | running (sem next_run) | 25/05 16:56 (disparo manual) |
+| orders-hourly-sync | running com lock até 17:45 | 25/05 09:32 |
 
-1. **`ml_accounts.is_active` sendo mutado globalmente.** Embora o `setActiveAccount` no front não escreva nesse campo, alguma edge function ou trigger pode estar marcando `is_active=true` na linha compartilhada (Sâmila e Rafa enxergam as mesmas linhas de `ml_accounts` porque pertencem ao mesmo titular). Se sim, qualquer hook que lê `is_active` passa a refletir a escolha do último que alternou.
-2. **`user_context` compartilhado por engano.** A função `get_accessible_ml_accounts` ou alguma RPC pode estar lendo `active_marketplace_account_id` do **titular** (Rafa) mesmo quando o caller é o colaborador (Sâmila), fazendo a tela da Sâmila "puxar" a escolha do Rafa — e vice-versa.
-3. **Cache/realtime cruzado.** Um canal `postgres_changes` em `ml_accounts` ou `user_context` sem filtro por `user_id` pode estar disparando `invalidateQueries` na sessão errada quando o outro usuário troca.
+Como `status='running'` e `lock_expires_at` ainda vigente, o próximo tick do cron pula a execução ("já está rodando"), e o cache de shipments nunca é populado. Por isso o cliente atualiza e nada muda.
 
-## Plano
+Adicionalmente, o job `shipping-labels-sync` foi criado hoje sem `next_run_at` nem entrada em `cron.job`, então **não há agendamento recorrente** — só roda quando disparado manualmente.
 
-### Passo 1 — Diagnóstico no banco (somente leitura)
-- Consultar `user_context` das duas contas (Rafa e Sâmila) antes e depois de uma troca para confirmar se cada `user_id` tem sua própria linha intacta.
-- Consultar `ml_accounts` (RAFA_STORE e HOME DIVERSE) e observar se `is_active` muda quando qualquer um dos dois alterna.
-- Listar triggers em `ml_accounts` e `user_context` que possam propagar `is_active`/`active_marketplace_account_id` entre linhas.
-- Inspecionar a função `get_accessible_ml_accounts` e qualquer RPC usada pelo `AccountSwitcher` para confirmar que ela usa `auth.uid()` do caller (e não o `user_id` do titular) ao resolver a conta ativa.
+## Plano de Correção
 
-### Passo 2 — Diagnóstico no código
-- Procurar em `src/` e `supabase/functions/` por escritas a `ml_accounts.is_active` que não estejam ligadas explicitamente ao fluxo de conexão/desconexão da conta.
-- Procurar por subscriptions de realtime (`channel(...).on('postgres_changes', ... 'ml_accounts'|'user_context' ...)`) e validar se há filtro `user_id=eq.${auth.uid()}`.
-- Confirmar que `useUserContext`, `useMlAccounts` e `ActiveAccountContext` derivam tudo a partir do `auth.getUser()` do navegador atual.
+### Passo 1 — Destravar os jobs presos (migration)
+Resetar para `idle` os três jobs com lock vencido/órfão, limpando `lock_expires_at` e `locked_by`:
 
-### Passo 3 — Correções (definidas após o diagnóstico)
-Conforme o resultado do Passo 1/2, aplicar **uma** das correções:
-- **(Hipótese 1)** Remover/condicionar a escrita em `ml_accounts.is_active` no fluxo de troca, ou migrar de vez para `is_active` deprecado — passando a depender só de `user_context.active_marketplace_account_id` (que já é por `user_id`).
-- **(Hipótese 2)** Ajustar a RPC para usar `auth.uid()` ao buscar o contexto ativo, em vez de qualquer `user_id` herdado do titular. Garantir que o filtro de `inheritedForActiveCompany` no `ActiveAccountContext` resolva a empresa com base no `user_context` do colaborador, não do titular.
-- **(Hipótese 3)** Adicionar filtro `user_id=eq.${auth.uid()}` nas subscriptions de realtime ou remover a invalidação global em prol de invalidação por chave.
+```sql
+UPDATE public.sync_scheduler
+   SET status='idle', lock_expires_at=NULL, locked_by=NULL, updated_at=now()
+ WHERE job_name IN ('shipping-status-sync','shipping-labels-sync','orders-hourly-sync')
+   AND (status='running');
+```
 
-### Passo 4 — Validação
-- Simular o cenário: Rafa logado em uma sessão com RAFA_STORE ativa; Sâmila logada em outra sessão alternando entre RAFA_STORE e HOME DIVERSE. Confirmar via console/DB que o `user_context` do Rafa não muda e a tela dele continua estável.
-- Confirmar o inverso (Rafa alterna, Sâmila não é afetada).
+### Passo 2 — Forçar repopulação imediata do cache do TODOVINOBR
+Disparar manualmente `shipping-labels-sync` (modo full, lookback 7 dias) e `shipping-status-sync` filtrando pelo seller 538218315 para popular `meli_shipments_cache` com os shipments `47130984351` e `47130730720`.
+
+### Passo 3 — Endurecer o scheduler para não travar de novo
+Em `sync_scheduler`, adotar política de lock com expiração obrigatória:
+- toda transição para `running` grava `lock_expires_at = now() + interval '15 min'`;
+- o picker do cron considera elegível qualquer job com `status='running' AND lock_expires_at < now()` (steal lock);
+- ao final do job (sucesso ou erro), forçar `status='idle'` e limpar lock no `finally`.
+
+Aplicar nas edge functions `shipping-labels-sync`, `shipping-status-sync` e `orders-hourly-sync`.
+
+### Passo 4 — Garantir cron recorrente para etiquetas
+Criar entrada em `cron.job` para `shipping-labels-sync` rodar a cada 15 min (via `supabase--insert` com a URL/anon key específicas do projeto, como manda a doc de cron). Setar `next_run_at` inicial em `sync_scheduler`.
+
+### Passo 5 — Watchdog visível
+Na UI de SystemStatus (admin), exibir jobs com `status='running' AND last_run_at < now() - interval '30 min'` em vermelho, para detectar travamento sem precisar abrir o banco.
+
+### Passo 6 — Validação
+1. Confirmar que `meli_shipments_cache` recebe ≥2 linhas para seller 538218315.
+2. Confirmar que os pacotes `2000013130005017` e `2000013128814913` aparecem em "Envios de hoje" e "Para imprimir" no TODOVINOBR.
+3. Aguardar 1 ciclo do cron e confirmar `status='idle'` + `last_run_at` recente.
 
 ## Detalhes técnicos
-- Arquivos prováveis de toque: `src/contexts/ActiveAccountContext.tsx`, `src/lib/accountUnification.ts`, função SQL `get_accessible_ml_accounts`, e edge functions que escrevem em `ml_accounts`.
-- Nenhuma mudança de schema é esperada **se** a causa for Hipótese 2 ou 3. Para Hipótese 1, possível migração simples de UPDATE removendo a coluna como gatilho de "conta ativa".
-- Sem impacto em RBAC: titular continua dono das contas ML; colaboradora continua herdando apenas as contas da empresa do titular.
 
-## Pergunta antes de implementar
-Posso prosseguir com o diagnóstico (Passos 1 e 2 são apenas leitura, sem alterar nada) e voltar com o resultado + a correção exata da hipótese vencedora? Ou você prefere que eu já aplique a correção mais provável (Hipótese 1 — parar de usar `ml_accounts.is_active` como "conta ativa") direto?
+- Tabelas tocadas: `public.sync_scheduler` (UPDATE), `cron.job` (INSERT via supabase--insert).
+- Edge functions tocadas: `shipping-labels-sync`, `shipping-status-sync`, `orders-hourly-sync` — apenas para envolver execução em `try/finally` com release de lock.
+- Não tocar `meli_orders_cache` nem schemas reservados (`auth`, `storage`, etc.).
+- Sem alterações de RLS necessárias.
+- Política de "sem TOP/LIMIT artificial" preservada.
+
+Posso seguir com Passos 1, 2 e 4 (destravar + repopular + agendar cron) imediatamente, e tratar Passos 3 e 5 (hardening + watchdog) em sequência?
