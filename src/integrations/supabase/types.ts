@@ -13314,6 +13314,9 @@ export type Database = {
           address_number: string | null
           address_state: string | null
           address_street: string | null
+          auto_sync_paused: boolean
+          auto_sync_paused_reason: string | null
+          auto_sync_reactivated_at: string | null
           company_name: string | null
           cpf: string | null
           created_at: string
@@ -13322,6 +13325,8 @@ export type Database = {
           full_name: string
           id: string
           instagram_url: string | null
+          last_active_at: string | null
+          last_login_at: string | null
           linkedin_url: string | null
           other_url: string | null
           photo_url: string | null
@@ -13339,6 +13344,9 @@ export type Database = {
           address_number?: string | null
           address_state?: string | null
           address_street?: string | null
+          auto_sync_paused?: boolean
+          auto_sync_paused_reason?: string | null
+          auto_sync_reactivated_at?: string | null
           company_name?: string | null
           cpf?: string | null
           created_at?: string
@@ -13347,6 +13355,8 @@ export type Database = {
           full_name: string
           id: string
           instagram_url?: string | null
+          last_active_at?: string | null
+          last_login_at?: string | null
           linkedin_url?: string | null
           other_url?: string | null
           photo_url?: string | null
@@ -13364,6 +13374,9 @@ export type Database = {
           address_number?: string | null
           address_state?: string | null
           address_street?: string | null
+          auto_sync_paused?: boolean
+          auto_sync_paused_reason?: string | null
+          auto_sync_reactivated_at?: string | null
           company_name?: string | null
           cpf?: string | null
           created_at?: string
@@ -13372,6 +13385,8 @@ export type Database = {
           full_name?: string
           id?: string
           instagram_url?: string | null
+          last_active_at?: string | null
+          last_login_at?: string | null
           linkedin_url?: string | null
           other_url?: string | null
           photo_url?: string | null
@@ -17711,6 +17726,63 @@ export type Database = {
         }
         Relationships: []
       }
+      system_sync_logs: {
+        Row: {
+          action: string
+          api_calls_count: number | null
+          created_at: string
+          duration_ms: number | null
+          finished_at: string | null
+          id: string
+          metadata: Json
+          module_name: string
+          reason: string | null
+          records_processed: number | null
+          seller_id: string | null
+          started_at: string | null
+          status: string
+          tenant_id: string | null
+          tokens_used: number | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          api_calls_count?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          finished_at?: string | null
+          id?: string
+          metadata?: Json
+          module_name: string
+          reason?: string | null
+          records_processed?: number | null
+          seller_id?: string | null
+          started_at?: string | null
+          status: string
+          tenant_id?: string | null
+          tokens_used?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          api_calls_count?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          finished_at?: string | null
+          id?: string
+          metadata?: Json
+          module_name?: string
+          reason?: string | null
+          records_processed?: number | null
+          seller_id?: string | null
+          started_at?: string | null
+          status?: string
+          tenant_id?: string | null
+          tokens_used?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       task_checklists: {
         Row: {
           created_at: string
@@ -21395,6 +21467,10 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      can_run_auto_sync: {
+        Args: { p_module: string; p_user_id: string }
+        Returns: Json
+      }
       can_start_sync: {
         Args: { p_company_id: string; p_job_type: string; p_scope: string }
         Returns: Json
@@ -21765,6 +21841,19 @@ export type Database = {
         }
         Returns: undefined
       }
+      log_sync_decision: {
+        Args: {
+          p_action: string
+          p_metadata?: Json
+          p_module: string
+          p_reason?: string
+          p_seller_id?: string
+          p_status: string
+          p_tenant_id?: string
+          p_user_id?: string
+        }
+        Returns: string
+      }
       move_to_dlq: {
         Args: {
           dlq_name: string
@@ -21955,6 +22044,10 @@ export type Database = {
       sync_visual_group_to_templates: {
         Args: { p_group_id: string }
         Returns: Json
+      }
+      touch_user_activity: {
+        Args: { p_is_login?: boolean; p_user_id: string }
+        Returns: undefined
       }
       track_module_usage: {
         Args: {
