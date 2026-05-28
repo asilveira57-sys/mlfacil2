@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { canRunAutoSync, logSyncDecision } from "@/hooks/useSyncEligibility";
 
 // Check for stale orders every 60 seconds
 const WATCHDOG_INTERVAL_MS = 60000;
