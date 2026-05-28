@@ -284,7 +284,9 @@ const App = () => {
                   <Route path="/inicio" element={<Home />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/shipping-labels" element={<ShippingEligibilityGuard><ShippingLabels /></ShippingEligibilityGuard>} />
-                  <Route path="/label-teste" element={<LabelTeste />} />
+                  {/* Label Teste pausado para controle de custo — 2026-05.
+                       Rota redireciona para /shipping-labels (mesmo recurso). */}
+                  <Route path="/label-teste" element={<Navigate to="/shipping-labels" replace />} />
                   <Route path="/shipping-labels/header-settings" element={<ShippingEligibilityGuard><LabelHeaderSettings /></ShippingEligibilityGuard>} />
                   <Route path="/zpl-converter" element={<ShippingEligibilityGuard><ZPLConverter /></ShippingEligibilityGuard>} />
                   <Route path="/abc-analysis" element={<AbcAnalysis />} />
