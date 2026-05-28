@@ -1,59 +1,94 @@
-## Diagnóstico
+# Plano — Modo Econômico MKTP Fácil
 
-Os dois pedidos existem em `meli_orders_cache` (pack_ids `2000013130005017` e `2000013128814913`, sincronizados hoje), mas **não existe NENHUM registro** em `meli_shipments_cache` para o seller TODOVINOBR (538218315). Sem o cache de shipments, a UI marca todas as vendas como "Sincronizando…" e nada aparece em "Para imprimir" / "Envios de hoje".
+Objetivo: reduzir drasticamente consumo de banco/API/tokens mantendo apenas Etiquetas de Envio e Etiqueta Full operacionais.
 
-Causa raiz: os jobs de sincronização de envios estão **travados** em `sync_scheduler`:
+## 1. Infraestrutura de elegibilidade (base de tudo)
 
-| job_name | status | last_run_at |
-|---|---|---|
-| shipping-status-sync | running (travado) | 23/05 21:15 |
-| shipping-labels-sync | running (sem next_run) | 25/05 16:56 (disparo manual) |
-| orders-hourly-sync | running com lock até 17:45 | 25/05 09:32 |
+**Migração SQL** (`supabase--migration`):
+- Adicionar em `workspace_accounts` (ou tabela equivalente do seller): `last_login_at`, `last_active_at`, `auto_sync_paused boolean default false`, `auto_sync_paused_reason text`, `auto_sync_reactivated_at` — só se ainda não existirem.
+- Criar tabela `public.system_sync_logs` com campos do prompt (id, tenant_id, seller_id, user_id, module_name, action, status, reason, started_at, finished_at, duration_ms, records_processed, api_calls_count, tokens_used, metadata jsonb, created_at) + GRANTs + RLS (admin lê tudo, seller lê o próprio) + índices em (seller_id, module_name, created_at desc), (tenant_id, created_at desc), (status, created_at desc).
+- Índices auxiliares se faltarem: `last_login_at`, `last_active_at` em workspace_accounts.
+- Função SQL `public.can_run_auto_sync(p_seller_id, p_module text) returns jsonb` retornando `{allowed, reason}` aplicando:
+  - seller ativo + `auto_sync_paused = false`
+  - `last_login_at >= now() - interval '3 days'`
+  - timezone America/Sao_Paulo: bloqueia 20:00–06:00; sábado >=15:00 e domingo inteiro até segunda 06:00
+  - lista de módulos pausados (radiografia, ads, promotions, seed, abc, custos, frete, ajuste_preco, atacado, ad_timeline) → sempre `false` para auto
+  - apenas módulos `shipping_labels` e `shipping_full` permitidos dentro da janela
+- Função `public.log_sync_decision(...)` grava em `system_sync_logs` (security definer).
 
-Como `status='running'` e `lock_expires_at` ainda vigente, o próximo tick do cron pula a execução ("já está rodando"), e o cache de shipments nunca é populado. Por isso o cliente atualiza e nada muda.
+## 2. Edge function compartilhada
 
-Adicionalmente, o job `shipping-labels-sync` foi criado hoje sem `next_run_at` nem entrada em `cron.job`, então **não há agendamento recorrente** — só roda quando disparado manualmente.
+`supabase/functions/_shared/sync-eligibility.ts` — wrapper que chama `can_run_auto_sync` via RPC e loga via `log_sync_decision`. Toda edge function de sync passa a importá-lo no início e retornar `{skipped: true, reason}` quando bloqueado.
 
-## Plano de Correção
+Aplicar nas edge functions já existentes de:
+- `ml-sync-orders` (somente em chamadas com flag `auto=true`; manual continua)
+- qualquer função de radiografia/ads/promotions/seed/abc/custos/frete/ajuste/atacado/ad-timeline que rode em background ou cron
+- `label-teste-*` se existir → retorno imediato 410 Gone
 
-### Passo 1 — Destravar os jobs presos (migration)
-Resetar para `idle` os três jobs com lock vencido/órfão, limpando `lock_expires_at` e `locked_by`:
+## 3. Frontend — pausa de auto-sync
 
-```sql
-UPDATE public.sync_scheduler
-   SET status='idle', lock_expires_at=NULL, locked_by=NULL, updated_at=now()
- WHERE job_name IN ('shipping-status-sync','shipping-labels-sync','orders-hourly-sync')
-   AND (status='running');
-```
+- **`src/hooks/usePostLoginPrefetch.ts`**: remover `triggerBackgroundOrderSync` ou condicionar a `can_run_auto_sync` (chamar RPC antes). Manter prefetch de menu/visual identity (não consome ML API).
+- **`src/hooks/useOrdersSyncWatchdog.ts`**: marcar todos os triggers automáticos como `auto=true`; antes de disparar, chamar RPC de elegibilidade. `forceSyncOrders` (manual) permanece intocado.
+- Watchdogs/polling secundários a desativar (chamar RPC + early-return): `useCostSyncWatchdog`, `useCostDataPolling`, `useAdsDataCache` (background preloads), `useTrendsAutoLoad`, `useTrendsPrefetch`, `useMercadoPrefetch`, `useRadiography` background, `usePromotionSyncLogs` autopoll, etc. Manter botão manual em cada módulo.
+- Atualizar `last_login_at`/`last_active_at` no listener `SIGNED_IN` (uma chamada `update workspace_accounts`).
 
-### Passo 2 — Forçar repopulação imediata do cache do TODOVINOBR
-Disparar manualmente `shipping-labels-sync` (modo full, lookback 7 dias) e `shipping-status-sync` filtrando pelo seller 538218315 para popular `meli_shipments_cache` com os shipments `47130984351` e `47130730720`.
+## 4. Label Teste — pausa total
 
-### Passo 3 — Endurecer o scheduler para não travar de novo
-Em `sync_scheduler`, adotar política de lock com expiração obrigatória:
-- toda transição para `running` grava `lock_expires_at = now() + interval '15 min'`;
-- o picker do cron considera elegível qualquer job com `status='running' AND lock_expires_at < now()` (steal lock);
-- ao final do job (sucesso ou erro), forçar `status='idle'` e limpar lock no `finally`.
+- Remover entrada do menu lateral (procurar em `useDynamicMenu`/`system_modules` — desativar via migração: `update system_modules set is_active=false where key='label_teste'`).
+- Em `App.tsx` (rota `/label-teste`) substituir componente por redirect para `/etiquetas` com toast "Módulo pausado para controle de custo".
+- Em `src/pages/LabelTeste.tsx`: substituir conteúdo por placeholder "Módulo em pausa econômica" (preservar arquivo antigo como `LabelTeste.paused.tsx` com comentário técnico — código original mantido em git).
+- Desabilitar quaisquer edge functions `label-teste-*` retornando 410 + log.
 
-Aplicar nas edge functions `shipping-labels-sync`, `shipping-status-sync` e `orders-hourly-sync`.
+## 5. Módulo Custo — restrição a 30 dias
 
-### Passo 4 — Garantir cron recorrente para etiquetas
-Criar entrada em `cron.job` para `shipping-labels-sync` rodar a cada 15 min (via `supabase--insert` com a URL/anon key específicas do projeto, como manda a doc de cron). Setar `next_run_at` inicial em `sync_scheduler`.
+- Localizar UI de importação (`src/pages/Custos.tsx` + componentes filhos) e remover/ocultar botões "Importar 12 meses"/"Importar 1 ano".
+- Hooks/edge functions: forçar `date_from = max(date_from, now - 30d)` no lado servidor (validação em `costs_orders_import` e congêneres).
+- Cron de importação anual (se existir em `cron.job`) → `cron.unschedule`.
+- Esconder rota/botão mas manter função interna acessível para admin (flag `is_admin`).
 
-### Passo 5 — Watchdog visível
-Na UI de SystemStatus (admin), exibir jobs com `status='running' AND last_run_at < now() - interval '30 min'` em vermelho, para detectar travamento sem precisar abrir o banco.
+## 6. Auditoria de crons & edge functions
 
-### Passo 6 — Validação
-1. Confirmar que `meli_shipments_cache` recebe ≥2 linhas para seller 538218315.
-2. Confirmar que os pacotes `2000013130005017` e `2000013128814913` aparecem em "Envios de hoje" e "Para imprimir" no TODOVINOBR.
-3. Aguardar 1 ciclo do cron e confirmar `status='idle'` + `last_run_at` recente.
+- Listar via `select * from cron.job` e desativar todos que tocam módulos pausados (radiografia, ads, promotions, seed, abc, custos auto, frete, etc.). Manter apenas crons essenciais (refresh de token ML, etiquetas).
+- Documentar no comentário do cron.
 
-## Detalhes técnicos
+## 7. Estado informativo nos módulos pausados
 
-- Tabelas tocadas: `public.sync_scheduler` (UPDATE), `cron.job` (INSERT via supabase--insert).
-- Edge functions tocadas: `shipping-labels-sync`, `shipping-status-sync`, `orders-hourly-sync` — apenas para envolver execução em `try/finally` com release de lock.
-- Não tocar `meli_orders_cache` nem schemas reservados (`auth`, `storage`, etc.).
-- Sem alterações de RLS necessárias.
-- Política de "sem TOP/LIMIT artificial" preservada.
+Componente compartilhado `<EconomyModeBanner moduleName="..." onRefresh={...} />` em:
+- AdTimeline, Radiografia, Promoções, ADS, Seed, ABC, Custos (lista), Frete, Ajuste Preço, Atacado
+Texto: "Este módulo está em modo econômico. Os dados só serão atualizados quando você clicar em Atualizar."
 
-Posso seguir com Passos 1, 2 e 4 (destravar + repopular + agendar cron) imediatamente, e tratar Passos 3 e 5 (hardening + watchdog) em sequência?
+## 8. Admin — auditoria simples
+
+Nova página `/admin/economy-mode` (link em AdminDashboard) mostrando:
+- crons ativos (`select * from cron.job`)
+- módulos pausados (constante do front)
+- contadores agregados dos últimos 7 dias em `system_sync_logs` por module/status
+- últimos 100 logs
+
+## 9. Detalhes técnicos
+
+- Timezone: usar `(now() at time zone 'America/Sao_Paulo')` na função SQL — evita dependência de TZ do client.
+- Eligibilidade do front: chamar RPC `can_run_auto_sync` antes de qualquer dispatch automático. Cache de 60s por (seller, module) em memória.
+- Manual = qualquer botão "Atualizar" passa `manual: true` e bypassa a função (mas continua logando como `manual_sync`).
+- Nunca usar `LIMIT` artificial novo — manter paginação por cursor existente.
+
+## 10. Critérios de validação
+
+- `select * from cron.job` mostra apenas essenciais
+- Acessar dashboard fora de horário não chama `ml-sync-orders`
+- Botão "Atualizar" em Etiquetas funciona 24/7
+- `/label-teste` redireciona
+- Custos.tsx não tem mais botão de 12 meses
+- `system_sync_logs` recebe entradas a cada decisão
+
+## Ordem de execução
+
+1. Migração SQL (tabelas/funções/índices/desativação system_modules)
+2. Hook `useSyncEligibility` + invalidações nos watchdogs do front
+3. Label Teste: rota + menu + página placeholder
+4. Custos: remover botão 12 meses + clamp servidor
+5. Banner Modo Econômico nos módulos pausados
+6. Página admin de auditoria
+7. Desativar crons supérfluos (via `supabase--insert` em `cron.unschedule`)
+
+Confirmação necessária antes de começar: posso prosseguir com **todo o escopo acima de uma vez**, ou prefere fatiar (ex.: começar só por 1+3+4+desativar crons como "fase 1 emergencial" e fazer o resto depois)?
