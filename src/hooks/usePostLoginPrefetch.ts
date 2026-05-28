@@ -45,10 +45,15 @@ export function usePostLoginPrefetch() {
   useEffect(() => {
     if (hasPrefetched.current) return;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && !hasPrefetched.current) {
         hasPrefetched.current = true;
-        
+
+        // Marca atividade de login (Modo Econômico depende disso para liberar auto-sync)
+        if (session?.user?.id) {
+          touchUserActivity(session.user.id, true);
+        }
+
         setTimeout(() => {
           // Prefetch config menu — uses the SAME queryFn as useConfigMenu
           queryClient.prefetchQuery({
@@ -77,11 +82,11 @@ export function usePostLoginPrefetch() {
             staleTime: 30 * 60 * 1000,
           });
 
-          // === Proactive background sync for orders ===
-          if (isWithinSyncWindow()) {
-            triggerBackgroundOrderSync();
+          // === Modo Econômico: background sync apenas se elegível ===
+          if (isWithinSyncWindow() && session?.user?.id) {
+            triggerBackgroundOrderSync(session.user.id);
           } else if (import.meta.env.DEV) {
-            console.info('[Prefetch] Outside sync window (09–15h BRT), skipping background sync');
+            console.info('[Prefetch] Outside sync window or no user — skipping background sync');
           }
 
           if (import.meta.env.DEV) {
