@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchConfigMenuItems } from '@/hooks/useConfigMenu';
+import { canRunAutoSync, touchUserActivity, logSyncDecision } from '@/hooks/useSyncEligibility';
 
 const SYNC_COOLDOWN_KEY = 'postlogin_sync_';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours per account
