@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { canRunAutoSync, logSyncDecision } from "@/hooks/useSyncEligibility";
 
 // Check for stale orders every 60 seconds
 const WATCHDOG_INTERVAL_MS = 60000;
@@ -75,22 +76,33 @@ export function useOrdersSyncWatchdog(sellerId: string | null, enabled: boolean)
 
     // Check if data is stale
     if (isStale()) {
+      // Get auth token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      // Modo Econômico: bloqueia auto-sync conforme regras de horário/inatividade/módulo
+      const eligibility = await canRunAutoSync(session.user.id, "shipping_labels");
+      if (!eligibility.allowed) {
+        logSyncDecision({
+          module: "shipping_labels",
+          action: "auto_sync",
+          status: "blocked",
+          reason: eligibility.reason,
+          sellerId,
+        });
+        return;
+      }
+
       console.log("[OrdersWatchdog] Data is stale, triggering background sync...");
       isSyncingRef.current = true;
       lastActionRef.current = Date.now();
 
-      // Notify UI that sync is starting
       window.dispatchEvent(new CustomEvent("orders_sync_start", {
         detail: { sellerId }
       }));
 
       try {
-        // Get auth token
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          isSyncingRef.current = false;
-          return;
-        }
+
 
         // Calculate date range for last 7 days
         const now = new Date();

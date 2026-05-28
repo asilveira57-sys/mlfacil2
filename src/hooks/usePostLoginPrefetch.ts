@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchConfigMenuItems } from '@/hooks/useConfigMenu';
+import { canRunAutoSync, touchUserActivity, logSyncDecision } from '@/hooks/useSyncEligibility';
 
 const SYNC_COOLDOWN_KEY = 'postlogin_sync_';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours per account
@@ -44,10 +45,15 @@ export function usePostLoginPrefetch() {
   useEffect(() => {
     if (hasPrefetched.current) return;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && !hasPrefetched.current) {
         hasPrefetched.current = true;
-        
+
+        // Marca atividade de login (Modo Econômico depende disso para liberar auto-sync)
+        if (session?.user?.id) {
+          touchUserActivity(session.user.id, true);
+        }
+
         setTimeout(() => {
           // Prefetch config menu — uses the SAME queryFn as useConfigMenu
           queryClient.prefetchQuery({
@@ -76,11 +82,11 @@ export function usePostLoginPrefetch() {
             staleTime: 30 * 60 * 1000,
           });
 
-          // === Proactive background sync for orders ===
-          if (isWithinSyncWindow()) {
-            triggerBackgroundOrderSync();
+          // === Modo Econômico: background sync apenas se elegível ===
+          if (isWithinSyncWindow() && session?.user?.id) {
+            triggerBackgroundOrderSync(session.user.id);
           } else if (import.meta.env.DEV) {
-            console.info('[Prefetch] Outside sync window (09–15h BRT), skipping background sync');
+            console.info('[Prefetch] Outside sync window or no user — skipping background sync');
           }
 
           if (import.meta.env.DEV) {
@@ -98,12 +104,26 @@ export function usePostLoginPrefetch() {
  * Triggers background order sync for all ML accounts that haven't been synced in 2h.
  * Non-blocking, fire-and-forget.
  */
-async function triggerBackgroundOrderSync() {
+async function triggerBackgroundOrderSync(userId: string) {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
-    // Get all active ML accounts for this user
+    // Modo Econômico: consulta gate central antes de qualquer chamada
+    const eligibility = await canRunAutoSync(userId, 'shipping_labels');
+    if (!eligibility.allowed) {
+      logSyncDecision({
+        module: 'shipping_labels',
+        action: 'background_preload',
+        status: 'blocked',
+        reason: eligibility.reason,
+      });
+      if (import.meta.env.DEV) {
+        console.info('[Prefetch] Background sync blocked:', eligibility.reason);
+      }
+      return;
+    }
+
     const { data: accounts } = await (supabase as any)
       .from('ml_accounts')
       .select('id, ml_user_id, nickname')
@@ -124,33 +144,23 @@ async function triggerBackgroundOrderSync() {
 
     for (const account of accounts) {
       const sellerId = account.ml_user_id;
-      if (!sellerId || !canSyncAccount(sellerId)) {
-        if (import.meta.env.DEV) {
-          console.info(`[Prefetch] Skipping sync for ${account.nickname || sellerId} (cooldown)`);
-        }
-        continue;
-      }
-
-      // Mark as synced immediately to prevent duplicate triggers
+      if (!sellerId || !canSyncAccount(sellerId)) continue;
       markSynced(sellerId);
 
-      if (import.meta.env.DEV) {
-        console.info(`[Prefetch] Background sync for ${account.nickname || sellerId}`);
-      }
+      logSyncDecision({
+        module: 'shipping_labels',
+        action: 'background_preload',
+        status: 'executed',
+        sellerId,
+      });
 
-      // Fire-and-forget — don't await, don't block
       supabase.functions.invoke('ml-sync-orders', {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: {
-          seller_id: sellerId,
-          date_from: dateFrom,
-          date_to: dateTo,
-        },
+        body: { seller_id: sellerId, date_from: dateFrom, date_to: dateTo, auto: true },
       }).catch((err) => {
         console.warn(`[Prefetch] Background sync failed for ${sellerId}:`, err);
       });
 
-      // Small stagger between accounts to avoid thundering herd
       await new Promise(r => setTimeout(r, 500));
     }
   } catch (err) {

@@ -54,7 +54,14 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { seller_id, action, job_id, days_back = 365 } = body;
+    let { seller_id, action, job_id, days_back = 30, admin_override = false } = body;
+
+    // Modo Econômico (2026-05): clamp servidor — sellers comuns só podem importar 30 dias.
+    // admin_override=true mantém comportamento histórico (uso futuro/admin).
+    const MAX_DAYS_BACK_NORMAL = 30;
+    if (!admin_override && Number(days_back) > MAX_DAYS_BACK_NORMAL) {
+      days_back = MAX_DAYS_BACK_NORMAL;
+    }
 
     // --- STATUS action ---
     if (action === "status") {

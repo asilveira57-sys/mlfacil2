@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
@@ -38,7 +38,7 @@ import NotFound from "./pages/NotFound";
 import PublicLayout from "./components/PublicLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import ShippingLabels from "./pages/ShippingLabels";
-import LabelTeste from "./pages/LabelTeste";
+// LabelTeste import removido — módulo pausado por controle de custo (2026-05)
 import ZPLConverter from "./pages/ZPLConverter";
 
 // === Lazy-loaded routes (heavy modules) ===
@@ -284,7 +284,9 @@ const App = () => {
                   <Route path="/inicio" element={<Home />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/shipping-labels" element={<ShippingEligibilityGuard><ShippingLabels /></ShippingEligibilityGuard>} />
-                  <Route path="/label-teste" element={<LabelTeste />} />
+                  {/* Label Teste pausado para controle de custo — 2026-05.
+                       Rota redireciona para /shipping-labels (mesmo recurso). */}
+                  <Route path="/label-teste" element={<Navigate to="/shipping-labels" replace />} />
                   <Route path="/shipping-labels/header-settings" element={<ShippingEligibilityGuard><LabelHeaderSettings /></ShippingEligibilityGuard>} />
                   <Route path="/zpl-converter" element={<ShippingEligibilityGuard><ZPLConverter /></ShippingEligibilityGuard>} />
                   <Route path="/abc-analysis" element={<AbcAnalysis />} />
