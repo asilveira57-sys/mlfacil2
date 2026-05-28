@@ -38,7 +38,7 @@ import NotFound from "./pages/NotFound";
 import PublicLayout from "./components/PublicLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import ShippingLabels from "./pages/ShippingLabels";
-import LabelTeste from "./pages/LabelTeste";
+// LabelTeste import removido — módulo pausado por controle de custo (2026-05)
 import ZPLConverter from "./pages/ZPLConverter";
 
 // === Lazy-loaded routes (heavy modules) ===
