@@ -447,34 +447,8 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                   Importar Pedidos (30 dias)
                 </Button>
 
-                {/* 1 year button — disabled during trial */}
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex">
-                        <Button
-                          onClick={handleStartHistoricalImport}
-                          disabled={startingHistorical || isJobRunning || !hasActiveSubscription}
-                          className="gap-2"
-                        >
-                          {startingHistorical || isJobRunning ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : !hasActiveSubscription ? (
-                            <Lock className="h-4 w-4" />
-                          ) : (
-                            <Download className="h-4 w-4" />
-                          )}
-                          {historicalJob?.status === "done" ? "Reimportar Pedidos (1 ano)" : "Importar Pedidos (1 ano)"}
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    {!hasActiveSubscription && (
-                      <TooltipContent>
-                        <p>Disponível após ativação do plano</p>
-                      </TooltipContent>
-                    )}
-                  </Tooltip>
-                </TooltipProvider>
+                {/* Botão "Importar Pedidos (1 ano)" removido em 2026-05 para controle de custo.
+                    Importação histórica > 30 dias está bloqueada para sellers; uso futuro restrito a admin. */}
 
                 {historicalJob?.status === "done" && (
                   <span className="text-sm text-muted-foreground">
