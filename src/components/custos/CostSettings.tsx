@@ -83,21 +83,10 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   };
 
   const handleStartHistoricalImport = async () => {
-    setStartingHistorical(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("orders-historical-import", { body: { seller_id: sellerId, action: "start", days_back: 365 } });
-      if (error) throw error;
-      if (data?.ok) {
-        toast.success("Importação histórica iniciada! O processo roda em background.");
-        loadHistoricalJobStatus();
-      } else {
-        toast.error(data?.error || "Erro ao iniciar importação");
-      }
-    } catch (err: any) {
-      toast.error("Erro ao iniciar importação: " + (err?.message || "Erro"));
-    } finally {
-      setStartingHistorical(false);
-    }
+    // Importação histórica de 1 ano desabilitada em 2026-05 para controle de custo.
+    // Função preservada para uso futuro/admin.
+    toast.error("Importação histórica (1 ano) temporariamente indisponível. Use 'Importar Pedidos (30 dias)'.");
+    return;
   };
 
   const handleStartHistoricalImport30d = async () => {
