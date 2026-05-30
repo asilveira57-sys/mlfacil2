@@ -19,6 +19,7 @@ import { RadiographyDetailPanel } from "@/components/radiography/RadiographyDeta
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
 
 export default function Radiografia() {
   const { sellerId } = useActiveAccount();

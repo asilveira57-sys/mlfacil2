@@ -6,6 +6,7 @@ import { WholesaleDefaultProfile } from "@/components/wholesale/WholesaleDefault
 import { WholesaleCategoryBindings } from "@/components/wholesale/WholesaleCategoryBindings";
 import { WholesaleProductOverrides } from "@/components/wholesale/WholesaleProductOverrides";
 import { WholesalePreview } from "@/components/wholesale/WholesalePreview";
+import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
 
 export default function Atacado() {
   const [activeTab, setActiveTab] = useState("profiles");
@@ -18,6 +19,7 @@ export default function Atacado() {
           Gerencie perfis de camadas, vincule categorias e aplique preços de atacado em lote.
         </p>
       </div>
+      <EconomyModeBanner moduleName="Preço de Atacado" />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex-wrap h-auto gap-1">
