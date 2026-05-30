@@ -1,94 +1,62 @@
-# Plano — Modo Econômico MKTP Fácil
+# Stats públicos (últimos 30 dias) na Landing Page
 
-Objetivo: reduzir drasticamente consumo de banco/API/tokens mantendo apenas Etiquetas de Envio e Etiqueta Full operacionais.
+Exibir prova social com métricas reais e atualizadas dos últimos 30 dias, posicionadas na landing page principal (`/`) como argumento de confiança para novos usuários.
 
-## 1. Infraestrutura de elegibilidade (base de tudo)
+## Métricas exibidas (4 cards)
 
-**Migração SQL** (`supabase--migration`):
-- Adicionar em `workspace_accounts` (ou tabela equivalente do seller): `last_login_at`, `last_active_at`, `auto_sync_paused boolean default false`, `auto_sync_paused_reason text`, `auto_sync_reactivated_at` — só se ainda não existirem.
-- Criar tabela `public.system_sync_logs` com campos do prompt (id, tenant_id, seller_id, user_id, module_name, action, status, reason, started_at, finished_at, duration_ms, records_processed, api_calls_count, tokens_used, metadata jsonb, created_at) + GRANTs + RLS (admin lê tudo, seller lê o próprio) + índices em (seller_id, module_name, created_at desc), (tenant_id, created_at desc), (status, created_at desc).
-- Índices auxiliares se faltarem: `last_login_at`, `last_active_at` em workspace_accounts.
-- Função SQL `public.can_run_auto_sync(p_seller_id, p_module text) returns jsonb` retornando `{allowed, reason}` aplicando:
-  - seller ativo + `auto_sync_paused = false`
-  - `last_login_at >= now() - interval '3 days'`
-  - timezone America/Sao_Paulo: bloqueia 20:00–06:00; sábado >=15:00 e domingo inteiro até segunda 06:00
-  - lista de módulos pausados (radiografia, ads, promotions, seed, abc, custos, frete, ajuste_preco, atacado, ad_timeline) → sempre `false` para auto
-  - apenas módulos `shipping_labels` e `shipping_full` permitidos dentro da janela
-- Função `public.log_sync_decision(...)` grava em `system_sync_logs` (security definer).
+1. **Valor Total Transacionado** — `R$ 32.011.331,00` (com vírgula + 2 casas)
+2. **Pedidos Processados** — `165.654`
+3. **Ticket Médio** — `valor / pedidos`, formato `R$ X,XX`
+4. **Pedidos por Dia** — `pedidos / 30`, inteiro com separador
 
-## 2. Edge function compartilhada
+Todas baseadas em **janela móvel de 30 dias** (não mês calendário).
 
-`supabase/functions/_shared/sync-eligibility.ts` — wrapper que chama `can_run_auto_sync` via RPC e loga via `log_sync_decision`. Toda edge function de sync passa a importá-lo no início e retornar `{skipped: true, reason}` quando bloqueado.
+## Onde aparece
 
-Aplicar nas edge functions já existentes de:
-- `ml-sync-orders` (somente em chamadas com flag `auto=true`; manual continua)
-- qualquer função de radiografia/ads/promotions/seed/abc/custos/frete/ajuste/atacado/ad-timeline que rode em background ou cron
-- `label-teste-*` se existir → retorno imediato 410 Gone
+Nova seção `LandingStats` inserida em `src/pages/Index.tsx` entre `LandingHero` e `LandingBenefits`. Título tipo "Movimentado pelos sellers da plataforma — últimos 30 dias".
 
-## 3. Frontend — pausa de auto-sync
+## Backend
 
-- **`src/hooks/usePostLoginPrefetch.ts`**: remover `triggerBackgroundOrderSync` ou condicionar a `can_run_auto_sync` (chamar RPC antes). Manter prefetch de menu/visual identity (não consome ML API).
-- **`src/hooks/useOrdersSyncWatchdog.ts`**: marcar todos os triggers automáticos como `auto=true`; antes de disparar, chamar RPC de elegibilidade. `forceSyncOrders` (manual) permanece intocado.
-- Watchdogs/polling secundários a desativar (chamar RPC + early-return): `useCostSyncWatchdog`, `useCostDataPolling`, `useAdsDataCache` (background preloads), `useTrendsAutoLoad`, `useTrendsPrefetch`, `useMercadoPrefetch`, `useRadiography` background, `usePromotionSyncLogs` autopoll, etc. Manter botão manual em cada módulo.
-- Atualizar `last_login_at`/`last_active_at` no listener `SIGNED_IN` (uma chamada `update workspace_accounts`).
+### Nova tabela `public.landing_public_stats` (singleton)
+Campos: `total_valor_30d numeric`, `total_pedidos_30d bigint`, `ticket_medio_30d numeric`, `pedidos_por_dia_30d numeric`, `period_start timestamptz`, `period_end timestamptz`, `updated_at timestamptz`.
 
-## 4. Label Teste — pausa total
+- GRANT SELECT para `anon` e `authenticated` (dado público para landing).
+- RLS habilitado com policy `SELECT USING (true)`.
 
-- Remover entrada do menu lateral (procurar em `useDynamicMenu`/`system_modules` — desativar via migração: `update system_modules set is_active=false where key='label_teste'`).
-- Em `App.tsx` (rota `/label-teste`) substituir componente por redirect para `/etiquetas` com toast "Módulo pausado para controle de custo".
-- Em `src/pages/LabelTeste.tsx`: substituir conteúdo por placeholder "Módulo em pausa econômica" (preservar arquivo antigo como `LabelTeste.paused.tsx` com comentário técnico — código original mantido em git).
-- Desabilitar quaisquer edge functions `label-teste-*` retornando 410 + log.
+### Nova edge function `landing-stats-refresh`
+Agrega de `meli_orders_cache` onde `order_status='paid'` e `created_at_meli >= now() - interval '30 days'`:
+- `sum(total_amount)`, `count(*)`.
+- Calcula ticket médio e pedidos/dia.
+- Upsert no singleton + log em `system_logs`.
 
-## 5. Módulo Custo — restrição a 30 dias
+### Cron
+1 execução diária às **06:35 BRT** (`35 9 * * *` UTC), logo após o `global-metrics-daily-refresh` das 06:30. Custo desprezível.
 
-- Localizar UI de importação (`src/pages/Custos.tsx` + componentes filhos) e remover/ocultar botões "Importar 12 meses"/"Importar 1 ano".
-- Hooks/edge functions: forçar `date_from = max(date_from, now - 30d)` no lado servidor (validação em `costs_orders_import` e congêneres).
-- Cron de importação anual (se existir em `cron.job`) → `cron.unschedule`.
-- Esconder rota/botão mas manter função interna acessível para admin (flag `is_admin`).
+## Frontend
 
-## 6. Auditoria de crons & edge functions
+### Novo componente `src/components/landing/LandingStats.tsx`
+- Fetch público via `supabase.from('landing_public_stats').select('*').single()`.
+- Sem autenticação necessária (RLS público).
+- Skeleton enquanto carrega; se erro/vazio, seção não renderiza (fail-safe — não quebra a landing).
+- Formatação:
+  - Valor / Ticket: `new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 }).format(v)`
+  - Pedidos / por dia: `toLocaleString('pt-BR')` (inteiro)
+- Visual alinhado ao print: cards com ícone colorido + label + número grande em negrito, usando tokens semânticos (`bg-card`, `text-foreground`, `text-primary`, etc.). 4 colunas em desktop, 2 em mobile.
+- Texto pequeno "Atualizado em DD/MM" usando `updated_at`.
 
-- Listar via `select * from cron.job` e desativar todos que tocam módulos pausados (radiografia, ads, promotions, seed, abc, custos auto, frete, etc.). Manter apenas crons essenciais (refresh de token ML, etiquetas).
-- Documentar no comentário do cron.
+### i18n
+Adicionar chaves em `src/locales/{pt-BR,en,es}/landing.json` (`stats.title`, `stats.subtitle`, `stats.transacted`, `stats.orders`, `stats.avg_ticket`, `stats.orders_per_day`, `stats.updated_at`).
 
-## 7. Estado informativo nos módulos pausados
+## Passos de implementação
 
-Componente compartilhado `<EconomyModeBanner moduleName="..." onRefresh={...} />` em:
-- AdTimeline, Radiografia, Promoções, ADS, Seed, ABC, Custos (lista), Frete, Ajuste Preço, Atacado
-Texto: "Este módulo está em modo econômico. Os dados só serão atualizados quando você clicar em Atualizar."
+1. Migration: criar tabela + GRANTs + RLS + policy + agendar cron (após função existir).
+2. Edge function `landing-stats-refresh` + entrada em `supabase/config.toml` com `verify_jwt = false` (chamada pública e por cron).
+3. Disparo inicial via `net.http_post` na migration para popular dados imediatamente.
+4. Componente `LandingStats` + chaves i18n.
+5. Inserir `<LandingStats />` em `src/pages/Index.tsx`.
+6. QA: validar formatação `R$ 32.011.331,00` e responsividade no viewport mobile.
 
-## 8. Admin — auditoria simples
+## Pontos a confirmar
 
-Nova página `/admin/economy-mode` (link em AdminDashboard) mostrando:
-- crons ativos (`select * from cron.job`)
-- módulos pausados (constante do front)
-- contadores agregados dos últimos 7 dias em `system_sync_logs` por module/status
-- últimos 100 logs
-
-## 9. Detalhes técnicos
-
-- Timezone: usar `(now() at time zone 'America/Sao_Paulo')` na função SQL — evita dependência de TZ do client.
-- Eligibilidade do front: chamar RPC `can_run_auto_sync` antes de qualquer dispatch automático. Cache de 60s por (seller, module) em memória.
-- Manual = qualquer botão "Atualizar" passa `manual: true` e bypassa a função (mas continua logando como `manual_sync`).
-- Nunca usar `LIMIT` artificial novo — manter paginação por cursor existente.
-
-## 10. Critérios de validação
-
-- `select * from cron.job` mostra apenas essenciais
-- Acessar dashboard fora de horário não chama `ml-sync-orders`
-- Botão "Atualizar" em Etiquetas funciona 24/7
-- `/label-teste` redireciona
-- Custos.tsx não tem mais botão de 12 meses
-- `system_sync_logs` recebe entradas a cada decisão
-
-## Ordem de execução
-
-1. Migração SQL (tabelas/funções/índices/desativação system_modules)
-2. Hook `useSyncEligibility` + invalidações nos watchdogs do front
-3. Label Teste: rota + menu + página placeholder
-4. Custos: remover botão 12 meses + clamp servidor
-5. Banner Modo Econômico nos módulos pausados
-6. Página admin de auditoria
-7. Desativar crons supérfluos (via `supabase--insert` em `cron.unschedule`)
-
-Confirmação necessária antes de começar: posso prosseguir com **todo o escopo acima de uma vez**, ou prefere fatiar (ex.: começar só por 1+3+4+desativar crons como "fase 1 emergencial" e fazer o resto depois)?
+- **Escopo dos dados**: agregar **todos os sellers** da plataforma (números globais) — confirmado pelo print que mostra 165k pedidos e R$ 32M, valores compatíveis com o agregado global atual. OK?
+- **Posicionamento**: logo abaixo do Hero faz mais sentido para impacto. Alternativa: antes do Pricing como reforço final. Preferência?
