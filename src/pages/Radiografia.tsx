@@ -124,6 +124,10 @@ export default function Radiografia() {
             </Button>
           </div>
 
+          <EconomyModeBanner moduleName="Radiografia" onRefresh={handleUpdate} refreshing={updating} />
+
+
+
           {/* No seller state */}
           {!sellerId ? (
             <Card className="bg-slate-900/50 border-slate-700/50">
