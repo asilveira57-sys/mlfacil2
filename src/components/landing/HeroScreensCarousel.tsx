@@ -24,6 +24,9 @@ import dashboardPreview from "@/assets/dashboard-preview.jpg";
 import screenLinhaTempo from "@/assets/landing/screen-linha-tempo.png";
 import screenPromocoes from "@/assets/landing/screen-promocoes.png";
 import screenRadiografia from "@/assets/landing/screen-radiografia.png";
+import screenRadiografiaDetalhe from "@/assets/landing/screen-radiografia-detalhe.png";
+import screenEtiquetas from "@/assets/landing/screen-etiquetas.png";
+import screenAds from "@/assets/landing/screen-ads.png";
 
 type Slide = {
   contentKey: string;
