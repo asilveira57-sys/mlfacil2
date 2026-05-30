@@ -70,6 +70,7 @@ const SLIDES: Slide[] = [
     label: "Diagnóstico do Anúncio",
     icon: BarChart3,
     alt: "Drawer de detalhes do anúncio no MKTP Fácil",
+    fallback: screenRadiografiaDetalhe,
   },
   {
     contentKey: "home.hero.screen_promocoes",
