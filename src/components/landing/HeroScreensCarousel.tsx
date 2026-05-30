@@ -84,6 +84,7 @@ const SLIDES: Slide[] = [
     label: "Publicidade / ADS",
     icon: Megaphone,
     alt: "Tela de Publicidade ADS no MKTP Fácil",
+    fallback: screenAds,
   },
 ];
 
