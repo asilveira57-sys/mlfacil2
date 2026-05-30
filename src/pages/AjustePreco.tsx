@@ -19,6 +19,7 @@ import { format, addDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { Search, ArrowRight, ArrowLeft, ChevronsRight, ChevronsLeft, Eye, Play, Loader2, CheckCircle2, XCircle, AlertTriangle, CalendarIcon, Bell } from "lucide-react";
+import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
 
 interface MlItem {
   id: string;
@@ -326,6 +327,9 @@ export default function AjustePreco() {
         <h1 className="text-2xl font-bold">Ajuste de Preço em Lote</h1>
         <p className="text-muted-foreground text-sm mt-1">Ajuste percentual de preços dos seus anúncios no Mercado Livre</p>
       </div>
+
+      <EconomyModeBanner moduleName="Ajuste de Preço" />
+
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ── LEFT: Filters ── */}

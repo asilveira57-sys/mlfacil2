@@ -66,6 +66,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { exportTimelineExcel, exportTimelinePdf } from "@/utils/exportTimeline";
 import type { StatusBucket, ActionType, CloneChecklist, AdTimelineStats } from "@/types/ad-timeline";
+import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
 
 const bucketLabels: Record<StatusBucket | 'ALL' | 'HAS_SALES', string> = {
   ALL: 'Todos',
@@ -427,6 +428,7 @@ export default function AdTimelineRadar() {
         soft
       >
       <div className="p-6 space-y-6">
+        <EconomyModeBanner moduleName="Linha do Tempo" />
         {/* Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {countsLoading ? (

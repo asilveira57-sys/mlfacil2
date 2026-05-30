@@ -19,6 +19,7 @@ import { RadiographyDetailPanel } from "@/components/radiography/RadiographyDeta
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
 
 export default function Radiografia() {
   const { sellerId } = useActiveAccount();
@@ -122,6 +123,10 @@ export default function Radiografia() {
               {updating ? "Processando..." : "Atualizar Dados"}
             </Button>
           </div>
+
+          <EconomyModeBanner moduleName="Radiografia" onRefresh={handleUpdate} refreshing={updating} />
+
+
 
           {/* No seller state */}
           {!sellerId ? (

@@ -72,6 +72,7 @@ import { PromotionDetailModal } from '@/components/promotions/PromotionDetailMod
 import { PromotionAgentBot } from '@/components/promotions/PromotionAgentBot';
 import { PromotionAgentConfig } from '@/components/promotions/PromotionAgentConfig';
 import { useAgentConfig } from '@/hooks/usePromotionAgent';
+import { EconomyModeBanner } from '@/components/shared/EconomyModeBanner';
 
 export default function Promocoes() {
   const navigate = useNavigate();
@@ -470,6 +471,7 @@ export default function Promocoes() {
   return (
     <PageContainer title="Promoções" subtitle="Central de Promoções">
       <div ref={containerRef} className="p-6 space-y-6 relative">
+        <EconomyModeBanner moduleName="Promoções" />
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">

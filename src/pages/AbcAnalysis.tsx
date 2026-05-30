@@ -10,6 +10,7 @@ import { AbcConfigPanel } from "@/components/abc/AbcConfigPanel";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Package, Users, MapPin } from "lucide-react";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
 
 export interface AbcFilters {
   dateFrom: string | null;
@@ -145,6 +146,7 @@ const AbcAnalysis = () => {
       className="p-6"
     >
       <div className="space-y-6">
+        <EconomyModeBanner moduleName="Curva ABC" />
         <AbcHeader 
           sellerNickname={sellerNickname}
           config={config}

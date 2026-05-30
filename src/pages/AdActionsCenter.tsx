@@ -46,6 +46,7 @@ import { NewListingCloneModal } from "@/components/clone/new-listing";
 import { CreateListingModal } from "@/components/create-listing";
 import { ActionDetailsDialog } from "@/components/ad-actions/ActionDetailsDialog";
 import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
+import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
 
 const statusConfig: Record<ActionStatus, { label: string; icon: React.ReactNode; className: string }> = {
   DRAFT: { label: 'Rascunho', icon: <FileText className="h-4 w-4" />, className: 'bg-muted text-muted-foreground' },
@@ -231,6 +232,7 @@ export default function AdActionsCenter() {
       subtitle="Gerencie ações de encerramento, republicação e clonagem"
     >
       <div className="p-6 space-y-6">
+        <EconomyModeBanner moduleName="Central de Ações" />
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">
             <Button onClick={() => setCreateListingOpen(true)} className="gap-2">

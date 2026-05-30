@@ -6,6 +6,7 @@ import { FreightProductsTab } from '@/components/freight/FreightProductsTab';
 import { FreightDivergenceTab } from '@/components/freight/FreightDivergenceTab';
 import { FreightSettingsTab } from '@/components/freight/FreightSettingsTab';
 import { Table2, Package, AlertTriangle, Settings } from 'lucide-react';
+import { EconomyModeBanner } from '@/components/shared/EconomyModeBanner';
 
 export default function FreightManagement() {
   const [activeTab, setActiveTab] = useState('rulesets');
@@ -15,7 +16,8 @@ export default function FreightManagement() {
       title="Gestão de Frete"
       subtitle="Tabela de frete ML, cálculo de custos e validação de divergências"
     >
-      <div className="container mx-auto py-6 px-4 max-w-7xl">
+      <div className="container mx-auto py-6 px-4 max-w-7xl space-y-4">
+        <EconomyModeBanner moduleName="Gestão de Frete" />
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-4 h-auto p-1 bg-muted/50">
             <TabsTrigger value="rulesets" className="gap-2 py-3">
