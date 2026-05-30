@@ -3,9 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, Play, Shield, Users, Zap, CheckCircle2 } from "lucide-react";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
-import { EditableImage } from "@/components/admin/EditableImage";
 import { EditableText } from "@/components/admin/EditableText";
-import dashboardPreview from "@/assets/dashboard-preview.jpg";
+import { HeroScreensCarousel } from "./HeroScreensCarousel";
 
 export function LandingHero() {
   const navigate = useNavigate();
