@@ -39,6 +39,7 @@ import {
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
 
 export default function Seed() {
   const { t } = useTranslation('seed');
@@ -179,6 +180,7 @@ export default function Seed() {
       headerContent={headerContent}
     >
       <div className="container mx-auto py-6 px-4 max-w-7xl space-y-6">
+        <EconomyModeBanner moduleName="Seed" />
         {/* Hero section */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-success/10 via-primary/5 to-background p-6 border">
           <div className="flex flex-col md:flex-row md:items-center gap-6">
