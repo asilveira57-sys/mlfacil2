@@ -24,6 +24,9 @@ import dashboardPreview from "@/assets/dashboard-preview.jpg";
 import screenLinhaTempo from "@/assets/landing/screen-linha-tempo.png";
 import screenPromocoes from "@/assets/landing/screen-promocoes.png";
 import screenRadiografia from "@/assets/landing/screen-radiografia.png";
+import screenRadiografiaDetalhe from "@/assets/landing/screen-radiografia-detalhe.png";
+import screenEtiquetas from "@/assets/landing/screen-etiquetas.png";
+import screenAds from "@/assets/landing/screen-ads.png";
 
 type Slide = {
   contentKey: string;
@@ -46,6 +49,7 @@ const SLIDES: Slide[] = [
     label: "Etiquetas de Envio",
     icon: Package,
     alt: "Tela de Etiquetas de Envio no MKTP Fácil",
+    fallback: screenEtiquetas,
   },
   {
     contentKey: "home.hero.screen_linha_tempo",
@@ -66,6 +70,7 @@ const SLIDES: Slide[] = [
     label: "Diagnóstico do Anúncio",
     icon: BarChart3,
     alt: "Drawer de detalhes do anúncio no MKTP Fácil",
+    fallback: screenRadiografiaDetalhe,
   },
   {
     contentKey: "home.hero.screen_promocoes",
@@ -79,6 +84,7 @@ const SLIDES: Slide[] = [
     label: "Publicidade / ADS",
     icon: Megaphone,
     alt: "Tela de Publicidade ADS no MKTP Fácil",
+    fallback: screenAds,
   },
 ];
 
