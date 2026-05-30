@@ -19,6 +19,9 @@ export interface BlogPost {
   resumo: string | null;
   conteudo_principal: string | null;
   imagem_capa: string | null;
+  imagem_capa_alt: string | null;
+  tempo_leitura_min: number | null;
+  seo_score: number | null;
   status: BlogPostStatus;
   data_publicacao: string | null;
   data_agendada: string | null;
