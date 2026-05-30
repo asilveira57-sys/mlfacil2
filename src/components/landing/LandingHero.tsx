@@ -110,49 +110,9 @@ export function LandingHero() {
             </div>
           </div>
 
-          {/* Dashboard mockup / Editable Image */}
-          <div className="mt-16 relative">
-            <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent z-10 pointer-events-none" />
-            
-            {hasDashboardImage ? (
-              <EditableImage
-                contentKey="home.hero.dashboard_image"
-                className="w-full rounded-xl md:rounded-2xl shadow-2xl border border-border"
-                alt="Dashboard Preview"
-                aspectRatio="video"
-              />
-            ) : (
-              <EditableImage
-                contentKey="home.hero.dashboard_image"
-                className="w-full"
-                alt="Dashboard Preview"
-                aspectRatio="video"
-                placeholder={
-                  <div className="bg-card border border-border rounded-xl md:rounded-2xl shadow-2xl overflow-hidden">
-                    {/* Browser chrome header */}
-                    <div className="bg-muted/50 border-b border-border px-4 py-3 flex items-center gap-2">
-                      <div className="flex gap-1.5">
-                        <div className="w-3 h-3 rounded-full bg-destructive/50" />
-                        <div className="w-3 h-3 rounded-full bg-warning/50" />
-                        <div className="w-3 h-3 rounded-full bg-success/50" />
-                      </div>
-                      <div className="flex-1 flex justify-center">
-                        <div className="bg-muted px-4 py-1 rounded-md text-xs text-muted-foreground">
-                          dashboard.mktpfacil.com
-                        </div>
-                      </div>
-                    </div>
-                    {/* Real dashboard screenshot */}
-                    <img
-                      src={dashboardPreview}
-                      alt="MKTP Fácil Dashboard"
-                      className="w-full h-auto block"
-                    />
-                  </div>
-                }
-              />
-            )}
-          </div>
+          {/* Screens carousel */}
+          <HeroScreensCarousel />
+
         </div>
       </div>
     </section>
