@@ -7,56 +7,84 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { BlogPost, BlogCategory } from '@/types/blog';
 
-// SEO Head component
+// SEO Head component — injeta title, meta, OG e JSON-LD Article
+const SITE_URL = 'https://www.mktpfacil.com';
+
+function setMeta(selector: string, attr: 'name' | 'property', key: string, content: string) {
+  let el = document.querySelector(selector) as HTMLMetaElement | null;
+  if (!el) {
+    el = document.createElement('meta');
+    el.setAttribute(attr, key);
+    document.head.appendChild(el);
+  }
+  el.setAttribute('content', content);
+}
+
+function setLink(rel: string, href: string) {
+  let el = document.querySelector(`link[rel="${rel}"]`) as HTMLLinkElement | null;
+  if (!el) {
+    el = document.createElement('link');
+    el.setAttribute('rel', rel);
+    document.head.appendChild(el);
+  }
+  el.setAttribute('href', href);
+}
+
+function setJsonLd(id: string, payload: object | null) {
+  let el = document.getElementById(id) as HTMLScriptElement | null;
+  if (payload === null) { el?.remove(); return; }
+  if (!el) {
+    el = document.createElement('script');
+    el.type = 'application/ld+json';
+    el.id = id;
+    document.head.appendChild(el);
+  }
+  el.text = JSON.stringify(payload);
+}
+
 function BlogSEO({ post, category }: { post?: BlogPost | null; category?: BlogCategory | null }) {
   useEffect(() => {
     if (post) {
-      document.title = post.meta_title || post.titulo;
-      
-      // Meta description
-      const metaDesc = document.querySelector('meta[name="description"]');
-      if (metaDesc) {
-        metaDesc.setAttribute('content', post.meta_description || post.resumo || '');
-      } else {
-        const meta = document.createElement('meta');
-        meta.name = 'description';
-        meta.content = post.meta_description || post.resumo || '';
-        document.head.appendChild(meta);
-      }
-      
-      // Meta keywords
-      if (post.meta_keywords) {
-        let metaKeywords = document.querySelector('meta[name="keywords"]');
-        if (!metaKeywords) {
-          metaKeywords = document.createElement('meta');
-          metaKeywords.setAttribute('name', 'keywords');
-          document.head.appendChild(metaKeywords);
-        }
-        metaKeywords.setAttribute('content', post.meta_keywords);
-      }
-      
-      // Canonical URL
-      let canonical = document.querySelector('link[rel="canonical"]');
-      if (!canonical) {
-        canonical = document.createElement('link');
-        canonical.setAttribute('rel', 'canonical');
-        document.head.appendChild(canonical);
-      }
-      canonical.setAttribute('href', post.canonical_url || window.location.href);
-      
+      const url = post.canonical_url || `${SITE_URL}/blog/${post.slug}`;
+      const title = post.meta_title || post.titulo;
+      const desc = post.meta_description || post.resumo || '';
+      document.title = title;
+      setMeta('meta[name="description"]', 'name', 'description', desc);
+      if (post.meta_keywords) setMeta('meta[name="keywords"]', 'name', 'keywords', post.meta_keywords);
+      setMeta('meta[property="og:title"]', 'property', 'og:title', title);
+      setMeta('meta[property="og:description"]', 'property', 'og:description', desc);
+      setMeta('meta[property="og:type"]', 'property', 'og:type', 'article');
+      setMeta('meta[property="og:url"]', 'property', 'og:url', url);
+      if (post.imagem_capa) setMeta('meta[property="og:image"]', 'property', 'og:image', post.imagem_capa);
+      setLink('canonical', url);
+      setJsonLd('jsonld-article', {
+        '@context': 'https://schema.org',
+        '@type': 'Article',
+        headline: title,
+        description: desc,
+        image: post.imagem_capa || undefined,
+        datePublished: post.data_publicacao || post.created_at,
+        dateModified: post.updated_at,
+        author: post.autor ? { '@type': 'Person', name: post.autor } : undefined,
+        publisher: { '@type': 'Organization', name: 'MKTP Fácil' },
+        mainEntityOfPage: url,
+      });
     } else if (category) {
-      document.title = `${category.nome} - Blog`;
+      document.title = `${category.nome} — Blog MKTP Fácil`;
+      setMeta('meta[name="description"]', 'name', 'description', category.descricao || `Posts da categoria ${category.nome}`);
+      setLink('canonical', `${SITE_URL}/blog/categoria/${category.slug}`);
+      setJsonLd('jsonld-article', null);
     } else {
-      document.title = 'Blog - MKTP Fácil';
+      document.title = 'Blog — MKTP Fácil';
+      setMeta('meta[name="description"]', 'name', 'description', 'Dicas, estratégias e novidades sobre vendas no Mercado Livre.');
+      setLink('canonical', `${SITE_URL}/blog`);
+      setJsonLd('jsonld-article', null);
     }
-    
-    return () => {
-      document.title = 'MKTP Fácil';
-    };
+    return () => { document.title = 'MKTP Fácil'; };
   }, [post, category]);
-  
   return null;
 }
+
 
 // Blog List Page
 function BlogListPage() {
