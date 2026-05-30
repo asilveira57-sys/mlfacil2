@@ -21,6 +21,9 @@ import {
   BarChart3,
 } from "lucide-react";
 import dashboardPreview from "@/assets/dashboard-preview.jpg";
+import screenLinhaTempo from "@/assets/landing/screen-linha-tempo.png";
+import screenPromocoes from "@/assets/landing/screen-promocoes.png";
+import screenRadiografia from "@/assets/landing/screen-radiografia.png";
 
 type Slide = {
   contentKey: string;
