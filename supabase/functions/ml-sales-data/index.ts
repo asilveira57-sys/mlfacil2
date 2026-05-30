@@ -33,25 +33,19 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Validate JWT and get user using admin client
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    
-    if (userError) {
-      console.error('Auth error:', userError.message, 'Status:', userError.status);
+    // Validate JWT locally via signing keys (no network call to GoTrue → avoids
+    // intermittent "Auth session missing!" 400s when access tokens are mid-refresh)
+    const { data: claimsData, error: claimsError } = await supabaseAdmin.auth.getClaims(token);
+
+    if (claimsError || !claimsData?.claims?.sub) {
+      console.error('Auth error:', claimsError?.message ?? 'no claims');
       return new Response(
-        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    if (!user) {
-      console.error('No user found for token');
-      return new Response(
-        JSON.stringify({ error: 'User not authenticated' }),
+        JSON.stringify({ error: 'User not authenticated', details: claimsError?.message ?? 'invalid token' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    const user = { id: claimsData.claims.sub as string };
     console.log('Authenticated user:', user.id);
 
     // ML API Access Gate - check trial/subscription
