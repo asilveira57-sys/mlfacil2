@@ -72,6 +72,7 @@ const SLIDES: Slide[] = [
     label: "Promoções",
     icon: Tag,
     alt: "Tela de Promoções no MKTP Fácil",
+    fallback: screenPromocoes,
   },
   {
     contentKey: "home.hero.screen_ads",
