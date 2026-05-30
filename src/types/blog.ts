@@ -49,6 +49,9 @@ export interface BlogPostInsert {
   resumo?: string;
   conteudo_principal?: string;
   imagem_capa?: string;
+  imagem_capa_alt?: string;
+  tempo_leitura_min?: number;
+  seo_score?: number;
   status?: BlogPostStatus;
   data_publicacao?: string;
   data_agendada?: string;
@@ -69,6 +72,9 @@ export interface BlogPostUpdate {
   resumo?: string;
   conteudo_principal?: string;
   imagem_capa?: string;
+  imagem_capa_alt?: string;
+  tempo_leitura_min?: number;
+  seo_score?: number;
   status?: BlogPostStatus;
   data_publicacao?: string;
   data_agendada?: string;
