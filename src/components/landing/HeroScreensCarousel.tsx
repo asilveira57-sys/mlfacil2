@@ -21,6 +21,9 @@ import {
   BarChart3,
 } from "lucide-react";
 import dashboardPreview from "@/assets/dashboard-preview.jpg";
+import screenLinhaTempo from "@/assets/landing/screen-linha-tempo.png";
+import screenPromocoes from "@/assets/landing/screen-promocoes.png";
+import screenRadiografia from "@/assets/landing/screen-radiografia.png";
 
 type Slide = {
   contentKey: string;
@@ -49,12 +52,14 @@ const SLIDES: Slide[] = [
     label: "Linha do Tempo",
     icon: Clock,
     alt: "Tela da Linha do Tempo no MKTP Fácil",
+    fallback: screenLinhaTempo,
   },
   {
     contentKey: "home.hero.screen_radiografia",
     label: "Radiografia",
     icon: Activity,
     alt: "Tela de Radiografia de anúncios no MKTP Fácil",
+    fallback: screenRadiografia,
   },
   {
     contentKey: "home.hero.screen_radiografia_detalhe",
@@ -67,6 +72,7 @@ const SLIDES: Slide[] = [
     label: "Promoções",
     icon: Tag,
     alt: "Tela de Promoções no MKTP Fácil",
+    fallback: screenPromocoes,
   },
   {
     contentKey: "home.hero.screen_ads",
