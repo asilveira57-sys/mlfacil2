@@ -1,79 +1,56 @@
-# Blog Pro + Assistente de SEO com IA
 
-Transformar o blog atual em uma ferramenta completa de publicação, no estilo WordPress, com editor visual, upload de imagens, embed de vídeo e assistente de IA para SEO.
+# Carrossel de Telas do Sistema no Hero da Landing
 
-## 1. Backend (Lovable Cloud)
+Transformar a imagem única do dashboard (em `LandingHero.tsx`) em um carrossel elegante com múltiplas telas do sistema, navegação por setas, dots indicadores e autoplay.
 
-### Banco de dados (migration)
-Adicionar colunas em `blog_posts`:
-- `imagem_capa_alt` (text) — obrigatório quando há capa
-- `tempo_leitura_min` (int) — auto-calculado a partir do conteúdo
-- `seo_score` (int 0–100) — preenchido pelo auditor de IA
-- `meta_title` e `meta_description` (caso ainda não existam) — usados nas tags `<title>` e `<meta>`
+## O que será feito
 
-### Storage
-- Criar bucket público `blog-media`
-- Políticas: `SELECT` público; `INSERT/UPDATE/DELETE` apenas para autenticados
+### 1. Assets das telas (7 imagens enviadas)
+Copiar as imagens anexadas para `src/assets/landing/`:
+- `screen-dashboard.png` (Dashboard de Vendas)
+- `screen-etiquetas.png` (Etiquetas de Envio)
+- `screen-linha-tempo.png` (Linha do Tempo)
+- `screen-radiografia.png` (Radiografia / Prontuários)
+- `screen-radiografia-detalhe.png` (drawer Ribbon Dourado)
+- `screen-promocoes.png` (Promoções)
+- `screen-ads.png` (Mercado ADS)
 
-### Edge Function `blog-ai-assistant`
-Usa Lovable AI Gateway (modelo `google/gemini-2.5-flash`, sem custo extra). 4 ações:
-- `generate_meta` → title ≤60, description ≤160, 8–12 keywords
-- `improve_content` → corrige gramática, sugere H2/H3
-- `generate_alt` → alt ≤125 caracteres a partir da URL/contexto da imagem
-- `seo_audit` → score 0–100 + lista de problemas e sugestões
+Cada slide terá um rótulo (badge) com o nome do módulo, ex: "Dashboard", "Etiquetas de Envio", "Radiografia", "Publicidade / ADS", etc.
 
-Logs salvos em `system_logs` (area `blog_ai`).
+### 2. Novo componente `HeroScreensCarousel.tsx`
+Em `src/components/landing/HeroScreensCarousel.tsx`, usando o `Carousel` do shadcn (`@/components/ui/carousel`, já presente — baseado em Embla) com plugin `embla-carousel-autoplay`:
 
-## 2. Frontend — Editor
+- **Frame "browser"**: mantém o chrome atual (3 bolinhas + barra de URL `dashboard.mktpfacil.com`) envolvendo a imagem ativa, dando moldura premium.
+- **Borda trabalhada**: container com `rounded-2xl`, `border border-border`, `shadow-2xl`, gradient ring sutil (`bg-gradient-to-br from-primary/20 via-transparent to-accent/20 p-[2px]`) ao redor do frame; glow suave atrás (`blur-3xl` em primary/10).
+- **Badge do módulo**: no canto superior esquerdo da imagem, pill com ícone + nome do módulo (ex: ícone Lucide + "Etiquetas de Envio").
+- **Setas prev/next**: botões circulares semitransparentes nas laterais (visíveis no hover em desktop, sempre visíveis no mobile), usando `CarouselPrevious`/`CarouselNext` reposicionados.
+- **Dots indicadores**: linha de pontinhos abaixo do carrossel; o ativo é mais largo (pill) na cor `primary`, inativos em `muted-foreground/40`. Clicáveis para pular direto.
+- **Autoplay**: 5s por slide, pausa no hover/interação, loop infinito.
+- **Acessibilidade**: `aria-label` no carrossel, `alt` descritivo por imagem, `aria-current` nos dots.
+- **Responsivo**: imagem `w-full h-auto`, frame mantém `aspect-video`, lazy loading nas imagens não-ativas.
 
-### Novo componente `RichTextEditor.tsx`
-Baseado em TipTap (`@tiptap/react` + `starter-kit` + extensões para imagem, YouTube e paste-cleanup do Word/Docs/WordPress).
+### 3. Integração no `LandingHero.tsx`
+Substituir o bloco final "Dashboard mockup / Editable Image" (a partir do `<div className="mt-16 relative">`) pelo `<HeroScreensCarousel />`. Remover o uso do `EditableImage` para `home.hero.dashboard_image` nesse ponto (manter o asset por compatibilidade, mas não exibido). O gradient overlay superior é preservado dentro do componente.
 
-Recursos:
-- Toolbar com H1/H2/H3, negrito, itálico, listas, link, citação, código
-- Upload de imagem direto (drag, paste ou botão) → envia ao bucket `blog-media`
-- Inserir imagem por URL com campo de **alt obrigatório**
-- Embed de YouTube/Vimeo via URL
-- Colar conteúdo do Word/Google Docs/WordPress com limpeza automática
-- Saída: HTML salvo em `conteudo_principal`
-
-### `BlogPostEditor.tsx` reformulado
-- Substitui o textarea pelo `RichTextEditor`
-- Botão **"Auto-SEO ✨"** → preenche meta title, description e keywords
-- Botão **"Gerar alt com IA"** ao lado do campo da capa
-- Botão **"Revisar conteúdo com IA"** → aplica `improve_content`
-- Painel **"Auditoria de SEO"** com score visual, problemas e sugestões
-- Pré-visualização ao vivo, contagem de palavras e tempo de leitura
-- Slug gerado automaticamente a partir do título (editável)
-
-## 3. Frontend — Renderização pública
-
-### `Blog.tsx` (lista) e página de post individual
-- Renderização com `dangerouslySetInnerHTML` sanitizada via `DOMPurify`
-- Classes `prose prose-lg` do `@tailwindcss/typography` para HTML bonito
-- Cards com `aspect-video`, lazy loading de imagens, miniatura destacada
-- Por post via `react-helmet-async`:
-  - `<title>` e `<meta name="description">` específicos
-  - `<link rel="canonical">` apontando para o slug
-  - Open Graph (`og:title`, `og:description`, `og:image`, `og:type=article`)
-  - **JSON-LD `Article`** com `headline`, `image`, `datePublished`, `author`
-
-### `index.html`
-- Remover `<link rel="canonical">` global (cada rota define o seu via Helmet)
-- Manter Organization JSON-LD e meta padrão como fallback
-
-## 4. Dependências novas
-- `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-image`, `@tiptap/extension-youtube`
-- `dompurify` + `@types/dompurify`
-- `@tailwindcss/typography`
-- `react-helmet-async`
-
-## Fora de escopo
-- `BlogArticleGenerator` (geração de artigo inteiro por IA) — permanece como está
-- Mudanças no admin de comentários/categorias
+### 4. Sem mudanças em backend
+- Não envolve banco, edge functions ou auth.
+- Lista de slides definida estaticamente no componente (módulo + imagem + alt), facilmente extensível.
 
 ## Detalhes técnicos
-- `conteudo_principal` passa a armazenar **HTML** (TipTap salva HTML nativo). Como ainda não há posts publicados, não há migração de dados.
-- Sanitização sempre via `DOMPurify` antes de renderizar (allowlist incluindo `iframe` apenas para YouTube/Vimeo).
-- IA estritamente server-side: o frontend chama a edge function, nunca o gateway direto.
-- Edge function valida sessão autenticada (admin) antes de processar ações.
+
+- **Dependência nova**: `embla-carousel-autoplay` (peer compatível com `embla-carousel-react` já instalado pelo shadcn carousel). Se não estiver, adicionar via bun.
+- **Estado ativo**: usar `api.on("select", ...)` do Embla para sincronizar dots e badge atual.
+- **Performance**: `loading="lazy"` + `decoding="async"` em todas imagens exceto a primeira (`eager`).
+- **Tokens semânticos**: usar `border-border`, `bg-card`, `text-primary`, `text-muted-foreground` — sem cores hardcoded.
+- **Não afeta** outras páginas/módulos; mudança isolada no Hero da landing pública.
+
+## Arquivos
+
+- **Criar**: `src/components/landing/HeroScreensCarousel.tsx`
+- **Copiar (assets)**: 7 PNGs para `src/assets/landing/`
+- **Editar**: `src/components/landing/LandingHero.tsx` (substituir bloco da imagem)
+- **Editar (se necessário)**: `package.json` (adicionar `embla-carousel-autoplay`)
+
+## Fora de escopo
+- Edição inline das imagens do carrossel via admin (`EditableImage`) — slides ficam fixos nesta primeira versão.
+- Alterar outras seções da landing.
