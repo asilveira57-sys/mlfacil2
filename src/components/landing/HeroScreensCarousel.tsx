@@ -52,12 +52,14 @@ const SLIDES: Slide[] = [
     label: "Linha do Tempo",
     icon: Clock,
     alt: "Tela da Linha do Tempo no MKTP Fácil",
+    fallback: screenLinhaTempo,
   },
   {
     contentKey: "home.hero.screen_radiografia",
     label: "Radiografia",
     icon: Activity,
     alt: "Tela de Radiografia de anúncios no MKTP Fácil",
+    fallback: screenRadiografia,
   },
   {
     contentKey: "home.hero.screen_radiografia_detalhe",
