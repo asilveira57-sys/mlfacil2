@@ -6,6 +6,7 @@ import { AdminEditModeIndicator } from "@/components/admin/AdminEditModeIndicato
 import {
   LandingHeader,
   LandingHero,
+  LandingStats,
   LandingBenefits,
   LandingModules,
   LandingHowItWorks,
@@ -34,6 +35,7 @@ const Index = () => {
         <LandingHeader />
         <main>
           <LandingHero />
+          <LandingStats />
           <LandingBenefits />
           <LandingModules />
           <LandingHowItWorks />

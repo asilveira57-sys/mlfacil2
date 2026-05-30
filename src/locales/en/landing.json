@@ -25,6 +25,15 @@
     "trust_mercadopago": "Integrated with Mercado Pago",
     "trust_multiconta": "Multi-account support"
   },
+  "stats": {
+    "title": "Moved by sellers on MKTP Fácil",
+    "subtitle": "Real volume transacted by our seller base in the last 30 days.",
+    "transacted": "Transacted Value (30d)",
+    "orders": "Processed Orders (30d)",
+    "avg_ticket": "Average Ticket",
+    "orders_per_day": "Orders per Day",
+    "updated_at": "Updated on {{date}}"
+  },
   "benefits": {
     "title": "What MKTP Fácil does for you",
     "subtitle": "Real features that optimize every aspect of your Mercado Libre operation.",

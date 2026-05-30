@@ -6591,6 +6591,39 @@ export type Database = {
         }
         Relationships: []
       }
+      landing_public_stats: {
+        Row: {
+          id: string
+          pedidos_por_dia_30d: number
+          period_end: string | null
+          period_start: string | null
+          ticket_medio_30d: number
+          total_pedidos_30d: number
+          total_valor_30d: number
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          pedidos_por_dia_30d?: number
+          period_end?: string | null
+          period_start?: string | null
+          ticket_medio_30d?: number
+          total_pedidos_30d?: number
+          total_valor_30d?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          pedidos_por_dia_30d?: number
+          period_end?: string | null
+          period_start?: string | null
+          ticket_medio_30d?: number
+          total_pedidos_30d?: number
+          total_valor_30d?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       learned_listing_attributes: {
         Row: {
           attribute_id: string

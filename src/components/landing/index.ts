@@ -5,6 +5,7 @@ export { FAQItem, FAQList } from "./FAQItem";
 export { LandingHeader } from "./LandingHeader";
 export { LandingHero } from "./LandingHero";
 export { LandingBenefits } from "./LandingBenefits";
+export { LandingStats } from "./LandingStats";
 export { LandingModules } from "./LandingModules";
 export { LandingHowItWorks } from "./LandingHowItWorks";
 export { LandingIntegrations } from "./LandingIntegrations";
