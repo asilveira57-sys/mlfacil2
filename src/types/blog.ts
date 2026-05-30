@@ -123,3 +123,20 @@ export function validateSeoBeforePublish(post: BlogPost): BlogSeoValidation {
     errors
   };
 }
+
+// Helpers
+export function stripHtml(html: string): string {
+  return (html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+export function countWords(html: string): number {
+  const text = stripHtml(html);
+  if (!text) return 0;
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+export function readingTimeMin(html: string): number {
+  const words = countWords(html);
+  return Math.max(1, Math.ceil(words / 220));
+}
+
