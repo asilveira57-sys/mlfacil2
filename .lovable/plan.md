@@ -1,62 +1,79 @@
-# Stats públicos (últimos 30 dias) na Landing Page
+# Blog Pro + Assistente de SEO com IA
 
-Exibir prova social com métricas reais e atualizadas dos últimos 30 dias, posicionadas na landing page principal (`/`) como argumento de confiança para novos usuários.
+Transformar o blog atual em uma ferramenta completa de publicação, no estilo WordPress, com editor visual, upload de imagens, embed de vídeo e assistente de IA para SEO.
 
-## Métricas exibidas (4 cards)
+## 1. Backend (Lovable Cloud)
 
-1. **Valor Total Transacionado** — `R$ 32.011.331,00` (com vírgula + 2 casas)
-2. **Pedidos Processados** — `165.654`
-3. **Ticket Médio** — `valor / pedidos`, formato `R$ X,XX`
-4. **Pedidos por Dia** — `pedidos / 30`, inteiro com separador
+### Banco de dados (migration)
+Adicionar colunas em `blog_posts`:
+- `imagem_capa_alt` (text) — obrigatório quando há capa
+- `tempo_leitura_min` (int) — auto-calculado a partir do conteúdo
+- `seo_score` (int 0–100) — preenchido pelo auditor de IA
+- `meta_title` e `meta_description` (caso ainda não existam) — usados nas tags `<title>` e `<meta>`
 
-Todas baseadas em **janela móvel de 30 dias** (não mês calendário).
+### Storage
+- Criar bucket público `blog-media`
+- Políticas: `SELECT` público; `INSERT/UPDATE/DELETE` apenas para autenticados
 
-## Onde aparece
+### Edge Function `blog-ai-assistant`
+Usa Lovable AI Gateway (modelo `google/gemini-2.5-flash`, sem custo extra). 4 ações:
+- `generate_meta` → title ≤60, description ≤160, 8–12 keywords
+- `improve_content` → corrige gramática, sugere H2/H3
+- `generate_alt` → alt ≤125 caracteres a partir da URL/contexto da imagem
+- `seo_audit` → score 0–100 + lista de problemas e sugestões
 
-Nova seção `LandingStats` inserida em `src/pages/Index.tsx` entre `LandingHero` e `LandingBenefits`. Título tipo "Movimentado pelos sellers da plataforma — últimos 30 dias".
+Logs salvos em `system_logs` (area `blog_ai`).
 
-## Backend
+## 2. Frontend — Editor
 
-### Nova tabela `public.landing_public_stats` (singleton)
-Campos: `total_valor_30d numeric`, `total_pedidos_30d bigint`, `ticket_medio_30d numeric`, `pedidos_por_dia_30d numeric`, `period_start timestamptz`, `period_end timestamptz`, `updated_at timestamptz`.
+### Novo componente `RichTextEditor.tsx`
+Baseado em TipTap (`@tiptap/react` + `starter-kit` + extensões para imagem, YouTube e paste-cleanup do Word/Docs/WordPress).
 
-- GRANT SELECT para `anon` e `authenticated` (dado público para landing).
-- RLS habilitado com policy `SELECT USING (true)`.
+Recursos:
+- Toolbar com H1/H2/H3, negrito, itálico, listas, link, citação, código
+- Upload de imagem direto (drag, paste ou botão) → envia ao bucket `blog-media`
+- Inserir imagem por URL com campo de **alt obrigatório**
+- Embed de YouTube/Vimeo via URL
+- Colar conteúdo do Word/Google Docs/WordPress com limpeza automática
+- Saída: HTML salvo em `conteudo_principal`
 
-### Nova edge function `landing-stats-refresh`
-Agrega de `meli_orders_cache` onde `order_status='paid'` e `created_at_meli >= now() - interval '30 days'`:
-- `sum(total_amount)`, `count(*)`.
-- Calcula ticket médio e pedidos/dia.
-- Upsert no singleton + log em `system_logs`.
+### `BlogPostEditor.tsx` reformulado
+- Substitui o textarea pelo `RichTextEditor`
+- Botão **"Auto-SEO ✨"** → preenche meta title, description e keywords
+- Botão **"Gerar alt com IA"** ao lado do campo da capa
+- Botão **"Revisar conteúdo com IA"** → aplica `improve_content`
+- Painel **"Auditoria de SEO"** com score visual, problemas e sugestões
+- Pré-visualização ao vivo, contagem de palavras e tempo de leitura
+- Slug gerado automaticamente a partir do título (editável)
 
-### Cron
-1 execução diária às **06:35 BRT** (`35 9 * * *` UTC), logo após o `global-metrics-daily-refresh` das 06:30. Custo desprezível.
+## 3. Frontend — Renderização pública
 
-## Frontend
+### `Blog.tsx` (lista) e página de post individual
+- Renderização com `dangerouslySetInnerHTML` sanitizada via `DOMPurify`
+- Classes `prose prose-lg` do `@tailwindcss/typography` para HTML bonito
+- Cards com `aspect-video`, lazy loading de imagens, miniatura destacada
+- Por post via `react-helmet-async`:
+  - `<title>` e `<meta name="description">` específicos
+  - `<link rel="canonical">` apontando para o slug
+  - Open Graph (`og:title`, `og:description`, `og:image`, `og:type=article`)
+  - **JSON-LD `Article`** com `headline`, `image`, `datePublished`, `author`
 
-### Novo componente `src/components/landing/LandingStats.tsx`
-- Fetch público via `supabase.from('landing_public_stats').select('*').single()`.
-- Sem autenticação necessária (RLS público).
-- Skeleton enquanto carrega; se erro/vazio, seção não renderiza (fail-safe — não quebra a landing).
-- Formatação:
-  - Valor / Ticket: `new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 }).format(v)`
-  - Pedidos / por dia: `toLocaleString('pt-BR')` (inteiro)
-- Visual alinhado ao print: cards com ícone colorido + label + número grande em negrito, usando tokens semânticos (`bg-card`, `text-foreground`, `text-primary`, etc.). 4 colunas em desktop, 2 em mobile.
-- Texto pequeno "Atualizado em DD/MM" usando `updated_at`.
+### `index.html`
+- Remover `<link rel="canonical">` global (cada rota define o seu via Helmet)
+- Manter Organization JSON-LD e meta padrão como fallback
 
-### i18n
-Adicionar chaves em `src/locales/{pt-BR,en,es}/landing.json` (`stats.title`, `stats.subtitle`, `stats.transacted`, `stats.orders`, `stats.avg_ticket`, `stats.orders_per_day`, `stats.updated_at`).
+## 4. Dependências novas
+- `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-image`, `@tiptap/extension-youtube`
+- `dompurify` + `@types/dompurify`
+- `@tailwindcss/typography`
+- `react-helmet-async`
 
-## Passos de implementação
+## Fora de escopo
+- `BlogArticleGenerator` (geração de artigo inteiro por IA) — permanece como está
+- Mudanças no admin de comentários/categorias
 
-1. Migration: criar tabela + GRANTs + RLS + policy + agendar cron (após função existir).
-2. Edge function `landing-stats-refresh` + entrada em `supabase/config.toml` com `verify_jwt = false` (chamada pública e por cron).
-3. Disparo inicial via `net.http_post` na migration para popular dados imediatamente.
-4. Componente `LandingStats` + chaves i18n.
-5. Inserir `<LandingStats />` em `src/pages/Index.tsx`.
-6. QA: validar formatação `R$ 32.011.331,00` e responsividade no viewport mobile.
-
-## Pontos a confirmar
-
-- **Escopo dos dados**: agregar **todos os sellers** da plataforma (números globais) — confirmado pelo print que mostra 165k pedidos e R$ 32M, valores compatíveis com o agregado global atual. OK?
-- **Posicionamento**: logo abaixo do Hero faz mais sentido para impacto. Alternativa: antes do Pricing como reforço final. Preferência?
+## Detalhes técnicos
+- `conteudo_principal` passa a armazenar **HTML** (TipTap salva HTML nativo). Como ainda não há posts publicados, não há migração de dados.
+- Sanitização sempre via `DOMPurify` antes de renderizar (allowlist incluindo `iframe` apenas para YouTube/Vimeo).
+- IA estritamente server-side: o frontend chama a edge function, nunca o gateway direto.
+- Edge function valida sessão autenticada (admin) antes de processar ações.

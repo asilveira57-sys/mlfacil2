@@ -19,6 +19,9 @@ export interface BlogPost {
   resumo: string | null;
   conteudo_principal: string | null;
   imagem_capa: string | null;
+  imagem_capa_alt: string | null;
+  tempo_leitura_min: number | null;
+  seo_score: number | null;
   status: BlogPostStatus;
   data_publicacao: string | null;
   data_agendada: string | null;
@@ -46,6 +49,9 @@ export interface BlogPostInsert {
   resumo?: string;
   conteudo_principal?: string;
   imagem_capa?: string;
+  imagem_capa_alt?: string;
+  tempo_leitura_min?: number;
+  seo_score?: number;
   status?: BlogPostStatus;
   data_publicacao?: string;
   data_agendada?: string;
@@ -66,6 +72,9 @@ export interface BlogPostUpdate {
   resumo?: string;
   conteudo_principal?: string;
   imagem_capa?: string;
+  imagem_capa_alt?: string;
+  tempo_leitura_min?: number;
+  seo_score?: number;
   status?: BlogPostStatus;
   data_publicacao?: string;
   data_agendada?: string;
@@ -114,3 +123,20 @@ export function validateSeoBeforePublish(post: BlogPost): BlogSeoValidation {
     errors
   };
 }
+
+// Helpers
+export function stripHtml(html: string): string {
+  return (html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+export function countWords(html: string): number {
+  const text = stripHtml(html);
+  if (!text) return 0;
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+export function readingTimeMin(html: string): number {
+  const words = countWords(html);
+  return Math.max(1, Math.ceil(words / 220));
+}
+

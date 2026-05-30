@@ -2256,6 +2256,7 @@ export type Database = {
           data_publicacao: string | null
           id: string
           imagem_capa: string | null
+          imagem_capa_alt: string | null
           meta_description: string | null
           meta_keywords: string | null
           meta_title: string | null
@@ -2263,9 +2264,11 @@ export type Database = {
           modulo_vinculado: string | null
           origem: string | null
           resumo: string | null
+          seo_score: number | null
           slug: string
           status: string
           tags: string[] | null
+          tempo_leitura_min: number | null
           titulo: string
           updated_at: string
         }
@@ -2279,6 +2282,7 @@ export type Database = {
           data_publicacao?: string | null
           id?: string
           imagem_capa?: string | null
+          imagem_capa_alt?: string | null
           meta_description?: string | null
           meta_keywords?: string | null
           meta_title?: string | null
@@ -2286,9 +2290,11 @@ export type Database = {
           modulo_vinculado?: string | null
           origem?: string | null
           resumo?: string | null
+          seo_score?: number | null
           slug: string
           status?: string
           tags?: string[] | null
+          tempo_leitura_min?: number | null
           titulo: string
           updated_at?: string
         }
@@ -2302,6 +2308,7 @@ export type Database = {
           data_publicacao?: string | null
           id?: string
           imagem_capa?: string | null
+          imagem_capa_alt?: string | null
           meta_description?: string | null
           meta_keywords?: string | null
           meta_title?: string | null
@@ -2309,9 +2316,11 @@ export type Database = {
           modulo_vinculado?: string | null
           origem?: string | null
           resumo?: string | null
+          seo_score?: number | null
           slug?: string
           status?: string
           tags?: string[] | null
+          tempo_leitura_min?: number | null
           titulo?: string
           updated_at?: string
         }
