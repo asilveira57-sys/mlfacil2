@@ -100,17 +100,20 @@ export function ExplanatoryCardGate({ moduleSlug, children }: Props) {
         children
       )}
 
-      {/* "Rever explicação" button (only if cards exist and user already viewed) */}
+      {/* "Rever explicação" floating button — collapsed icon, expands on hover */}
       {hasCards && hasViewed && (
-        <div className="fixed bottom-6 right-6 z-40">
+        <div className="fixed bottom-4 right-4 z-40">
           <Button
             variant="outline"
             size="sm"
-            className="shadow-lg gap-2"
+            className="shadow-lg group h-9 w-9 hover:w-auto hover:px-3 p-0 overflow-hidden transition-all duration-200 rounded-full"
             onClick={() => setManualOpen(true)}
+            title="Rever explicação"
           >
-            <BookOpen className="h-4 w-4" />
-            Rever explicação
+            <BookOpen className="h-4 w-4 shrink-0" />
+            <span className="ml-0 max-w-0 group-hover:ml-2 group-hover:max-w-[160px] whitespace-nowrap overflow-hidden transition-all duration-200">
+              Rever explicação
+            </span>
           </Button>
         </div>
       )}
