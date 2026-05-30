@@ -44,12 +44,12 @@ const AuthLeftColumn = () => (
 
     <div className="relative z-20">
       {/* Logo */}
-      <div className="flex items-center gap-3 mb-6">
+      <Link to="/" aria-label="Voltar para a página inicial" className="flex items-center gap-3 mb-6 w-fit hover:opacity-90 transition-opacity">
         <div className="w-9 h-9 bg-accent/90 rounded-xl flex items-center justify-center">
           <BarChart3 className="w-4.5 h-4.5 text-white" />
         </div>
         <h1 className="text-lg font-bold tracking-tight">MKTP Fácil</h1>
-      </div>
+      </Link>
 
       {/* Benefit Cards */}
       <div className="space-y-2">
@@ -327,12 +327,12 @@ const Auth = () => {
         <div className="w-full max-w-[400px]">
           {/* Mobile logo */}
           <div className="lg:hidden mb-10 text-center">
-            <div className="flex items-center justify-center gap-3 mb-2">
+            <Link to="/" aria-label="Voltar para a página inicial" className="flex items-center justify-center gap-3 mb-2 hover:opacity-90 transition-opacity">
               <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
                 <BarChart3 className="w-5 h-5 text-primary-foreground" />
               </div>
               <h1 className="text-xl font-bold text-foreground tracking-tight">MKTP Fácil</h1>
-            </div>
+            </Link>
           </div>
 
           <div className="bg-card p-8 sm:p-10 rounded-2xl shadow-lg border border-border/50">
