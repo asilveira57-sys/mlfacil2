@@ -49,6 +49,7 @@ const SLIDES: Slide[] = [
     label: "Etiquetas de Envio",
     icon: Package,
     alt: "Tela de Etiquetas de Envio no MKTP Fácil",
+    fallback: screenEtiquetas,
   },
   {
     contentKey: "home.hero.screen_linha_tempo",
