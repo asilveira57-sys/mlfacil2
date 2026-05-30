@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Rocket, Users, Shield, CreditCard, Receipt, FileText, 
   Search, Plug, Settings, Tags, Link2, FileStack, Globe, Menu, Star,
   ClipboardList, History, Palette, Radio, CalendarDays, Sparkles, Eye, Activity, HelpCircle, Mail, Headphones, Zap,
-  UserCheck,
+  UserCheck, Leaf,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -41,6 +41,7 @@ import { AdminEmails } from './admin/AdminEmails';
 import AdminSuporte from './admin/AdminSuporte';
 import { AdminClientes } from './admin/AdminClientes';
 import AdminConsents from './admin/AdminConsents';
+import { AdminEconomyMode } from './admin/AdminEconomyMode';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -77,6 +78,7 @@ const adminTabs = [
   { id: 'emails', label: 'Comunicação', icon: Mail },
   { id: 'suporte', label: 'Suporte', icon: Headphones },
   { id: 'consentimentos', label: 'Consentimentos', icon: Shield },
+  { id: 'modo-economico', label: 'Modo Econômico', icon: Leaf },
 ];
 
 export default function Admin() {
@@ -159,6 +161,7 @@ export default function Admin() {
           <Route path="emails" element={<AdminEmails />} />
           <Route path="suporte" element={<AdminSuporte />} />
           <Route path="consentimentos" element={<AdminConsents />} />
+          <Route path="modo-economico" element={<AdminEconomyMode />} />
         </Routes>
       </div>
     </PageContainer>
