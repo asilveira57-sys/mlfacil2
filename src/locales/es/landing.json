@@ -25,6 +25,15 @@
     "trust_mercadopago": "Integrado con Mercado Pago",
     "trust_multiconta": "Soporte multi-cuenta"
   },
+  "stats": {
+    "title": "Movido por los sellers en MKTP Fácil",
+    "subtitle": "Volumen real transaccionado por nuestra base de vendedores en los últimos 30 días.",
+    "transacted": "Valor Transaccionado (30d)",
+    "orders": "Pedidos Procesados (30d)",
+    "avg_ticket": "Ticket Promedio",
+    "orders_per_day": "Pedidos por Día",
+    "updated_at": "Actualizado el {{date}}"
+  },
   "benefits": {
     "title": "Lo que MKTP Fácil hace por ti",
     "subtitle": "Funcionalidades reales que optimizan cada aspecto de tu operación en Mercado Libre.",
