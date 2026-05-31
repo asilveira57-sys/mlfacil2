@@ -165,13 +165,13 @@ const MICROCOPY = [
 function ReconnectingCard() {
   const [msgIndex, setMsgIndex] = useState(0);
 
-  // Rotate microcopy
-  useState(() => {
+  // Rotate microcopy every 2.2s
+  useEffect(() => {
     const interval = setInterval(() => {
       setMsgIndex((prev) => (prev + 1) % MICROCOPY.length);
     }, 2200);
     return () => clearInterval(interval);
-  });
+  }, []);
 
   return (
     <div className="min-h-[50vh] flex items-center justify-center">
