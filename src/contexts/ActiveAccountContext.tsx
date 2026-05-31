@@ -318,13 +318,15 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('cost_watchdog_seller_id', active.sellerId);
 
         // Proactive token refresh: if the active account has an expired token,
-        // trigger a background refresh immediately so the user doesn't see "attention" for minutes
-        if (active.status === 'attention') {
-          console.info('[ActiveAccountContext] Token expired for active account, refreshing proactively...');
+        // trigger a background refresh immediately so the user doesn't see "attention" for minutes.
+        // Guarded against concurrent attempts on the same account.
+        if (active.status === 'attention' && !refreshingAccountsRef.current.has(active.id)) {
+          refreshingAccountsRef.current.add(active.id);
+          setIsRefreshingToken(true);
+          console.info('[ActiveAccountContext] Token attention for active account, refreshing proactively...');
           refreshAccountToken(active.id).then(async (result) => {
             if (result.success) {
               console.info('[ActiveAccountContext] Proactive token refresh succeeded');
-              // Reload accounts to update status to 'connected'
               const refreshedAccounts = await loadAccounts();
               setAccounts(refreshedAccounts);
               accountsRef.current = refreshedAccounts;
@@ -337,6 +339,9 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
             }
           }).catch((err) => {
             console.error('[ActiveAccountContext] Proactive refresh error:', err);
+          }).finally(() => {
+            refreshingAccountsRef.current.delete(active.id);
+            setIsRefreshingToken(false);
           });
         }
       }
