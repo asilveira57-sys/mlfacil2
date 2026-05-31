@@ -298,21 +298,17 @@ export async function updateAccountStatus(
  */
 function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplaceAccount {
   const isActive = row.is_active as boolean;
-  
-  // Use connection_status directly if available, otherwise derive from token state
-  let connectionStatus = (row.connection_status as ConnectionStatus) || 'disconnected';
-  
-  // Override based on token state if connection_status says connected but token is expired
-  if (connectionStatus === 'connected') {
-    const tokenExpiresAt = row.token_expires_at as string | null;
-    if (!tokenExpiresAt || new Date(tokenExpiresAt) < new Date()) {
-      connectionStatus = 'attention'; // Token expired, needs refresh
-    }
-  }
-  
-  // NOTE: We do NOT downgrade status based on is_active flag anymore.
-  // is_active only indicates which account is "selected" for the UI, not connection health.
-  // connection_status is the single source of truth for connection state.
+
+  // Trust the server-side connection_status. We do NOT downgrade a 'connected'
+  // account to 'attention' purely because the cached token_expires_at is in the
+  // past — the backend refreshes the token transparently on the next ML API
+  // call via getValidAccessToken(). Downgrading client-side caused a spurious
+  // "Restaurando sua conexão" screen on every navigation a few hours after
+  // login, even when the connection was perfectly healthy.
+  const connectionStatus = (row.connection_status as ConnectionStatus) || 'disconnected';
+
+  // NOTE: is_active only indicates which account is "selected" for the UI,
+  // not connection health. connection_status is the single source of truth.
 
   return {
     id: row.id as string,
