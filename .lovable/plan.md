@@ -1,56 +1,68 @@
 
-# Carrossel de Telas do Sistema no Hero da Landing
+## Diagnóstico
 
-Transformar a imagem única do dashboard (em `LandingHero.tsx`) em um carrossel elegante com múltiplas telas do sistema, navegação por setas, dots indicadores e autoplay.
+Investiguei o banco, a edge function `ml-sales-data` e o estado de conexão. Os dois problemas têm causa identificada:
 
-## O que será feito
+### 1) Dashboard zerado (R$ 0 / 0 pedidos)
 
-### 1. Assets das telas (7 imagens enviadas)
-Copiar as imagens anexadas para `src/assets/landing/`:
-- `screen-dashboard.png` (Dashboard de Vendas)
-- `screen-etiquetas.png` (Etiquetas de Envio)
-- `screen-linha-tempo.png` (Linha do Tempo)
-- `screen-radiografia.png` (Radiografia / Prontuários)
-- `screen-radiografia-detalhe.png` (drawer Ribbon Dourado)
-- `screen-promocoes.png` (Promoções)
-- `screen-ads.png` (Mercado ADS)
+A conta ativa (ADECONEXVV — `66043362`) tem **6.069 pedidos** em `meli_orders_cache` e o RPC `get_sales_metrics` retorna corretamente:
 
-Cada slide terá um rótulo (badge) com o nome do módulo, ex: "Dashboard", "Etiquetas de Envio", "Radiografia", "Publicidade / ADS", etc.
+```
+{ "metrics": { "orders_today": 4, "revenue_today": 396.55,
+               "orders_7d": 119, "revenue_7d": 17539.67,
+               "orders_period": 111, "revenue_period": 16950.86, ... },
+  "monthly_sales": [...] }
+```
 
-### 2. Novo componente `HeroScreensCarousel.tsx`
-Em `src/components/landing/HeroScreensCarousel.tsx`, usando o `Carousel` do shadcn (`@/components/ui/carousel`, já presente — baseado em Embla) com plugin `embla-carousel-autoplay`:
+Porém a edge function `supabase/functions/ml-sales-data/index.ts` lê os campos em **camelCase achatado** (`metricsData.revenueTotal`, `metricsData.ordersPeriod`, etc.). Como o RPC devolve **snake_case aninhado em `metrics`**, todos os campos viram `undefined` → `Number(undefined) || 0` → **R$ 0 / 0 pedidos**. Os logs confirmam: `ordersTotal: undefined, revenueTotal: undefined, ...`.
 
-- **Frame "browser"**: mantém o chrome atual (3 bolinhas + barra de URL `dashboard.mktpfacil.com`) envolvendo a imagem ativa, dando moldura premium.
-- **Borda trabalhada**: container com `rounded-2xl`, `border border-border`, `shadow-2xl`, gradient ring sutil (`bg-gradient-to-br from-primary/20 via-transparent to-accent/20 p-[2px]`) ao redor do frame; glow suave atrás (`blur-3xl` em primary/10).
-- **Badge do módulo**: no canto superior esquerdo da imagem, pill com ícone + nome do módulo (ex: ícone Lucide + "Etiquetas de Envio").
-- **Setas prev/next**: botões circulares semitransparentes nas laterais (visíveis no hover em desktop, sempre visíveis no mobile), usando `CarouselPrevious`/`CarouselNext` reposicionados.
-- **Dots indicadores**: linha de pontinhos abaixo do carrossel; o ativo é mais largo (pill) na cor `primary`, inativos em `muted-foreground/40`. Clicáveis para pular direto.
-- **Autoplay**: 5s por slide, pausa no hover/interação, loop infinito.
-- **Acessibilidade**: `aria-label` no carrossel, `alt` descritivo por imagem, `aria-current` nos dots.
-- **Responsivo**: imagem `w-full h-auto`, frame mantém `aspect-video`, lazy loading nas imagens não-ativas.
+Efeito colateral: como `_debug.cachedOrdersCount` também vira 0, o `SalesDashboard` dispara `startProgressiveSync` em todo primeiro load, mantendo o badge "Sincronizando..." aceso indefinidamente, mesmo com cache cheio.
 
-### 3. Integração no `LandingHero.tsx`
-Substituir o bloco final "Dashboard mockup / Editable Image" (a partir do `<div className="mt-16 relative">`) pelo `<HeroScreensCarousel />`. Remover o uso do `EditableImage` para `home.hero.dashboard_image` nesse ponto (manter o asset por compatibilidade, mas não exibido). O gradient overlay superior é preservado dentro do componente.
+### 2) "Restaurando sua conexão" toda hora ao trocar de tela
 
-### 4. Sem mudanças em backend
-- Não envolve banco, edge functions ou auth.
-- Lista de slides definida estaticamente no componente (módulo + imagem + alt), facilmente extensível.
+Três fatores se somam:
 
-## Detalhes técnicos
+- `mapMlAccountToUnified` (em `accountUnification.ts`) **rebaixa para `attention`** qualquer conta cujo `token_expires_at` esteja no passado, mesmo que o `connection_status` no banco esteja `connected`. Como o estado `accounts` no `ActiveAccountContext` só é recarregado em momentos pontuais, depois de algumas horas o front "acha" que a conta caiu, embora o backend ainda consiga renovar transparentemente.
+- `useMLConnectionState` mantém `attemptedRef` **por instância do hook**. Cada navegação para `/inicio` desmonta e remonta o hook → `attemptedRef` zera → ao ver `status === 'attention'` dispara `refreshAccountToken` de novo e mostra a tela "Restaurando sua conexão".
+- `ReconnectingCard` usa `useState(() => { setInterval(...) })` em vez de `useEffect`, então o interval nem chega a rodar (cosmético, mas errado).
 
-- **Dependência nova**: `embla-carousel-autoplay` (peer compatível com `embla-carousel-react` já instalado pelo shadcn carousel). Se não estiver, adicionar via bun.
-- **Estado ativo**: usar `api.on("select", ...)` do Embla para sincronizar dots e badge atual.
-- **Performance**: `loading="lazy"` + `decoding="async"` em todas imagens exceto a primeira (`eager`).
-- **Tokens semânticos**: usar `border-border`, `bg-card`, `text-primary`, `text-muted-foreground` — sem cores hardcoded.
-- **Não afeta** outras páginas/módulos; mudança isolada no Hero da landing pública.
+## Plano de correção
 
-## Arquivos
+### A. Dashboard de vendas (edge function `ml-sales-data`)
 
-- **Criar**: `src/components/landing/HeroScreensCarousel.tsx`
-- **Copiar (assets)**: 7 PNGs para `src/assets/landing/`
-- **Editar**: `src/components/landing/LandingHero.tsx` (substituir bloco da imagem)
-- **Editar (se necessário)**: `package.json` (adicionar `embla-carousel-autoplay`)
+1. Ajustar o handler para ler o contrato real do RPC:
+   - Acessar `metricsData.metrics.<snake_case>` (orders_today, revenue_today, orders_7d, revenue_7d, orders_30d, revenue_30d, orders_period, revenue_period, orders_prev_*, revenue_prev_*, orders_total, revenue_total, orders_yesterday, revenue_yesterday) e mapear para o camelCase já consumido pelo front (`revenueToday`, `ordersToday`, `revenue7d`, `orders7d`, `revenuePeriod`, `ordersPeriod`, `revenuePrevPeriod`, `ordersPrevPeriod`, etc.).
+   - Calcular `averageTicket`, `averageTicket30d`, `averageTicketPeriod`, `averageTicketPrevPeriod` no edge a partir das somas (revenue/orders).
+   - Mapear `metricsData.monthly_sales` → `monthlySales` (e usar como `availableMonths`).
+2. Preencher `_debug.cachedOrdersCount` com um `SELECT count(*) FROM meli_orders_cache WHERE seller_id=...` para que o `SalesDashboard` não dispare `startProgressiveSync` quando o cache já tem dados, encerrando o badge "Sincronizando..." quando não há trabalho real.
+3. Métricas que o RPC ainda não fornece (`cancelledOrders/Revenue`, `dailySales`, `topProducts`) seguem como 0/array vazio nesta correção — o objetivo aqui é destravar o card principal de Receita/Pedidos/Ticket; um próximo passo opcional pode estender o RPC para incluí-las.
 
-## Fora de escopo
-- Edição inline das imagens do carrossel via admin (`EditableImage`) — slides ficam fixos nesta primeira versão.
-- Alterar outras seções da landing.
+### B. Estado de conexão (parar o loop "Restaurando sua conexão")
+
+1. Em `src/lib/accountUnification.ts` (`mapMlAccountToUnified`):
+   - **Não** rebaixar de `connected` para `attention` apenas porque `token_expires_at < now()`. Respeitar o `connection_status` do banco. A renovação transparente continua a cargo de `getValidAccessToken` na hora da chamada à API do ML.
+2. Em `src/contexts/ActiveAccountContext.tsx`:
+   - Expor uma flag `isRefreshingToken` no contexto. Quando o `initialize` dispara o refresh proativo (status real `attention`), marcar `true` durante a operação e voltar para `false` ao fim.
+   - Adicionar guarda em memória por `accountId` para não disparar dois refreshes simultâneos.
+3. Em `src/hooks/useMLConnectionState.ts`:
+   - **Remover** o `refreshAccountToken` disparado pelo hook. O hook passa a ser apenas observador.
+   - Determinar o estado a partir do contexto: `CONNECTED` quando `activeAccount.status === 'connected'`; `RECONNECTING` somente enquanto `isRefreshingToken === true`; `RECONNECT_REQUIRED` quando status real for `disconnected`/`revoked` (ou `attention` após o refresh proativo ter falhado).
+4. Em `src/components/dashboard/MLConnectionCard.tsx` (`ReconnectingCard`):
+   - Trocar o `useState(() => setInterval(...))` por `useEffect(() => { const id = setInterval(...); return () => clearInterval(id); }, [])`.
+
+### C. Validação manual após o build
+
+1. Abrir `/inicio` com a conta ADECONEXVV ativa e confirmar Receita/Pedidos/Ticket preenchidos para "Hoje", "7 dias" e "30 dias".
+2. Conferir que o badge "Sincronizando..." some quando o cache já está populado.
+3. Navegar entre `/inicio`, `/etiquetas-de-envio` e voltar várias vezes confirmando que a tela "Restaurando sua conexão" **não** reaparece se o `connection_status` for `connected`.
+4. Forçar uma conta com `connection_status='attention'` (ex.: MLFACIL_CONSULTORIA) e confirmar que ainda aparece o card de reconexão / botão "Reconectar".
+
+## Arquivos afetados
+
+- `supabase/functions/ml-sales-data/index.ts` (mapeamento snake_case → camelCase, monthlySales, cachedOrdersCount).
+- `src/lib/accountUnification.ts` (remover rebaixamento por `token_expires_at`).
+- `src/contexts/ActiveAccountContext.tsx` (flag `isRefreshingToken`, guarda anti-duplicação).
+- `src/hooks/useMLConnectionState.ts` (apenas observador, sem disparar refresh).
+- `src/components/dashboard/MLConnectionCard.tsx` (corrigir `ReconnectingCard`).
+
+Nenhuma migração de banco é necessária; o RPC `get_sales_metrics` já está correto.
