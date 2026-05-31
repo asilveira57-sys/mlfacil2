@@ -293,7 +293,10 @@ serve(async (req) => {
       console.warn('Failed to count cached orders:', e);
     }
 
-    const availableMonths = monthlySales.map((row) => row.month);
+    const availableMonths = monthlySales
+      .map((row) => row.month)
+      .filter((m): m is string => typeof m === 'string' && m.length > 0)
+      .map((m) => ({ key: m, label: m }));
 
     const response = {
       metrics: {
