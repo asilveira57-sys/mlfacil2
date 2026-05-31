@@ -5,7 +5,7 @@
  * States: FIRST_CONNECTION | RECONNECTING | CONNECTED | RECONNECT_REQUIRED
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MLOAuthWarningModal } from "@/components/ml/MLOAuthWarningModal";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
