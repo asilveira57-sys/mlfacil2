@@ -34,6 +34,8 @@ interface ActiveAccountContextType {
   // State
   loading: boolean;
   initialized: boolean;
+  /** True while the context is proactively refreshing an ML token in background. */
+  isRefreshingToken: boolean;
   
   // Actions
   setActiveAccount: (accountId: string) => Promise<boolean>;
