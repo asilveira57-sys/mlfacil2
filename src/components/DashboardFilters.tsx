@@ -73,6 +73,7 @@ export function DashboardFilters({
     if (!availableMonths?.length) return [];
     
     return [...availableMonths]
+      .filter((m) => m && typeof m.key === 'string')
       .sort((a, b) => b.key.localeCompare(a.key))
       .map((m) => ({
         key: m.key,
