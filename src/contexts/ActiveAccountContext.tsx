@@ -49,12 +49,15 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   const [activeAccount, setActiveAccountState] = useState<ActiveAccount | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
+  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
   
   // Use refs to avoid dependency loops
   const accountsRef = useRef<ActiveAccount[]>([]);
   const initializingRef = useRef(false);
   // Guard to prevent repeated persist calls with the same value
   const lastPersistedRef = useRef<{userId: string; accountId: string} | null>(null);
+  // Guard to prevent concurrent token refreshes for the same account
+  const refreshingAccountsRef = useRef<Set<string>>(new Set());
   
   // Keep ref in sync
   useEffect(() => {
