@@ -1,18 +1,22 @@
 /**
  * useMLConnectionState
- * 
- * State machine hook for ML connection status on dashboard.
+ *
+ * Pure observer hook for ML connection status on the dashboard.
+ *
  * States: FIRST_CONNECTION | RECONNECTING | CONNECTED | RECONNECT_REQUIRED
- * 
- * Prevents premature "Connect" card when account exists but token is being validated.
+ *
+ * IMPORTANT: This hook does NOT trigger token refreshes anymore. The proactive
+ * refresh lives in ActiveAccountContext (one attempt per session per account,
+ * guarded against concurrent calls). The dashboard simply reflects the current
+ * connection state, which prevents the "Restaurando sua conexão" screen from
+ * reappearing on every navigation.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
-import { refreshAccountToken } from '@/lib/mlTokenRefresh';
 import { supabase } from '@/integrations/supabase/client';
 
-export type MLConnectionState = 
+export type MLConnectionState =
   | 'FIRST_CONNECTION'
   | 'RECONNECTING'
   | 'CONNECTED'
@@ -26,8 +30,6 @@ export interface MLConnectionInfo {
   email: string | null;
   lastApiOkAt?: string;
 }
-
-const MIN_RECONNECTING_MS = 1500; // prevent flicker
 
 async function logConnectionEvent(
   eventType: string,
@@ -51,21 +53,44 @@ async function logConnectionEvent(
 }
 
 export function useMLConnectionState(): MLConnectionInfo {
-  const { activeAccount, accounts, loading, initialized, refreshAccounts } = useActiveAccount();
-  const [state, setState] = useState<MLConnectionState | null>(null);
-  const reconnectingStartRef = useRef<number | null>(null);
-  const attemptedRef = useRef(false);
+  const { activeAccount, accounts, loading, initialized, isRefreshingToken } = useActiveAccount();
   const prevStateRef = useRef<MLConnectionState | null>(null);
   const userIdRef = useRef<string | null>(null);
 
-  // Get userId once
+  // Get userId once for telemetry
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       userIdRef.current = data.user?.id || null;
     });
   }, []);
 
-  // Log state transitions
+  const state: MLConnectionState | null = useMemo(() => {
+    if (!initialized || loading) return null;
+
+    if (accounts.length === 0) return 'FIRST_CONNECTION';
+
+    if (activeAccount?.status === 'connected') return 'CONNECTED';
+
+    // While the context is proactively refreshing a token, show RECONNECTING.
+    if (isRefreshingToken) return 'RECONNECTING';
+
+    if (activeAccount?.status === 'attention'
+        || activeAccount?.status === 'disconnected'
+        || activeAccount?.status === 'revoked') {
+      return 'RECONNECT_REQUIRED';
+    }
+
+    // Accounts exist but no active account selected
+    if (accounts.length > 0 && !activeAccount) {
+      return accounts.some(a => a.status === 'connected')
+        ? 'CONNECTED'
+        : 'RECONNECT_REQUIRED';
+    }
+
+    return null;
+  }, [initialized, loading, accounts, activeAccount, isRefreshingToken]);
+
+  // Log state transitions (telemetry only — never trigger side effects on the connection)
   useEffect(() => {
     if (state && state !== prevStateRef.current) {
       const eventMap: Record<MLConnectionState, string> = {
@@ -83,95 +108,6 @@ export function useMLConnectionState(): MLConnectionInfo {
       prevStateRef.current = state;
     }
   }, [state, activeAccount?.id, activeAccount?.sellerId]);
-
-  // Main state machine
-  const evaluate = useCallback(async () => {
-    if (!initialized || loading) return;
-
-    // No accounts at all → first connection
-    if (accounts.length === 0) {
-      setState('FIRST_CONNECTION');
-      return;
-    }
-
-    // Has account with connected status → connected
-    if (activeAccount && activeAccount.status === 'connected') {
-      setState('CONNECTED');
-      return;
-    }
-
-    // Has account with attention status → try reconnecting
-    if (activeAccount && activeAccount.status === 'attention') {
-      if (attemptedRef.current) return; // already attempting
-      attemptedRef.current = true;
-      
-      setState('RECONNECTING');
-      reconnectingStartRef.current = Date.now();
-      
-      logConnectionEvent('oauth_revalidation_started', userIdRef.current, {
-        accountId: activeAccount.id,
-      });
-
-      try {
-        const result = await refreshAccountToken(activeAccount.id);
-        
-        // Ensure minimum display time for RECONNECTING
-        const elapsed = Date.now() - (reconnectingStartRef.current || 0);
-        if (elapsed < MIN_RECONNECTING_MS) {
-          await new Promise(r => setTimeout(r, MIN_RECONNECTING_MS - elapsed));
-        }
-
-        if (result.success) {
-          logConnectionEvent('oauth_revalidation_success', userIdRef.current, {
-            accountId: activeAccount.id,
-          });
-          await refreshAccounts();
-          setState('CONNECTED');
-        } else {
-          logConnectionEvent('oauth_revalidation_failed', userIdRef.current, {
-            accountId: activeAccount.id,
-            error: result.error,
-            newStatus: result.newStatus,
-          });
-          setState('RECONNECT_REQUIRED');
-        }
-      } catch (err: any) {
-        logConnectionEvent('oauth_revalidation_failed', userIdRef.current, {
-          accountId: activeAccount.id,
-          error: err?.message,
-        });
-        setState('RECONNECT_REQUIRED');
-      }
-      return;
-    }
-
-    // Has account with disconnected/revoked status → reconnect required
-    if (activeAccount && (activeAccount.status === 'disconnected' || activeAccount.status === 'revoked')) {
-      setState('RECONNECT_REQUIRED');
-      return;
-    }
-
-    // Accounts exist but no active account selected (edge case)
-    if (accounts.length > 0 && !activeAccount) {
-      // Check if any account is connected
-      const connectedAccount = accounts.find(a => a.status === 'connected');
-      if (connectedAccount) {
-        setState('CONNECTED');
-      } else {
-        setState('RECONNECT_REQUIRED');
-      }
-      return;
-    }
-  }, [initialized, loading, accounts, activeAccount, refreshAccounts]);
-
-  useEffect(() => {
-    evaluate();
-  }, [evaluate]);
-
-  // Reset attemptedRef when activeAccount changes (e.g., user switches account)
-  useEffect(() => {
-    attemptedRef.current = false;
-  }, [activeAccount?.id]);
 
   return {
     state,
