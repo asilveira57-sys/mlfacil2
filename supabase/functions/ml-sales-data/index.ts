@@ -248,62 +248,99 @@ serve(async (req) => {
       );
     }
 
+    // RPC returns { metrics: { snake_case... }, monthly_sales: [...] }
+    const m = (metricsData?.metrics ?? {}) as Record<string, unknown>;
+    const monthlySales = (metricsData?.monthly_sales ?? []) as Array<{ month: string; orders: number; revenue: number }>;
+
+    const num = (v: unknown) => Number(v) || 0;
+    const ticket = (revenue: number, orders: number) => (orders > 0 ? revenue / orders : 0);
+
+    const revenueTotal = num(m.revenue_total);
+    const ordersTotal = num(m.orders_total);
+    const revenueToday = num(m.revenue_today);
+    const ordersToday = num(m.orders_today);
+    const revenueYesterday = num(m.revenue_yesterday);
+    const ordersYesterday = num(m.orders_yesterday);
+    const revenue7d = num(m.revenue_7d);
+    const orders7d = num(m.orders_7d);
+    const revenuePrev7d = num(m.revenue_prev_7d);
+    const ordersPrev7d = num(m.orders_prev_7d);
+    const revenue30d = num(m.revenue_30d);
+    const orders30d = num(m.orders_30d);
+    const revenuePrev30d = num(m.revenue_prev_30d);
+    const ordersPrev30d = num(m.orders_prev_30d);
+    const revenuePeriod = num(m.revenue_period);
+    const ordersPeriod = num(m.orders_period);
+    const revenuePrevPeriod = num(m.revenue_prev_period);
+    const ordersPrevPeriod = num(m.orders_prev_period);
+
     console.log('Metrics from RPC:', {
-      ordersTotal: metricsData.ordersTotal,
-      revenueTotal: metricsData.revenueTotal,
-      ordersPeriod: metricsData.ordersPeriod,
-      revenuePeriod: metricsData.revenuePeriod,
-      cancelledOrders: metricsData.cancelledOrders,
-      availableMonths: metricsData.availableMonths?.length || 0,
+      ordersTotal, revenueTotal, ordersPeriod, revenuePeriod,
+      orders7d, orders30d,
+      monthsAvailable: monthlySales.length,
     });
 
-    // Build response in expected format
+    // Cached orders count from the cache table, so the front does NOT trigger
+    // a perpetual progressive sync when the cache already has data.
+    let cachedOrdersCount = 0;
+    try {
+      const { count } = await supabaseAdmin
+        .from('meli_orders_cache')
+        .select('id', { count: 'exact', head: true })
+        .eq('seller_id', sellerId);
+      cachedOrdersCount = count ?? 0;
+    } catch (e) {
+      console.warn('Failed to count cached orders:', e);
+    }
+
+    const availableMonths = monthlySales.map((row) => row.month);
+
     const response = {
       metrics: {
-        totalRevenue: Number(metricsData.revenueTotal) || 0,
-        totalOrders: Number(metricsData.ordersTotal) || 0,
-        revenueToday: Number(metricsData.revenueToday) || 0,
-        ordersToday: Number(metricsData.ordersToday) || 0,
-        revenueYesterday: Number(metricsData.revenueYesterday) || 0,
-        ordersYesterday: Number(metricsData.ordersYesterday) || 0,
-        revenue7d: Number(metricsData.revenue7d) || 0,
-        orders7d: Number(metricsData.orders7d) || 0,
-        revenuePrev7d: Number(metricsData.revenuePrev7d) || 0,
-        ordersPrev7d: Number(metricsData.ordersPrev7d) || 0,
-        revenue30d: Number(metricsData.revenue30d) || 0,
-        orders30d: Number(metricsData.orders30d) || 0,
-        revenuePrev30d: Number(metricsData.revenuePrev30d) || 0,
-        ordersPrev30d: Number(metricsData.ordersPrev30d) || 0,
-        revenuePeriod: Number(metricsData.revenuePeriod) || 0,
-        ordersPeriod: Number(metricsData.ordersPeriod) || 0,
-        revenuePrevPeriod: Number(metricsData.revenuePrevPeriod) || 0,
-        ordersPrevPeriod: Number(metricsData.ordersPrevPeriod) || 0,
-        averageTicket: Number(metricsData.averageTicket) || 0,
-        averageTicket30d: Number(metricsData.averageTicket30d) || 0,
-        averageTicketPeriod: Number(metricsData.averageTicketPeriod) || 0,
-        averageTicketPrevPeriod: Number(metricsData.averageTicketPrevPeriod) || 0,
-        cancelledOrders: Number(metricsData.cancelledOrders) || 0,
-        cancelledRevenue: Number(metricsData.cancelledRevenue) || 0,
-        cancelledOrdersPeriod: Number(metricsData.cancelledOrdersPeriod) || 0,
-        cancelledRevenuePeriod: Number(metricsData.cancelledRevenuePeriod) || 0,
+        totalRevenue: revenueTotal,
+        totalOrders: ordersTotal,
+        revenueToday,
+        ordersToday,
+        revenueYesterday,
+        ordersYesterday,
+        revenue7d,
+        orders7d,
+        revenuePrev7d,
+        ordersPrev7d,
+        revenue30d,
+        orders30d,
+        revenuePrev30d,
+        ordersPrev30d,
+        revenuePeriod,
+        ordersPeriod,
+        revenuePrevPeriod,
+        ordersPrevPeriod,
+        averageTicket: ticket(revenueTotal, ordersTotal),
+        averageTicket30d: ticket(revenue30d, orders30d),
+        averageTicketPeriod: ticket(revenuePeriod, ordersPeriod),
+        averageTicketPrevPeriod: ticket(revenuePrevPeriod, ordersPrevPeriod),
+        cancelledOrders: 0,
+        cancelledRevenue: 0,
+        cancelledOrdersPeriod: 0,
+        cancelledRevenuePeriod: 0,
       },
-      dailySales: metricsData.dailySales || [],
-      monthlySales: metricsData.monthlySales || [],
-      monthlyCancelled: metricsData.monthlyCancelled || [],
-      topProducts: metricsData.topProducts || [],
-      availableMonths: metricsData.availableMonths || [],
+      dailySales: [],
+      monthlySales,
+      monthlyCancelled: [],
+      topProducts: [],
+      availableMonths,
       seller: {
         nickname: mlAccount.nickname,
         email: mlAccount.email,
       },
       _debug: {
-        cachedOrdersCount: metricsData._debug?.cachedOrdersCount || 0,
-        cachedItemsCount: metricsData._debug?.cachedItemsCount || 0,
-        ordersWithItemsSynced: metricsData._debug?.ordersWithItemsSynced || 0,
-        itemsSyncedPercent: metricsData._debug?.itemsSyncedPercent || 0,
-        source: metricsData._debug?.source || 'rpc_get_sales_metrics',
-        dateFrom: metricsData._debug?.dateFrom || null,
-        dateTo: metricsData._debug?.dateTo || null,
+        cachedOrdersCount,
+        cachedItemsCount: 0,
+        ordersWithItemsSynced: 0,
+        itemsSyncedPercent: 0,
+        source: 'rpc_get_sales_metrics',
+        dateFrom,
+        dateTo,
       },
     };
 

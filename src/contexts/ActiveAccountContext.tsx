@@ -34,6 +34,8 @@ interface ActiveAccountContextType {
   // State
   loading: boolean;
   initialized: boolean;
+  /** True while the context is proactively refreshing an ML token in background. */
+  isRefreshingToken: boolean;
   
   // Actions
   setActiveAccount: (accountId: string) => Promise<boolean>;
@@ -47,12 +49,15 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   const [activeAccount, setActiveAccountState] = useState<ActiveAccount | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
+  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
   
   // Use refs to avoid dependency loops
   const accountsRef = useRef<ActiveAccount[]>([]);
   const initializingRef = useRef(false);
   // Guard to prevent repeated persist calls with the same value
   const lastPersistedRef = useRef<{userId: string; accountId: string} | null>(null);
+  // Guard to prevent concurrent token refreshes for the same account
+  const refreshingAccountsRef = useRef<Set<string>>(new Set());
   
   // Keep ref in sync
   useEffect(() => {
@@ -313,13 +318,15 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('cost_watchdog_seller_id', active.sellerId);
 
         // Proactive token refresh: if the active account has an expired token,
-        // trigger a background refresh immediately so the user doesn't see "attention" for minutes
-        if (active.status === 'attention') {
-          console.info('[ActiveAccountContext] Token expired for active account, refreshing proactively...');
+        // trigger a background refresh immediately so the user doesn't see "attention" for minutes.
+        // Guarded against concurrent attempts on the same account.
+        if (active.status === 'attention' && !refreshingAccountsRef.current.has(active.id)) {
+          refreshingAccountsRef.current.add(active.id);
+          setIsRefreshingToken(true);
+          console.info('[ActiveAccountContext] Token attention for active account, refreshing proactively...');
           refreshAccountToken(active.id).then(async (result) => {
             if (result.success) {
               console.info('[ActiveAccountContext] Proactive token refresh succeeded');
-              // Reload accounts to update status to 'connected'
               const refreshedAccounts = await loadAccounts();
               setAccounts(refreshedAccounts);
               accountsRef.current = refreshedAccounts;
@@ -332,6 +339,9 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
             }
           }).catch((err) => {
             console.error('[ActiveAccountContext] Proactive refresh error:', err);
+          }).finally(() => {
+            refreshingAccountsRef.current.delete(active.id);
+            setIsRefreshingToken(false);
           });
         }
       }
@@ -435,6 +445,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     accounts,
     loading,
     initialized,
+    isRefreshingToken,
     setActiveAccount,
     refreshAccounts,
   };
