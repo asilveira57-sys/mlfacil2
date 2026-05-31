@@ -445,6 +445,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     accounts,
     loading,
     initialized,
+    isRefreshingToken,
     setActiveAccount,
     refreshAccounts,
   };
