@@ -593,7 +593,11 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       if (activeIds.length > 0) { for (let i = 0; i < activeIds.length; i += SHIPMENT_SYNC_BATCH) { const batch = activeIds.slice(i, i + SHIPMENT_SYNC_BATCH); const r = await supabase.functions.invoke('ml-sync-shipments', { headers, body: { seller_id: sellerId, shipment_ids: batch } }); if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED'); if (r.data?.job_id) await waitForJob(r.data.job_id, silent); } }
       if (!silent) { setSyncPhase('invoices'); setSyncProgress('Sincronizando NFs...'); }
       if (orderIds.length > 0) { const { data: exInv } = await supabase.from('meli_invoices_cache').select('order_id').eq('seller_id', sellerId).in('order_id', orderIds); const invoiced = new Set((exInv || []).map((i: any) => i.order_id)); const pending = orderIds.filter(id => !invoiced.has(id)); if (pending.length > 0) { for (let i = 0; i < pending.length; i += INVOICE_SYNC_BATCH) { const batch = pending.slice(i, i + INVOICE_SYNC_BATCH); const r = await supabase.functions.invoke('ml-sync-invoices', { headers, body: { seller_id: sellerId, order_ids: batch } }); if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED'); if (r.data?.job_id) await waitForJob(r.data.job_id, silent); } } }
-      setLastSyncAt(new Date().toISOString());
+      {
+        const nowIso = new Date().toISOString();
+        setLastSyncAt(nowIso);
+        try { if (sellerId) localStorage.setItem(`shipping_last_sync_${sellerId}`, nowIso); } catch {}
+      }
       await refetch();
       queryClient.invalidateQueries({ queryKey: ['shipping-orders-v2'] });
       if (!silent) { setSyncPhase('done'); setSyncProgress('Concluído!'); setTimeout(() => { setIsSyncing(false); setSyncPhase('idle'); setSyncProgress(''); }, 1500); }
@@ -609,12 +613,14 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     if (!sellerId || hasAutoSyncedRef.current || hasActiveJob) return;
     hasAutoSyncedRef.current = true;
     const check = async () => {
+      let localIso: string | null = null;
+      try { localIso = localStorage.getItem(`shipping_last_sync_${sellerId}`); } catch {}
       const { data: scheduler } = await supabase.from('sync_scheduler').select('last_run_at').eq('job_name', 'shipping-labels-sync').maybeSingle();
-      if (scheduler?.last_run_at) { setLastSyncAt(scheduler.last_run_at); } else {
-        const { data: lastJob } = await supabase.from('sync_jobs').select('created_at').eq('module', 'labels_orders_list').eq('status', 'success').order('created_at', { ascending: false }).limit(1).maybeSingle();
-        setLastSyncAt(lastJob?.created_at || null);
-        if (!lastJob?.created_at) startSyncPipeline(false);
-      }
+      const { data: lastJob } = await supabase.from('sync_jobs').select('created_at').eq('module', 'labels_orders_list').eq('status', 'success').order('created_at', { ascending: false }).limit(1).maybeSingle();
+      const candidates = [localIso, scheduler?.last_run_at, lastJob?.created_at].filter(Boolean) as string[];
+      const mostRecent = candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+      setLastSyncAt(mostRecent);
+      if (!mostRecent) startSyncPipeline(false);
     };
     const t = setTimeout(check, 300);
     return () => clearTimeout(t);
