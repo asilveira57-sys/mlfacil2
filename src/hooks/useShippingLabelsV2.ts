@@ -613,12 +613,14 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     if (!sellerId || hasAutoSyncedRef.current || hasActiveJob) return;
     hasAutoSyncedRef.current = true;
     const check = async () => {
+      let localIso: string | null = null;
+      try { localIso = localStorage.getItem(`shipping_last_sync_${sellerId}`); } catch {}
       const { data: scheduler } = await supabase.from('sync_scheduler').select('last_run_at').eq('job_name', 'shipping-labels-sync').maybeSingle();
-      if (scheduler?.last_run_at) { setLastSyncAt(scheduler.last_run_at); } else {
-        const { data: lastJob } = await supabase.from('sync_jobs').select('created_at').eq('module', 'labels_orders_list').eq('status', 'success').order('created_at', { ascending: false }).limit(1).maybeSingle();
-        setLastSyncAt(lastJob?.created_at || null);
-        if (!lastJob?.created_at) startSyncPipeline(false);
-      }
+      const { data: lastJob } = await supabase.from('sync_jobs').select('created_at').eq('module', 'labels_orders_list').eq('status', 'success').order('created_at', { ascending: false }).limit(1).maybeSingle();
+      const candidates = [localIso, scheduler?.last_run_at, lastJob?.created_at].filter(Boolean) as string[];
+      const mostRecent = candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+      setLastSyncAt(mostRecent);
+      if (!mostRecent) startSyncPipeline(false);
     };
     const t = setTimeout(check, 300);
     return () => clearTimeout(t);
