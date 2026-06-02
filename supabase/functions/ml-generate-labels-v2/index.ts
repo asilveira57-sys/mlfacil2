@@ -139,9 +139,27 @@ serve(async (req) => {
     const startTime = Date.now();
     console.log(`[V2] ${format}/${layout} for ${shipment_ids.length} shipments, seller ${seller_id}`);
 
-    // Get ML account
-    const { data: mlAccount } = await supabaseAdmin.from('ml_accounts').select('access_token, ml_user_id').eq('user_id', user.id).eq('ml_user_id', seller_id).eq('is_active', true).maybeSingle();
+    // Get ML account — allow titular owner OR active collaborator of the company
+    const { data: mlAccount } = await supabaseAdmin
+      .from('ml_accounts')
+      .select('access_token, ml_user_id, user_id, company_id')
+      .eq('ml_user_id', seller_id)
+      .eq('is_active', true)
+      .maybeSingle();
     if (!mlAccount) return new Response(JSON.stringify({ error: 'ML account not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    let authorized = mlAccount.user_id === user.id;
+    if (!authorized && mlAccount.company_id) {
+      const { data: membership } = await supabaseAdmin
+        .from('company_users')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('company_id', mlAccount.company_id)
+        .eq('status', 'active')
+        .maybeSingle();
+      authorized = !!membership;
+    }
+    if (!authorized) return new Response(JSON.stringify({ error: 'ML account not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     // Validation
     const validationErrors: { shipment_id: string; reason: string }[] = [];
