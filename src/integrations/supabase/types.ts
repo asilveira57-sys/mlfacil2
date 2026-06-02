@@ -21934,6 +21934,7 @@ export type Database = {
         }
         Returns: string
       }
+      reset_stale_sync_locks: { Args: never; Returns: Json }
       resolve_notification: {
         Args: { p_notification_id: string }
         Returns: undefined

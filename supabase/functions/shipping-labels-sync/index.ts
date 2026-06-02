@@ -436,14 +436,31 @@ Deno.serve(async (req) => {
   const timer = syncStartTimer();
   const stats: SyncStats = { accounts: 0, shipments_synced: 0, shipments_updated: 0, invoices_synced: 0, errors: 0, skipped: 0 };
 
-  // Parse body for mode and optional seller_id (sync pontual)
+  // Parse body for mode, optional seller_id (sync pontual), and manual flag
   let mode = "incremental"; // default: last 6 hours
   let targetSellerId: string | null = null;
+  let isManual = false;
   try {
     const body = await req.json();
     if (body?.mode === "full") mode = "full";
     if (body?.seller_id) targetSellerId = String(body.seller_id);
+    if (body?.manual === true || body?.source === "manual") isManual = true;
   } catch { /* no body = incremental */ }
+
+  // sync pontual de 1 seller (chamado pelo usuário) é sempre considerado manual
+  if (targetSellerId) isManual = true;
+
+  // === Janela horária 07:00–17:00 BRT (apenas para execuções automáticas) ===
+  if (!isManual) {
+    const brtHour = new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo", hour: "2-digit", hour12: false });
+    const hour = parseInt(brtHour, 10);
+    if (hour < 7 || hour >= 17) {
+      console.log(`[shipping-labels-sync] Outside window (BRT hour=${hour}); skipping auto run.`);
+      return new Response(JSON.stringify({ status: "skipped", reason: "outside_window", brt_hour: hour }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
 
   const lookbackHours = mode === "full" ? 7 * 24 : 6; // 7 days or 6 hours
 
@@ -458,11 +475,13 @@ Deno.serve(async (req) => {
 
       if (scheduler?.status === "running") {
         const lastRun = scheduler.last_run_at ? new Date(scheduler.last_run_at).getTime() : 0;
-        if (Date.now() - lastRun < 10 * 60 * 1000) {
+        // 20 min stale lock window
+        if (Date.now() - lastRun < 20 * 60 * 1000) {
           return new Response(JSON.stringify({ status: "skipped", reason: "already_running" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
+        console.log("[shipping-labels-sync] Stale lock detected, resetting and continuing");
       }
 
       await supabase.from("sync_scheduler").upsert({
@@ -475,7 +494,7 @@ Deno.serve(async (req) => {
     await logSyncEvent(supabase, {
       action: "sync_started",
       entityType: "shipping_labels_sync",
-      metadata: { module: "shipping_labels_sync", scope: mode, seller_id: targetSellerId },
+      metadata: { module: "shipping_labels_sync", scope: mode, seller_id: targetSellerId, manual: isManual },
     });
 
     // Get active accounts (todos, ou filtrado por seller_id quando informado)
@@ -485,9 +504,9 @@ Deno.serve(async (req) => {
       .eq("is_active", true);
     if (targetSellerId) accountsQuery = accountsQuery.eq("ml_user_id", targetSellerId);
 
-    const { data: accounts, error: accError } = await accountsQuery;
+    const { data: rawAccounts, error: accError } = await accountsQuery;
 
-    if (accError || !accounts || accounts.length === 0) {
+    if (accError || !rawAccounts || rawAccounts.length === 0) {
       console.log(`[shipping-labels-sync] No active accounts${targetSellerId ? ` for seller ${targetSellerId}` : ""}`);
       if (!targetSellerId) await markDone(supabase, stats);
       return new Response(JSON.stringify({ status: "idle", stats, seller_id: targetSellerId }), {
@@ -495,8 +514,33 @@ Deno.serve(async (req) => {
       });
     }
 
+    // === Filtrar sellers com titular ativo (last_login_at < 3 dias) ===
+    // sync pontual (targetSellerId) ou manual NÃO aplica filtro de inatividade
+    let accounts = rawAccounts;
+    let skippedInactive = 0;
+    if (!isManual) {
+      const titularIds = [...new Set(rawAccounts.map((a: any) => a.user_id).filter(Boolean))];
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+      const { data: activeProfiles } = await supabase
+        .from("profiles")
+        .select("user_id, last_login_at")
+        .in("user_id", titularIds)
+        .gte("last_login_at", threeDaysAgo);
+      const activeUserIds = new Set((activeProfiles || []).map((p: any) => p.user_id));
+      accounts = rawAccounts.filter((a: any) => activeUserIds.has(a.user_id));
+      skippedInactive = rawAccounts.length - accounts.length;
+    }
 
-    console.log(`[shipping-labels-sync] Processing ${accounts.length} accounts, mode=${mode}, lookback=${lookbackHours}h`);
+    if (accounts.length === 0) {
+      console.log(`[shipping-labels-sync] All ${rawAccounts.length} accounts skipped (inactive titulars)`);
+      if (!targetSellerId) await markDone(supabase, stats);
+      return new Response(JSON.stringify({ status: "idle", stats, reason: "all_inactive", skipped_inactive: skippedInactive }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    console.log(`[shipping-labels-sync] Processing ${accounts.length} active accounts (skipped=${skippedInactive}), mode=${mode}, lookback=${lookbackHours}h, manual=${isManual}`);
+
 
     for (const account of accounts) {
       stats.accounts++;
