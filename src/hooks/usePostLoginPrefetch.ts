@@ -154,12 +154,14 @@ async function triggerBackgroundOrderSync(userId: string) {
         sellerId,
       });
 
-      supabase.functions.invoke('ml-sync-orders', {
+      // Rule 4: pós-login dispara apenas Etiquetas de Envio (módulo recuperação rápida)
+      supabase.functions.invoke('shipping-labels-sync', {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { seller_id: sellerId, date_from: dateFrom, date_to: dateTo, auto: true },
+        body: { seller_id: sellerId, mode: 'incremental', manual: true, source: 'manual' },
       }).catch((err) => {
-        console.warn(`[Prefetch] Background sync failed for ${sellerId}:`, err);
+        console.warn(`[Prefetch] Initial shipping-labels sync failed for ${sellerId}:`, err);
       });
+
 
       await new Promise(r => setTimeout(r, 500));
     }
