@@ -31,13 +31,16 @@ const STATE_TO_UF: Record<string, string> = {
 
 function isAuthorized(req: Request): boolean {
   const cronKey = req.headers.get("x-cron-key");
-  if (cronKey === CRON_SECRET) return true;
+  if (cronKey && cronKey === CRON_SECRET) return true;
   const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
-  if (token === SUPABASE_ANON_KEY) return true;
+  if (token && SUPABASE_ANON_KEY && token === SUPABASE_ANON_KEY) return true;
   // Allow service role key (internal calls)
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-  if (token === serviceKey) return true;
+  if (token && serviceKey && token === serviceKey) return true;
+  console.warn(
+    `[shipping-labels-sync] Unauthorized: cronKeyPresent=${!!cronKey} tokenLen=${token.length} anonLen=${SUPABASE_ANON_KEY.length} svcLen=${serviceKey.length}`
+  );
   return false;
 }
 

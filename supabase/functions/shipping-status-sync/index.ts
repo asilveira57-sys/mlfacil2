@@ -7,6 +7,7 @@ const corsHeaders = {
 
 const CRON_SECRET = Deno.env.get("CRON_JOB_SECRET") || "default-cron-secret";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const MAX_SHIPMENTS_PER_ACCOUNT = 250;
 const MAX_STALE_PER_ACCOUNT = 50;
 const MAX_SHIPPED_RECHECK_PER_ACCOUNT = 30;
@@ -21,12 +22,16 @@ const TERMINAL_STATUSES = new Set(["delivered", "not_delivered", "cancelled"]);
 
 function isAuthorized(req: Request): boolean {
   const cronKey = req.headers.get("x-cron-key");
-  if (cronKey === CRON_SECRET) return true;
+  if (cronKey && cronKey === CRON_SECRET) return true;
 
   const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
-  if (token === SUPABASE_ANON_KEY) return true;
+  if (token && SUPABASE_ANON_KEY && token === SUPABASE_ANON_KEY) return true;
+  if (token && SUPABASE_SERVICE_ROLE_KEY && token === SUPABASE_SERVICE_ROLE_KEY) return true;
 
+  console.warn(
+    `[shipping-status-sync] Unauthorized: cronKeyPresent=${!!cronKey} tokenLen=${token.length} anonLen=${SUPABASE_ANON_KEY.length} svcLen=${SUPABASE_SERVICE_ROLE_KEY.length}`
+  );
   return false;
 }
 
