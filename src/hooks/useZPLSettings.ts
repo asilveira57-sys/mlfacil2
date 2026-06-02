@@ -144,17 +144,36 @@ export const splitShopeeLabels = (zplCode: string): string[] => {
 };
 
 // FULL PRODUTOS/VOLUMES - Para etiquetas que já têm ^XA/^XZ
+// Expande a diretiva ^PQn,0,1,Y replicando o bloco n vezes e normalizando
+// cada cópia para ^PQ1 (para o Labelary não multiplicar novamente).
 export const splitFullLabels = (zplCode: string): string[] => {
   const normalized = zplCode.trim();
-  
+
   const parts = normalized.split(/(?=\^XA)/i);
-  
-  const labels = parts
+
+  const blocks = parts
     .map(part => part.trim())
     .filter(part => part.length > 0)
     .filter(part => /\^XA/i.test(part) && /\^XZ/i.test(part));
-  
-  return labels;
+
+  const expanded: string[] = [];
+  const pqRegex = /\^PQ\s*(\d+)(\s*,[^\^]*)?/i;
+
+  for (const block of blocks) {
+    const match = block.match(pqRegex);
+    const qty = match ? Math.max(1, parseInt(match[1], 10) || 1) : 1;
+
+    // Normaliza para ^PQ1 em cada cópia replicada (evita dupla multiplicação)
+    const normalizedBlock = match
+      ? block.replace(pqRegex, '^PQ1,0,1,Y')
+      : block;
+
+    for (let i = 0; i < qty; i++) {
+      expanded.push(normalizedBlock);
+    }
+  }
+
+  return expanded;
 };
 
 // MERCADO LIVRE - Estrutura similar ao Full
