@@ -159,11 +159,21 @@ serve(async (req) => {
     const layoutInfo = LAYOUTS[layout];
     console.log(`[labeltest-dispatcher] seller=${seller_id} format=${format} layout=${layout} shipments=${shipment_ids.length} (raw=${rawShipmentIds.length})`);
 
-    // ML account
+    // ML account — allow titular owner OR active collaborator of the company
     const { data: mlAccount } = await supabaseAdmin
-      .from('ml_accounts').select('access_token, ml_user_id')
-      .eq('user_id', user.id).eq('ml_user_id', seller_id).eq('is_active', true).maybeSingle();
+      .from('ml_accounts').select('access_token, ml_user_id, user_id, company_id')
+      .eq('ml_user_id', seller_id).eq('is_active', true).maybeSingle();
     if (!mlAccount) return respond(false, { error: 'ML account not found' }, 404);
+
+    let authorized = mlAccount.user_id === user.id;
+    if (!authorized && mlAccount.company_id) {
+      const { data: membership } = await supabaseAdmin
+        .from('company_users').select('id')
+        .eq('user_id', user.id).eq('company_id', mlAccount.company_id).eq('status', 'active')
+        .maybeSingle();
+      authorized = !!membership;
+    }
+    if (!authorized) return respond(false, { error: 'ML account not found' }, 404);
 
     // ─── Validate shipments ────────────────────────────────────────
     const validationErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
