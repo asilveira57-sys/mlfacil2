@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { logSyncEvent, syncStartTimer, syncDuration } from "../_shared/sync-audit.ts";
+import { resolveAccessibleMlAccount } from "../_shared/ml-account-access.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -425,10 +426,6 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  if (!isAuthorized(req)) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -437,15 +434,35 @@ Deno.serve(async (req) => {
   const stats: SyncStats = { accounts: 0, shipments_synced: 0, shipments_updated: 0, invoices_synced: 0, errors: 0, skipped: 0 };
 
   // Parse body for mode, optional seller_id (sync pontual), and manual flag
+  let body: any = null;
   let mode = "incremental"; // default: last 6 hours
   let targetSellerId: string | null = null;
   let isManual = false;
   try {
-    const body = await req.json();
+    body = await req.json();
     if (body?.mode === "full") mode = "full";
     if (body?.seller_id) targetSellerId = String(body.seller_id);
     if (body?.manual === true || body?.source === "manual") isManual = true;
   } catch { /* no body = incremental */ }
+
+  if (!isAuthorized(req)) {
+    let allowedTargetedUser = false;
+    if (targetSellerId) {
+      const authHeader = req.headers.get("authorization") || "";
+      const token = authHeader.replace("Bearer ", "").trim();
+      const supabaseAuth = createClient(supabaseUrl, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      if (token) {
+        const { data: { user } } = await supabaseAuth.auth.getUser(token);
+        if (user?.id) {
+          const access = await resolveAccessibleMlAccount(supabase, supabaseAuth, user.id, targetSellerId, "id");
+          allowedTargetedUser = !!access.data;
+        }
+      }
+    }
+    if (!allowedTargetedUser) return new Response("Unauthorized", { status: 401 });
+  }
 
   // sync pontual de 1 seller (chamado pelo usuário) é sempre considerado manual
   if (targetSellerId) isManual = true;
