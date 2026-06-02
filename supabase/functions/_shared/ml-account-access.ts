@@ -32,19 +32,26 @@ export async function resolveAccessibleMlAccount(
   );
 
   if (!accessible?.id) {
+    const { data: memberships, error: membershipListError } = await supabaseAdmin
+      .from("company_users")
+      .select("company_id")
+      .eq("user_id", userId)
+      .eq("status", "active");
+
+    if (membershipListError) {
+      return { data: null, reason: "membership_list_failed", error: membershipListError };
+    }
+
+    const companyIds = (memberships || []).map((row: any) => row.company_id).filter(Boolean);
+    if (companyIds.length === 0) return { data: null, reason: "seller_not_accessible" };
+
     const { data: membershipAccount, error: membershipError } = await supabaseAdmin
       .from("ml_accounts")
       .select(fields)
       .eq("ml_user_id", normalizedSellerId)
       .eq("is_active", true)
       .not("company_id", "is", null)
-      .in("company_id", (
-        await supabaseAdmin
-          .from("company_users")
-          .select("company_id")
-          .eq("user_id", userId)
-          .eq("status", "active")
-      ).data?.map((row: any) => row.company_id) || [])
+      .in("company_id", companyIds)
       .maybeSingle();
 
     if (membershipAccount) return { data: membershipAccount };
