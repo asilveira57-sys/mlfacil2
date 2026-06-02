@@ -1,35 +1,29 @@
-## Causa do erro
+## Problema
 
-O usuário **Wilson Longo** é colaborador (perfil Operacional) da empresa **TODOVINOBR**, que pertence ao titular `admin@todovino.com.br`. A conta ML `TODOVINOBR` (`ml_user_id 538218315`) é do titular, não do Wilson.
+O arquivo tem 96 blocos `^XA…^XZ`, mas cada bloco contém uma diretiva `^PQn,0,1,Y` indicando quantas cópias daquela etiqueta devem ser impressas. A soma dos `^PQ` = **221** (confirmado).
 
-A UI já herda corretamente a conta ML do titular para o colaborador (via `get_accessible_ml_accounts`), mas as **edge functions de geração de etiquetas** ainda exigem que `ml_accounts.user_id = auth.uid()`:
-
-- `supabase/functions/ml-generate-labels-v2/index.ts` (linha 143)
-- `supabase/functions/ml-generate-labels-labeltest/index.ts` (linhas 163-165)
-
-Como Wilson não é o `user_id` dono da `ml_account` da TODOVINOBR, a consulta retorna `null` e a função devolve `404 "ML account not found"`, exibido na UI como "Erro ao gerar etiqueta. Algo inesperado aconteceu...".
+O sistema atual (`splitFullLabels` em `src/hooks/useZPLSettings.ts`) apenas divide por `^XA` e retorna **96** etiquetas, ignorando completamente o `^PQ`. Por isso o painel mostra "96 etiquetas detectadas" e o PDF gerado também sai com 96 páginas. O sistema antigo (mlfacil) expandia o `^PQ`, por isso gerava as 221.
 
 ## Correção
 
-Substituir a busca da `ml_account` nas duas edge functions por uma lógica que aceite tanto o titular quanto o colaborador ativo da empresa dona da conta ML.
+Ajustar **`splitFullLabels`** (usado por Full Produto, Full Volume, Mercado Livre e Magalu) para:
 
-Lógica (com `supabaseAdmin`, mantendo segurança):
+1. Após dividir por `^XA…^XZ`, ler a quantidade do `^PQn,...` de cada bloco (default = 1 se ausente).
+2. Replicar o bloco `n` vezes no array de saída.
+3. Em cada cópia replicada, normalizar a diretiva para `^PQ1,0,1,Y` (ou remover) para que o Labelary não multiplique novamente em cima da replicação.
+4. Manter o comportamento atual quando não houver `^PQ` (1 cópia por bloco).
 
-1. Buscar a `ml_account` por `ml_user_id = seller_id` + `is_active = true` (sem filtrar por `user_id`).
-2. Autorizar o acesso se uma das duas condições for verdadeira:
-   - `ml_account.user_id = auth.uid()` (titular), **ou**
-   - existe linha em `company_users` com `user_id = auth.uid()`, `status = 'active'` e `company_id = ml_account.company_id` (colaborador ativo da mesma empresa).
-3. Se nada bater → manter `404 "ML account not found"`.
+Nenhuma outra mudança é necessária:
+- `detectLabelCount` já chama `splitZPLByType` quando recebe `labelType`, então o contador no painel passará automaticamente a mostrar 221.
+- O loop de conversão em `ZPLConverter.tsx` itera sobre o array retornado, então gerará as 221 páginas.
+- Shopee continua com sua própria lógica (`splitShopeeLabels`), sem impacto.
 
-Manter o restante do fluxo intacto. As inserções em `meli_print_queue_v2` continuam usando `user.id` (Wilson) para registrar quem disparou o job — assim a auditoria/histórico fica correta.
+## Arquivo alterado
 
-## Arquivos a alterar
-
-- `supabase/functions/ml-generate-labels-v2/index.ts` — substituir o bloco da linha 143.
-- `supabase/functions/ml-generate-labels-labeltest/index.ts` — substituir o bloco das linhas 163-166.
+- `src/hooks/useZPLSettings.ts` — função `splitFullLabels` (expansão de `^PQ` + normalização para `^PQ1`).
 
 ## Validação
 
-- Pedir ao Wilson para imprimir novamente uma etiqueta da TODOVINOBR — não deve mais aparecer o erro.
-- Confirmar via `meli_print_queue_v2` que o job foi criado com `user_id = Wilson` e `seller_id = 538218315`.
-- Garantir que usuários sem vínculo com a empresa continuam recebendo 404.
+- Recarregar o mesmo arquivo `Envio-69023601-Etiquetas-de-produtos (2).txt` → painel deve mostrar **221 etiquetas detectadas**.
+- Converter para PDF → arquivo deve ter **221 páginas**, na ordem original e com as repetições corretas (ex.: EUGB80550 aparecendo 2× consecutivas, SMAS45837 3×, etc.).
+- Testar um arquivo sem `^PQ` para confirmar que continua 1 cópia por bloco.
