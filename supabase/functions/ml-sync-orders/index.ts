@@ -1,6 +1,7 @@
 // @ts-nocheck - Deno types not available in build context
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { resolveAccessibleMlAccount } from "../_shared/ml-account-access.ts";
 
 // Declare EdgeRuntime for Supabase Edge Functions
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
@@ -617,10 +618,16 @@ serve(async (req) => {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    
+
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
+    const supabaseAuth = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
     );
 
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
@@ -655,16 +662,16 @@ serve(async (req) => {
     console.log(`Syncing orders for seller: ${seller_id}`);
 
     // Get ML account with access token AND refresh token
-    const { data: mlAccount, error: mlError } = await supabaseAdmin
-      .from('ml_accounts')
-      .select('id, access_token, refresh_token, token_expires_at, ml_user_id, company_id')
-      .eq('user_id', user.id)
-      .eq('ml_user_id', seller_id)
-      .eq('is_active', true)
-      .maybeSingle();
+    const { data: mlAccount, error: mlError, reason: mlReason } = await resolveAccessibleMlAccount(
+      supabaseAdmin,
+      supabaseAuth,
+      user.id,
+      seller_id,
+      'id, user_id, access_token, refresh_token, token_expires_at, ml_user_id, company_id',
+    );
 
     if (mlError || !mlAccount) {
-      console.error('ML account not found:', mlError?.message);
+      console.error('ML account not found:', mlError?.message || mlReason);
       return new Response(
         JSON.stringify({ error: 'ML account not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -742,7 +749,7 @@ serve(async (req) => {
       EdgeRuntime.waitUntil(
         processOrdersInBackground(
           supabaseAdmin,
-          user.id,
+            mlAccount.user_id || user.id,
           seller_id,
           validAccessToken,
           mlAccount.id,
@@ -756,7 +763,7 @@ serve(async (req) => {
       // Fallback: start async but don't await
       processOrdersInBackground(
         supabaseAdmin,
-        user.id,
+        mlAccount.user_id || user.id,
         seller_id,
         validAccessToken,
         mlAccount.id,
