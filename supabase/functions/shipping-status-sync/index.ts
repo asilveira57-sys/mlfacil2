@@ -11,6 +11,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "
 const MAX_SHIPMENTS_PER_ACCOUNT = 250;
 const MAX_STALE_PER_ACCOUNT = 50;
 const MAX_SHIPPED_RECHECK_PER_ACCOUNT = 30;
+const MAX_SEED_PER_ACCOUNT = 80; // Pass 0: novos pedidos sem shipment_cache
 const DELAY_BETWEEN_CALLS_MS = 200;
 const DELAY_BETWEEN_ACCOUNTS_MS = 2000;
 
@@ -155,6 +156,120 @@ async function checkAndUpdateShipment(
     return true;
   }
 }
+
+/**
+ * Pass 0: Seed shipments that exist in meli_orders_cache but are missing
+ * from meli_shipments_cache. Fixes the gap where new orders are imported
+ * by orders-hourly-sync but their shipment row is never created — which
+ * left the UI stuck showing "Sincronizando…" indefinitely.
+ */
+async function seedMissingShipments(
+  ctx: CheckContext,
+  userId: string,
+): Promise<void> {
+  // Pull recent orders with shipment_id for this seller
+  const { data: recentOrders, error: ordErr } = await ctx.supabase
+    .from("meli_orders_cache")
+    .select("order_id, shipment_id, pack_id")
+    .eq("seller_id", String(ctx.sellerId))
+    .not("shipment_id", "is", null)
+    .order("created_at_meli", { ascending: false })
+    .limit(MAX_SEED_PER_ACCOUNT * 3);
+
+  if (ordErr || !recentOrders || recentOrders.length === 0) return;
+
+  const shipmentIds = [...new Set(recentOrders.map((o: any) => String(o.shipment_id)))];
+
+  // Find which already exist in cache
+  const { data: existing } = await ctx.supabase
+    .from("meli_shipments_cache")
+    .select("shipment_id")
+    .eq("seller_id", String(ctx.sellerId))
+    .in("shipment_id", shipmentIds);
+
+  const existingSet = new Set((existing || []).map((s: any) => String(s.shipment_id)));
+  const missing = recentOrders
+    .filter((o: any) => !existingSet.has(String(o.shipment_id)))
+    .slice(0, MAX_SEED_PER_ACCOUNT);
+
+  if (missing.length === 0) return;
+
+  console.log(`[shipping-status-sync] ${ctx.sellerId}: SEED pass — ${missing.length} novos shipments a popular`);
+
+  for (const order of missing) {
+    ctx.stats.checked++;
+    try {
+      const response = await fetch(
+        `https://api.mercadolibre.com/shipments/${order.shipment_id}`,
+        { headers: { Authorization: `Bearer ${ctx.accessToken}` } }
+      );
+      if (response.status === 401) {
+        console.warn(`[shipping-status-sync] Token expired (seed) for ${ctx.sellerId}`);
+        return;
+      }
+      if (response.status === 429) {
+        console.warn(`[shipping-status-sync] Rate limited (seed) for ${ctx.sellerId}`);
+        await sleep(5000);
+        return;
+      }
+      if (!response.ok) {
+        ctx.stats.errors++;
+        await sleep(DELAY_BETWEEN_CALLS_MS);
+        continue;
+      }
+      const data = await response.json();
+      const receiverAddress = data.receiver_address || {};
+      const labelAvailable = data.substatus === "ready_to_print" || data.substatus === "printed";
+
+      let estimatedHandlingLimit: string | null = null;
+      if (data.shipping_option?.estimated_handling_limit?.date) estimatedHandlingLimit = data.shipping_option.estimated_handling_limit.date;
+      else if (data.lead_time?.estimated_handling_limit?.date) estimatedHandlingLimit = data.lead_time.estimated_handling_limit.date;
+      else if (data.estimated_handling_limit?.date) estimatedHandlingLimit = data.estimated_handling_limit.date;
+
+      let estimatedScheduleLimit: string | null = null;
+      if (data.shipping_option?.estimated_schedule_limit?.date) estimatedScheduleLimit = data.shipping_option.estimated_schedule_limit.date;
+      else if (data.lead_time?.estimated_schedule_limit?.date) estimatedScheduleLimit = data.lead_time.estimated_schedule_limit.date;
+      else if (data.estimated_schedule_limit?.date) estimatedScheduleLimit = data.estimated_schedule_limit.date;
+
+      const row: Record<string, any> = {
+        user_id: userId,
+        seller_id: String(ctx.sellerId),
+        order_id: String(order.order_id),
+        shipment_id: String(order.shipment_id),
+        shipment_status: data.status || null,
+        shipment_substatus: data.substatus || null,
+        tracking_number: data.tracking_number || null,
+        receiver_name: receiverAddress.receiver_name || null,
+        receiver_address: receiverAddress || null,
+        logistic_type: data.logistic_type || null,
+        label_available: labelAvailable,
+        shipping_state_uf: receiverAddress.state?.id || receiverAddress.state?.name || null,
+        shipping_city: receiverAddress.city?.name || null,
+        shipping_neighborhood: receiverAddress.neighborhood?.name || null,
+        shipping_zipcode: receiverAddress.zip_code || null,
+        estimated_handling_limit: estimatedHandlingLimit,
+        estimated_schedule_limit: estimatedScheduleLimit,
+        last_sync_at: new Date().toISOString(),
+      };
+
+      const { error: upErr } = await ctx.supabase
+        .from("meli_shipments_cache")
+        .upsert(row, { onConflict: "seller_id,shipment_id" });
+
+      if (upErr) {
+        console.error(`[shipping-status-sync] SEED upsert error ${order.shipment_id}:`, upErr.message);
+        ctx.stats.errors++;
+      } else {
+        ctx.stats.updated++;
+      }
+      await sleep(DELAY_BETWEEN_CALLS_MS);
+    } catch (err) {
+      console.error(`[shipping-status-sync] SEED error ${order.shipment_id}:`, err);
+      ctx.stats.errors++;
+    }
+  }
+}
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -322,6 +437,9 @@ Deno.serve(async (req) => {
       };
 
       try {
+        // ===== Pass 0: seed shipments faltantes (novos pedidos sem cache) =====
+        await seedMissingShipments(ctx, account.user_id);
+
         // ===== Pass 1: stale stuck shipments (ready_to_ship/printed-or-ready_for_pickup) =====
         const { data: staleShipments } = await supabase
           .from("meli_shipments_cache")
