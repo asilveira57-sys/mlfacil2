@@ -8,15 +8,15 @@ const SYNC_COOLDOWN_KEY = 'postlogin_sync_';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours per account
 
 /**
- * Check if current hour (BRT) is within allowed sync window (09:00–15:00).
+ * Check if current hour (BRT) is within allowed sync window (07:00–17:00).
  */
 function isWithinSyncWindow(): boolean {
   const now = new Date();
-  // Get BRT hour (UTC-3)
   const utcHour = now.getUTCHours();
   const brtHour = (utcHour - 3 + 24) % 24;
-  return brtHour >= 9 && brtHour < 15;
+  return brtHour >= 7 && brtHour < 17;
 }
+
 
 /**
  * Check cooldown per account using localStorage.
