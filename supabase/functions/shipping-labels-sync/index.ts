@@ -33,8 +33,6 @@ const STATE_TO_UF: Record<string, string> = {
 function isAuthorized(req: Request): boolean {
   const cronKey = req.headers.get("x-cron-key");
   if (cronKey && cronKey === CRON_SECRET) return true;
-  const apiKey = req.headers.get("apikey") || "";
-  if (apiKey && SUPABASE_ANON_KEY && apiKey === SUPABASE_ANON_KEY) return true;
   const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.replace("Bearer ", "").trim();
   if (token && SUPABASE_ANON_KEY && token === SUPABASE_ANON_KEY) return true;
