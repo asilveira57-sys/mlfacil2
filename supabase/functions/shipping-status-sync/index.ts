@@ -219,8 +219,27 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Parse manual flag from body — manual runs bypass the window check
+  let isManual = false;
+  try {
+    const body = await req.json();
+    if (body?.manual === true || body?.source === "manual") isManual = true;
+  } catch { /* no body */ }
+
+  // === Janela horária 07:00–17:00 BRT (apenas para execuções automáticas) ===
+  if (!isManual) {
+    const brtHour = new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo", hour: "2-digit", hour12: false });
+    const hour = parseInt(brtHour, 10);
+    if (hour < 7 || hour >= 17) {
+      console.log(`[shipping-status-sync] Outside window (BRT hour=${hour}); skipping auto run.`);
+      return new Response(JSON.stringify({ status: "skipped", reason: "outside_window", brt_hour: hour }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+
   const startTime = Date.now();
-  const stats = { accounts: 0, checked: 0, updated: 0, errors: 0, skipped: 0, stale_checked: 0, shipped_rechecked: 0 };
+  const stats = { accounts: 0, accounts_skipped_inactive: 0, checked: 0, updated: 0, errors: 0, skipped: 0, stale_checked: 0, shipped_rechecked: 0 };
 
   try {
     // Acquire lock via sync_scheduler
@@ -232,12 +251,14 @@ Deno.serve(async (req) => {
 
     if (scheduler?.status === "running") {
       const lastRun = scheduler.last_run_at ? new Date(scheduler.last_run_at).getTime() : 0;
-      if (Date.now() - lastRun < 10 * 60 * 1000) {
+      // 20 min stale lock window (alinhado com reset_stale_sync_locks)
+      if (Date.now() - lastRun < 20 * 60 * 1000) {
         console.log("[shipping-status-sync] Already running, skipping");
         return new Response(JSON.stringify({ status: "skipped", reason: "already_running" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      console.log("[shipping-status-sync] Stale lock detected, resetting and continuing");
     }
 
     await supabase
@@ -248,12 +269,12 @@ Deno.serve(async (req) => {
         last_run_at: new Date().toISOString(),
       }, { onConflict: "job_name" });
 
-    const { data: accounts, error: accError } = await supabase
+    const { data: allAccounts, error: accError } = await supabase
       .from("ml_accounts")
       .select("id, ml_user_id, user_id, access_token")
       .eq("is_active", true);
 
-    if (accError || !accounts || accounts.length === 0) {
+    if (accError || !allAccounts || allAccounts.length === 0) {
       console.log("[shipping-status-sync] No active accounts found");
       await markDone(supabase);
       return new Response(JSON.stringify({ status: "idle", stats }), {
@@ -261,7 +282,30 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log(`[shipping-status-sync] Processing ${accounts.length} accounts`);
+    // === Filtrar sellers com titular ativo (last_login_at < 3 dias) ===
+    const titularIds = [...new Set(allAccounts.map((a: any) => a.user_id).filter(Boolean))];
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+    const { data: activeProfiles } = await supabase
+      .from("profiles")
+      .select("user_id, last_login_at")
+      .in("user_id", titularIds)
+      .gte("last_login_at", threeDaysAgo);
+    const activeUserIds = new Set((activeProfiles || []).map((p: any) => p.user_id));
+
+    const accounts = allAccounts.filter((a: any) => activeUserIds.has(a.user_id));
+    stats.accounts_skipped_inactive = allAccounts.length - accounts.length;
+
+    if (accounts.length === 0) {
+      console.log(`[shipping-status-sync] All ${allAccounts.length} accounts skipped (inactive titulars)`);
+      await markDone(supabase);
+      return new Response(JSON.stringify({ status: "idle", stats, reason: "all_inactive" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    console.log(`[shipping-status-sync] Processing ${accounts.length} active accounts (${stats.accounts_skipped_inactive} skipped as inactive)`);
+
+
 
     const now = Date.now();
     const stale24hCutoff = new Date(now - 24 * 3600 * 1000).toISOString();
