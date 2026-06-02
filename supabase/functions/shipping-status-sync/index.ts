@@ -437,6 +437,9 @@ Deno.serve(async (req) => {
       };
 
       try {
+        // ===== Pass 0: seed shipments faltantes (novos pedidos sem cache) =====
+        await seedMissingShipments(ctx, account.user_id);
+
         // ===== Pass 1: stale stuck shipments (ready_to_ship/printed-or-ready_for_pickup) =====
         const { data: staleShipments } = await supabase
           .from("meli_shipments_cache")
