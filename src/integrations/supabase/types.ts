@@ -22054,6 +22054,7 @@ export type Database = {
         Returns: Json
       }
       rpc_start_tenant_trial: { Args: { p_tenant_id: string }; Returns: Json }
+      run_cost_retention_cleanup: { Args: never; Returns: undefined }
       select_plan: { Args: { p_plan_id: string }; Returns: Json }
       set_user_active_context: {
         Args: {
