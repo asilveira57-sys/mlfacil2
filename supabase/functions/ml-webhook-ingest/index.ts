@@ -81,6 +81,16 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Cost guard: descartar silenciosamente tópicos que não são processados.
+    // Retorna 200 OK para o ML não retentar. Sem INSERT, sem custo de storage.
+    if (!PROCESSED_TOPICS.has(String(topic))) {
+      return new Response(JSON.stringify({ status: "ignored_topic", topic }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+
     // Validate application_id if configured
     if (ALLOWED_APP_IDS.length > 0 && application_id) {
       if (!ALLOWED_APP_IDS.includes(String(application_id))) {
