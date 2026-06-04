@@ -1,29 +1,39 @@
-## Problema
+Plano de correção segura para Etiquetas de Envio
 
-O arquivo tem 96 blocos `^XA…^XZ`, mas cada bloco contém uma diretiva `^PQn,0,1,Y` indicando quantas cópias daquela etiqueta devem ser impressas. A soma dos `^PQ` = **221** (confirmado).
+1. Padronizar a regra de filtros no banco
+- Atualizar a função `get_shipping_orders` para usar uma única régua operacional baseada no prazo real do Mercado Livre:
+  - prioridade: `estimated_schedule_limit` quando existir;
+  - fallback: `estimated_handling_limit`;
+  - comparação sempre em horário de Brasília.
+- Para `Envios de hoje`, retornar apenas envios acionáveis com prazo hoje ou atrasados, excluindo cancelados e Full da contagem operacional quando o ML não exige ação do seller.
+- Classificar atraso e hoje pelo prazo de despacho, não pela data da venda.
 
-O sistema atual (`splitFullLabels` em `src/hooks/useZPLSettings.ts`) apenas divide por `^XA` e retorna **96** etiquetas, ignorando completamente o `^PQ`. Por isso o painel mostra "96 etiquetas detectadas" e o PDF gerado também sai com 96 páginas. O sistema antigo (mlfacil) expandia o `^PQ`, por isso gerava as 221.
+2. Corrigir status “Para imprimir” versus “Reimprimir”
+- Separar corretamente:
+  - `pronta`: etiqueta disponível e ainda não marcada como impressa pelo ML;
+  - `reimprimir`: apenas quando o ML realmente informar `printed`, `ready_for_pickup` ou `in_packing_list` para envio ainda acionável.
+- Garantir que itens `pending/buffered` sem etiqueta não inflem “Para imprimir” nem “Reimprimir”.
 
-## Correção
+3. Corrigir “Hoje” para não confundir venda de hoje com envio de hoje
+- Manter `Hoje` como venda criada hoje.
+- Manter `Envios de hoje` como prazo de envio/coleta do ML.
+- Ajustar o texto/contagem se necessário para evitar leitura errada: o número principal deve refletir o filtro ativo e os chips devem refletir somente o mesmo universo filtrado.
 
-Ajustar **`splitFullLabels`** (usado por Full Produto, Full Volume, Mercado Livre e Magalu) para:
+4. Remover armadilhas de limite e de operação em andamento
+- Não adicionar `LIMIT` artificial nas regras de contagem; preservar paginação apenas para a tela.
+- Manter bloqueio de sincronização enquanto existir geração de etiqueta ativa, para não mexer no cache no meio da operação.
+- Remover/evitar qualquer refetch automático que altere a lista durante impressão; atualizar só via botão ou após sync concluído.
 
-1. Após dividir por `^XA…^XZ`, ler a quantidade do `^PQn,...` de cada bloco (default = 1 se ausente).
-2. Replicar o bloco `n` vezes no array de saída.
-3. Em cada cópia replicada, normalizar a diretiva para `^PQ1,0,1,Y` (ou remover) para que o Labelary não multiplique novamente em cima da replicação.
-4. Manter o comportamento atual quando não houver `^PQ` (1 cópia por bloco).
+5. Validar com a conta ADECONEX
+- Rodar consultas comparando:
+  - `Hoje`;
+  - `Envios de hoje`;
+  - `Todos`;
+  - `Reimprimir`;
+  - prazos de hoje e atrasados.
+- Conferir se o resultado passa a seguir a lógica do Mercado Livre: 17 prontas para enviar hoje + 1 atrasada, sem transformar tudo em “Reimprimir”.
 
-Nenhuma outra mudança é necessária:
-- `detectLabelCount` já chama `splitZPLByType` quando recebe `labelType`, então o contador no painel passará automaticamente a mostrar 221.
-- O loop de conversão em `ZPLConverter.tsx` itera sobre o array retornado, então gerará as 221 páginas.
-- Shopee continua com sua própria lógica (`splitShopeeLabels`), sem impacto.
-
-## Arquivo alterado
-
-- `src/hooks/useZPLSettings.ts` — função `splitFullLabels` (expansão de `^PQ` + normalização para `^PQ1`).
-
-## Validação
-
-- Recarregar o mesmo arquivo `Envio-69023601-Etiquetas-de-produtos (2).txt` → painel deve mostrar **221 etiquetas detectadas**.
-- Converter para PDF → arquivo deve ter **221 páginas**, na ordem original e com as repetições corretas (ex.: EUGB80550 aparecendo 2× consecutivas, SMAS45837 3×, etc.).
-- Testar um arquivo sem `^PQ` para confirmar que continua 1 cópia por bloco.
+Arquivos previstos
+- Nova migration para substituir `public.get_shipping_orders`.
+- Possível ajuste pequeno em `src/hooks/useShippingLabelsV2.ts` e/ou `src/hooks/useShippingLabels.ts` apenas se a UI estiver mandando parâmetros errados.
+- Possível ajuste de label/contagem em `ShippingFilters` somente se necessário para refletir fielmente o filtro ativo.
