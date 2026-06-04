@@ -9,6 +9,20 @@ const corsHeaders = {
 // Allowed application IDs (your ML app)
 const ALLOWED_APP_IDS = (Deno.env.get("ML_APP_ID") || "").split(",").filter(Boolean);
 
+// Allowlist de tópicos que o sistema EFETIVAMENTE processa em ml-worker-process.
+// Qualquer outro tópico é respondido 200 OK e descartado, sem gravar em webhook_events,
+// para evitar custo de invocação/insert/storage com eventos que nunca seriam tratados.
+const PROCESSED_TOPICS = new Set([
+  "items",
+  "orders",
+  "orders_v2",
+  "shipments",
+  "messages",
+  "questions",
+  "invoices",
+]);
+
+
 /**
  * Generate a SHA-256 hash for deduplication
  */
