@@ -17,8 +17,10 @@
   "refresh": "Refresh",
   "status": {
     "all": "All",
-    "ready": "Ready to print",
+    "ready": "To print",
+    "to_print": "To print",
     "waiting_nf": "Waiting NF",
+    "ready_to_ship": "Ready to ship",
     "reprint": "Reprint"
   },
   "orders_count": "{{count}} order",

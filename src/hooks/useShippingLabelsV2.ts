@@ -464,7 +464,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders-v2', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
-      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
+      const emptyCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 };
+      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: emptyCounts };
 
       dbg('[query] fetching orders, hasActiveJob=', hasActiveJob);
 
@@ -481,9 +482,20 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         p_page_size: PAGE_SIZE,
         p_period_type: periodFilter === 'today' ? 'today_dispatch' : 'date_range',
       } as any);
-      if (error) { console.error('V2 RPC error:', error); return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } }; }
+      if (error) { console.error('V2 RPC error:', error); return { orders: [], totalCount: 0, statusCounts: emptyCounts }; }
       const result = data as any;
-      return { orders: result.orders || [], totalCount: result.total_count || 0, statusCounts: result.status_counts || { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
+      const sc = result.status_counts || {};
+      return {
+        orders: result.orders || [],
+        totalCount: result.total_count || 0,
+        statusCounts: {
+          all: sc.all ?? 0,
+          aguardando_nf: sc.aguardando_nf ?? 0,
+          para_imprimir: sc.para_imprimir ?? 0,
+          pronta_enviar: sc.pronta_enviar ?? 0,
+          reimprimir: sc.reimprimir ?? 0,
+        },
+      };
     },
     enabled: !!sellerId,
     staleTime: 5 * 60 * 1000,
@@ -496,7 +508,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const orders = ordersData?.orders ?? [];
   const totalCount = ordersData?.totalCount ?? 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-  const statusCounts = ordersData?.statusCounts ?? { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 };
+  const statusCounts = ordersData?.statusCounts ?? { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 };
 
   // Order items
   const { data: orderItemsData } = useQuery({

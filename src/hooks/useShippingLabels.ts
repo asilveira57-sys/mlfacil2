@@ -48,7 +48,17 @@ function isTrialExpiredResponse(response: { data?: any; error?: any }): boolean 
   return false;
 }
 
-export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
+export type FinalStatus = 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir' | 'pronta' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
+
+export interface StatusCounts {
+  all: number;
+  aguardando_nf: number;
+  para_imprimir: number;
+  pronta_enviar: number;
+  reimprimir: number;
+  /** @deprecated mantido apenas para compatibilidade — use para_imprimir + pronta_enviar. */
+  pronta?: number;
+}
 export type PeriodFilter = 'all' | 'today_sales' | 'today' | '7d' | '15d' | '30d' | 'custom';
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
 export type SortField = 'created_at_meli' | 'buyer_nickname' | 'final_status';
@@ -366,7 +376,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
-      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
+      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 } as StatusCounts };
 
       const { dateFrom, dateTo } = getDateRange();
 
@@ -383,21 +393,30 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         p_period_type: periodFilter === 'today' ? 'today_dispatch' : 'date_range',
       } as any);
 
+      const emptyCounts: StatusCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 };
+
       if (error) {
         console.error('RPC get_shipping_orders error:', error);
-        return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
+        return { orders: [], totalCount: 0, statusCounts: emptyCounts };
       }
 
       const result = data as unknown as {
         orders: ShippingOrder[];
         total_count: number;
-        status_counts: { all: number; pronta: number; aguardando_nf: number; reimprimir: number };
+        status_counts: Partial<StatusCounts>;
       };
 
+      const sc = result.status_counts || {};
       return {
         orders: result.orders || [],
         totalCount: result.total_count || 0,
-        statusCounts: result.status_counts || { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 },
+        statusCounts: {
+          all: sc.all ?? 0,
+          aguardando_nf: sc.aguardando_nf ?? 0,
+          para_imprimir: sc.para_imprimir ?? 0,
+          pronta_enviar: sc.pronta_enviar ?? 0,
+          reimprimir: sc.reimprimir ?? 0,
+        } as StatusCounts,
       };
     },
     enabled: !!sellerId,
@@ -1434,10 +1453,11 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   }, [startSyncPipeline]);
 
   // Status counts come directly from the RPC result
-  const statusCounts = ordersData?.statusCounts ?? {
+  const statusCounts: StatusCounts = ordersData?.statusCounts ?? {
     all: 0,
-    pronta: 0,
     aguardando_nf: 0,
+    para_imprimir: 0,
+    pronta_enviar: 0,
     reimprimir: 0,
   };
 
