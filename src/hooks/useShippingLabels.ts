@@ -376,7 +376,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
-      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
+      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 } as StatusCounts };
 
       const { dateFrom, dateTo } = getDateRange();
 
