@@ -48,7 +48,17 @@ function isTrialExpiredResponse(response: { data?: any; error?: any }): boolean 
   return false;
 }
 
-export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
+export type FinalStatus = 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir' | 'pronta' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
+
+export interface StatusCounts {
+  all: number;
+  aguardando_nf: number;
+  para_imprimir: number;
+  pronta_enviar: number;
+  reimprimir: number;
+  /** @deprecated mantido apenas para compatibilidade — use para_imprimir + pronta_enviar. */
+  pronta?: number;
+}
 export type PeriodFilter = 'all' | 'today_sales' | 'today' | '7d' | '15d' | '30d' | 'custom';
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
 export type SortField = 'created_at_meli' | 'buyer_nickname' | 'final_status';
