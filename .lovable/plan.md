@@ -1,136 +1,72 @@
-Plano para deixar a tela de etiquetas fiel ao Mercado Livre
+## Diagnóstico
 
-Objetivo
+O backend está saudável; o problema está na regra de filtragem da tela de etiquetas.
 
-- Fazer o card/lista do MKTP Fácil seguir a mesma lógica operacional do Mercado Livre:
-  - NF-e para gerenciar
-  - Etiquetas para imprimir
-  - Prontas para enviar
-  - Total = soma dessas três categorias
-- Separar corretamente:
-  - Hoje = vendas criadas hoje.
-  - Envios de hoje = envios que precisam ser despachados hoje/atrasados, igual ao card “Para enviar” do Mercado Livre.
-- Evitar mexer no meio da operação com atualização automática pesada: nada de sync automático inesperado; atualização só pelo botão Atualizar ou rotina controlada de etiquetas.
+Para o seller `472990216`, a RPC atual retorna exatamente **13** em `Envios de hoje`, todos como `pronta_enviar`.
 
-Diagnóstico encontrado
+Os exemplos enviados existem no cache, mas estão fora do filtro atual:
 
-- A função atual `get_shipping_orders` ainda mistura duas coisas diferentes:
-  - período da venda (`created_at_meli`)
-  - prazo/status operacional do envio (`estimated_schedule_limit`, `estimated_handling_limit`, `shipment_status`, `shipment_substatus`)
-- O status atual `pronta` está sendo usado como “Para imprimir”, mas também inclui casos já impressos.
-- O filtro “Reimprimir” está aparecendo como um status concorrente, quando no Mercado Livre isso corresponde melhor a “Prontas para enviar” ou a uma ação visual de reimpressão, não a uma quarta categoria que bagunça o total.
-- Existem envios antigos/stale no cache, principalmente `pending/buffered` e registros que provavelmente já mudaram para enviado no Mercado Livre, entrando em filtros de 7 dias e inflando contadores.
-- Na TODOVINOBR, a consulta direta do banco agora mostra divergência real entre o que está no cache e o que o Mercado Livre exibe, então a correção precisa envolver regra de status e reconciliação leve dos envios ativos.
+- `2000013248859093` → no banco é `pack_id`; pedido real `2000016684286938`; venda de `30/05`; shipment `47182817130`.
+- `2000013314214667` → no banco é `pack_id`; pedido real `2000016746942782`; venda de `02/06`; shipment `47210432443`.
+- `2000013322344495` → pack com 2 pedidos reais (`2000016754593296`, `2000016754597060`); shipment `47213816577`.
+- `2000013323256149` → pedido real `2000016755385572`; shipment `47214207345`.
 
-Regra nova proposta
+Todos estão com:
 
-1. Períodos
+- `shipment_status = ready_to_ship`
+- `shipment_substatus = printed`
+- `logistic_type = xd_drop_off`
+- `label_available = true`
+- `final_status = pronta_enviar`
+- `estimated_handling_limit` e `estimated_schedule_limit` nulos
 
-- Todos:
-  - lista operacional recente de etiquetas, sem trazer enviados/cancelados/entregues como se fossem ação pendente.
-- Hoje:
-  - filtra por venda criada hoje em Brasília, usando `created_at_meli`.
-  - não usa prazo de despacho.
-- Envios de hoje:
-  - filtra por envio ativo com prazo de despacho hoje ou atrasado.
-  - precisa bater com o card do Mercado Livre “Para enviar”.
-  - total = `NF-e para gerenciar + Etiquetas para imprimir + Prontas para enviar`.
-- 7, 15 e 30 dias:
-  - filtram vendas/envios dentro do período, mas mantendo apenas o universo operacional da tela de etiquetas.
-  - enviados, entregues, cancelados, dropped_off, in_hub e Full não devem inflar a lista principal de etiquetas pendentes.
+O bug principal é este trecho da RPC: quando o envio está **sem cutoff**, ela só inclui em `Envios de hoje` se a venda foi criada **ontem ou hoje**. O Mercado Livre, porém, mostra esses envios dentro do card de hoje porque estão prontos e precisam ser postados na agência hoje, mesmo sendo vendas antigas.
 
-2. Status operacionais
+Também há um segundo risco: pedidos enviados como `pack_id` são pesquisáveis no banco, mas a tela pode mostrar/filtrar pelo `order_id` interno do pedido, o que confunde quando o Mercado Livre exibe o número do pack.
 
-Substituir a régua atual por três buckets explícitos:
+## Plano de correção
 
-```text
-aguardando_nf
-  = NF-e para gerenciar
-  = envio ativo que exige nota e ainda está com substatus fiscal pendente
+### 1. Corrigir a RPC `get_shipping_orders`
 
-para_imprimir
-  = Etiquetas para imprimir
-  = envio ativo com etiqueta liberada, mas ainda não impresso/coletado
+Ajustar a regra de `today_dispatch` para envios sem cutoff:
 
-pronta_enviar
-  = Prontas para enviar
-  = envio ativo já impresso ou pronto para postagem/coleta
-```
+- manter a exclusão de Full, enviados, entregues, cancelados, `in_hub` e `dropped_off`;
+- incluir `ready_to_ship/printed` e `label_available = true` mesmo quando `estimated_*_limit` está nulo;
+- remover a trava artificial `created_at_meli >= ontem` para esses casos;
+- continuar usando `created_at_meli` apenas no filtro **Hoje / vendas de hoje**, não em **Envios de hoje**.
 
-Manter `is_reprint` apenas como booleano visual/ação, não como status principal que altera o total.
+Resultado esperado: pedidos prontos para enviar, sem cutoff, deixam de sumir do card operacional.
 
-3. Exclusões obrigatórias
+### 2. Tratar pack como unidade operacional
 
-A tela de etiquetas não deve contar como pendente operacional:
+Na listagem e na deduplicação:
 
-- `shipment_status`: `shipped`, `delivered`, `not_delivered`, `cancelled`
-- `shipment_substatus`: `dropped_off`, `in_hub`, `buffered` quando ainda não é uma ação do seller
-- `logistic_type`: `fulfillment` no fluxo principal de etiquetas do seller
-- pedidos cancelados
-- registros sem shipment válido, exceto quando forem exibidos claramente como pendência de sincronização fora do total operacional
+- manter a deduplicação por `shipment_id`, que é a unidade correta para etiqueta;
+- garantir que `pack_id` seja considerado na busca e retorno visual;
+- quando existir `pack_id`, preferir exibir o identificador do pack como referência principal, pois é o número que o Mercado Livre costuma mostrar ao vendedor.
 
-Implementação planejada
+Isso evita a sensação de “pedido não existe” quando o usuário procura pelo número visto no Mercado Livre.
 
-1. Ajustar a RPC `get_shipping_orders`
+### 3. Separar definitivamente os dois conceitos
 
-- Reescrever a classificação para retornar status claros:
-  - `aguardando_nf`
-  - `para_imprimir`
-  - `pronta_enviar`
-  - estados técnicos separados: `pendente_sync`, `full`, `enviado`, `outros`
-- Alterar os contadores para:
-  - `all`
-  - `aguardando_nf`
-  - `para_imprimir`
-  - `pronta_enviar`
-- Fazer `all` representar apenas o total operacional no contexto da tela, principalmente em “Envios de hoje”.
-- Garantir que `Envios de hoje` use prazo de corte/despacho em Brasília e inclua atrasados ainda acionáveis.
-- Garantir que `Hoje` use data de venda, não prazo de despacho.
+Reforçar a regra:
 
-2. Ajustar frontend da tela de etiquetas
+- **Hoje** = vendas criadas hoje em Brasília (`created_at_meli`).
+- **Envios de hoje** = envios acionáveis que precisam ir para despacho hoje, incluindo prontos sem cutoff.
 
-- Trocar chips/status para refletir a mesma linguagem do Mercado Livre:
-  - Todos
-  - Para imprimir
-  - Aguardando NF
-  - Prontas para enviar
-- Remover “Reimprimir” como filtro principal ou transformá-lo em ação/indicador visual dentro de “Prontas para enviar”.
-- Atualizar tipos TypeScript, contadores e traduções PT/EN/ES.
-- Manter seleção/impressão habilitada apenas nos status realmente imprimíveis.
+A UI já tem os dois filtros; o ajuste será garantir que a RPC não volte a misturar as regras.
 
-3. Corrigir sincronização sem estressar a operação
+### 4. Validação com os pedidos citados
 
-- Não adicionar sync automático pesado ao abrir a tela.
-- No botão Atualizar, fazer uma reconciliação pontual e limitada ao seller atual:
-  - pedidos recentes necessários
-  - envios ativos/pendentes de etiqueta
-  - notas fiscais desses pedidos
-- Revalidar também envios antigos que ainda aparecem como ativos no cache, para remover da tela os que o Mercado Livre já marcou como enviados/postados.
-- Após Atualizar, invalidar/refazer a consulta da tela automaticamente; o vendedor não deve precisar dar F5.
+Depois da migration:
 
-4. Critérios de aceite
+- consultar novamente `get_shipping_orders('472990216', ..., 'today_dispatch')`;
+- confirmar que os shipments dos exemplos aparecem quando são acionáveis;
+- confirmar contador esperado contra o print do Mercado Livre;
+- confirmar que enviados/entregues/cancelados/Full continuam fora do total operacional.
 
-Para TODOVINOBR, depois da correção e de uma atualização pontual:
+### 5. Proteção contra custo e estresse operacional
 
-- O filtro Envios de hoje deve bater com o card do Mercado Livre:
-  - NF-e para gerenciar = 12
-  - Etiquetas para imprimir = 2
-  - Prontas para enviar = 1
-  - Todos = 15
-- O filtro Hoje deve listar vendas feitas hoje, mesmo que não sejam o mesmo conjunto de “envios de hoje”.
-- O filtro 7 dias não deve trazer venda/envio já enviado como pendência de etiqueta.
-- Nenhum enviado, entregue, cancelado, Full ou buffered sem ação deve inflar o total operacional.
-- Clicar Atualizar deve corrigir a tela sem F5.
+A correção será feita na lógica de consulta e exibição, sem criar sincronização automática pesada.
 
-5. Validação antes de concluir
-
-- Consultar a RPC diretamente para TODOVINOBR antes/depois.
-- Conferir contadores por status no banco.
-- Testar visualmente a tela `/shipping-labels` com os filtros:
-  - Hoje
-  - Envios de hoje
-  - 7 dias
-  - Aguardando NF
-  - Para imprimir
-  - Prontas para enviar
-- Confirmar que a mudança não reativa sincronizações automáticas amplas nem aumenta custo de balance.
+Não vou adicionar rotina que atualiza todos os vendedores, nem importação ampla. O botão **Atualizar** continua sendo o ponto controlado para reconciliação pontual.
