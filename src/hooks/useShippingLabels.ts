@@ -1453,10 +1453,11 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   }, [startSyncPipeline]);
 
   // Status counts come directly from the RPC result
-  const statusCounts = ordersData?.statusCounts ?? {
+  const statusCounts: StatusCounts = ordersData?.statusCounts ?? {
     all: 0,
-    pronta: 0,
     aguardando_nf: 0,
+    para_imprimir: 0,
+    pronta_enviar: 0,
     reimprimir: 0,
   };
 
