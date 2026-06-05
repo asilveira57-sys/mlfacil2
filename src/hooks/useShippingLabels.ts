@@ -393,21 +393,30 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         p_period_type: periodFilter === 'today' ? 'today_dispatch' : 'date_range',
       } as any);
 
+      const emptyCounts: StatusCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 };
+
       if (error) {
         console.error('RPC get_shipping_orders error:', error);
-        return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
+        return { orders: [], totalCount: 0, statusCounts: emptyCounts };
       }
 
       const result = data as unknown as {
         orders: ShippingOrder[];
         total_count: number;
-        status_counts: { all: number; pronta: number; aguardando_nf: number; reimprimir: number };
+        status_counts: Partial<StatusCounts>;
       };
 
+      const sc = result.status_counts || {};
       return {
         orders: result.orders || [],
         totalCount: result.total_count || 0,
-        statusCounts: result.status_counts || { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 },
+        statusCounts: {
+          all: sc.all ?? 0,
+          aguardando_nf: sc.aguardando_nf ?? 0,
+          para_imprimir: sc.para_imprimir ?? 0,
+          pronta_enviar: sc.pronta_enviar ?? 0,
+          reimprimir: sc.reimprimir ?? 0,
+        } as StatusCounts,
       };
     },
     enabled: !!sellerId,
