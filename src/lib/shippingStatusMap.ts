@@ -234,6 +234,21 @@ export interface FinalStatusInfo extends StatusInfo {
 }
 
 export const FINAL_STATUS_MAP: Record<string, FinalStatusInfo> = {
+  para_imprimir: {
+    label: 'Para Imprimir',
+    description: 'Etiqueta liberada e ainda não impressa.',
+    severity: 'success',
+    badgeVariant: 'default',
+    className: 'bg-green-600 hover:bg-green-700',
+  },
+  pronta_enviar: {
+    label: 'Pronta para Enviar',
+    description: 'Etiqueta impressa, aguardando postagem/coleta.',
+    severity: 'success',
+    badgeVariant: 'default',
+    className: 'bg-emerald-600 hover:bg-emerald-700',
+  },
+  // Compat: registros antigos ainda podem chegar com final_status='pronta'.
   pronta: {
     label: 'Para Imprimir',
     description: 'Pedido pronto para postagem. NF emitida.',
