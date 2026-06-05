@@ -11,10 +11,18 @@ import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR, enUS, es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 
-// Filter status types (only the ones shown as filter chips)
-type FilterStatus = 'all' | 'pronta' | 'aguardando_nf' | 'reimprimir';
+// Filter status types (chips shown in UI) — alinhados ao Mercado Livre.
+type FilterStatus = 'all' | 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir';
 
 export type LogisticFilter = 'all' | 'flex' | 'coleta' | 'full';
+
+export interface ShippingStatusCounts {
+  all: number;
+  aguardando_nf: number;
+  para_imprimir: number;
+  pronta_enviar: number;
+  reimprimir: number;
+}
 
 interface ShippingFiltersProps {
   statusFilter: FinalStatus;
@@ -25,7 +33,7 @@ interface ShippingFiltersProps {
   setDateRange: (range: DateRange) => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  statusCounts: { all: number; pronta: number; aguardando_nf: number; reimprimir: number };
+  statusCounts: ShippingStatusCounts;
   isSyncing: boolean;
   syncPhase?: SyncPhase;
   syncProgress?: string;
@@ -38,8 +46,9 @@ interface ShippingFiltersProps {
 
 const STATUS_VARIANTS: Record<FilterStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   all: 'outline',
-  pronta: 'default',
   aguardando_nf: 'secondary',
+  para_imprimir: 'default',
+  pronta_enviar: 'default',
   reimprimir: 'outline',
 };
 
@@ -56,8 +65,9 @@ const PERIOD_KEYS: { value: QuickPeriod; labelKey: string }[] = [
 
 const STATUS_KEYS: { value: FilterStatus; labelKey: string }[] = [
   { value: 'all', labelKey: 'status.all' },
-  { value: 'pronta', labelKey: 'status.ready' },
+  { value: 'para_imprimir', labelKey: 'status.to_print' },
   { value: 'aguardando_nf', labelKey: 'status.waiting_nf' },
+  { value: 'pronta_enviar', labelKey: 'status.ready_to_ship' },
   { value: 'reimprimir', labelKey: 'status.reprint' },
 ];
 
