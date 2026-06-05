@@ -18,7 +18,9 @@
   "status": {
     "all": "Todos",
     "ready": "Para imprimir",
+    "to_print": "Para imprimir",
     "waiting_nf": "Aguardando NF",
+    "ready_to_ship": "Prontas para enviar",
     "reprint": "Reimprimir"
   },
   "orders_count": "{{count}} pedido",
