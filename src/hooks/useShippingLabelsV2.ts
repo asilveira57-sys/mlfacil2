@@ -494,6 +494,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           para_imprimir: sc.para_imprimir ?? 0,
           pronta_enviar: sc.pronta_enviar ?? 0,
           reimprimir: sc.reimprimir ?? 0,
+          agendadas: sc.agendadas ?? 0,
         },
       };
     },
