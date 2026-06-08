@@ -509,7 +509,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const orders = ordersData?.orders ?? [];
   const totalCount = ordersData?.totalCount ?? 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-  const statusCounts = ordersData?.statusCounts ?? { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 };
+  const statusCounts = ordersData?.statusCounts ?? { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0, agendadas: 0 };
 
   // Order items
   const { data: orderItemsData } = useQuery({
