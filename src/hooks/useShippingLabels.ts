@@ -48,7 +48,7 @@ function isTrialExpiredResponse(response: { data?: any; error?: any }): boolean 
   return false;
 }
 
-export type FinalStatus = 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir' | 'pronta' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
+export type FinalStatus = 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir' | 'agendada' | 'pronta' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
 
 export interface StatusCounts {
   all: number;
@@ -56,6 +56,7 @@ export interface StatusCounts {
   para_imprimir: number;
   pronta_enviar: number;
   reimprimir: number;
+  agendadas: number;
   /** @deprecated mantido apenas para compatibilidade — use para_imprimir + pronta_enviar. */
   pronta?: number;
 }
