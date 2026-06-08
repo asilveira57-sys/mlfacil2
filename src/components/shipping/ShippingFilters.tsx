@@ -12,7 +12,7 @@ import { ptBR, enUS, es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 
 // Filter status types (chips shown in UI) — alinhados ao Mercado Livre.
-type FilterStatus = 'all' | 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir';
+type FilterStatus = 'all' | 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir' | 'agendada';
 
 export type LogisticFilter = 'all' | 'flex' | 'coleta' | 'full';
 
@@ -22,6 +22,7 @@ export interface ShippingStatusCounts {
   para_imprimir: number;
   pronta_enviar: number;
   reimprimir: number;
+  agendadas: number;
 }
 
 interface ShippingFiltersProps {
