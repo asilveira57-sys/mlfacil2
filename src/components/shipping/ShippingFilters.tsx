@@ -298,7 +298,7 @@ export function ShippingFilters({
             >
               {t(status.labelKey)}
               <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-background/20 text-xs">
-                {statusCounts[status.value]}
+                {status.value === 'agendada' ? statusCounts.agendadas : statusCounts[status.value]}
               </span>
             </Badge>
           ))}
