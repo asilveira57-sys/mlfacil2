@@ -1461,6 +1461,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     para_imprimir: 0,
     pronta_enviar: 0,
     reimprimir: 0,
+    agendadas: 0,
   };
 
   // === SILENT AUTO-REFRESH: Update shipment statuses every 5 minutes ===
