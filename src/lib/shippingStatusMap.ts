@@ -269,6 +269,13 @@ export const FINAL_STATUS_MAP: Record<string, FinalStatusInfo> = {
     badgeVariant: 'outline',
     className: 'text-yellow-600 border-yellow-600',
   },
+  agendada: {
+    label: 'Agendada',
+    description: 'Envio com data futura de liberação (programado pelo comprador).',
+    severity: 'muted',
+    badgeVariant: 'outline',
+    className: 'text-amber-600 border-amber-500 bg-amber-50 dark:bg-amber-950/30',
+  },
   pendente_sync: {
     label: 'Sincronizando...',
     description: 'O envio está sendo sincronizado. Aguarde ou clique em Atualizar.',
