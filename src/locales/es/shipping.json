@@ -21,7 +21,8 @@
     "to_print": "Para imprimir",
     "waiting_nf": "Esperando NF",
     "ready_to_ship": "Listas para enviar",
-    "reprint": "Reimprimir"
+    "reprint": "Reimprimir",
+    "scheduled": "Programadas"
   },
   "orders_count": "{{count}} pedido",
   "orders_count_plural": "{{count}} pedidos",
