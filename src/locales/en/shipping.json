@@ -21,7 +21,8 @@
     "to_print": "To print",
     "waiting_nf": "Waiting NF",
     "ready_to_ship": "Ready to ship",
-    "reprint": "Reprint"
+    "reprint": "Reprint",
+    "scheduled": "Scheduled"
   },
   "orders_count": "{{count}} order",
   "orders_count_plural": "{{count}} orders",

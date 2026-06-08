@@ -12,7 +12,7 @@ import { ptBR, enUS, es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 
 // Filter status types (chips shown in UI) — alinhados ao Mercado Livre.
-type FilterStatus = 'all' | 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir';
+type FilterStatus = 'all' | 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir' | 'agendada';
 
 export type LogisticFilter = 'all' | 'flex' | 'coleta' | 'full';
 
@@ -22,6 +22,7 @@ export interface ShippingStatusCounts {
   para_imprimir: number;
   pronta_enviar: number;
   reimprimir: number;
+  agendadas: number;
 }
 
 interface ShippingFiltersProps {
@@ -50,6 +51,7 @@ const STATUS_VARIANTS: Record<FilterStatus, 'default' | 'secondary' | 'destructi
   para_imprimir: 'default',
   pronta_enviar: 'default',
   reimprimir: 'outline',
+  agendada: 'outline',
 };
 
 type QuickPeriod = Exclude<PeriodFilter, 'custom'>;
@@ -69,6 +71,7 @@ const STATUS_KEYS: { value: FilterStatus; labelKey: string }[] = [
   { value: 'aguardando_nf', labelKey: 'status.waiting_nf' },
   { value: 'pronta_enviar', labelKey: 'status.ready_to_ship' },
   { value: 'reimprimir', labelKey: 'status.reprint' },
+  { value: 'agendada', labelKey: 'status.scheduled' },
 ];
 
 const LOGISTIC_KEYS: { value: LogisticFilter; label: string }[] = [
@@ -295,7 +298,7 @@ export function ShippingFilters({
             >
               {t(status.labelKey)}
               <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-background/20 text-xs">
-                {statusCounts[status.value]}
+                {status.value === 'agendada' ? statusCounts.agendadas : statusCounts[status.value]}
               </span>
             </Badge>
           ))}

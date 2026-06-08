@@ -1,72 +1,64 @@
 ## Diagnóstico
 
-O backend está saudável; o problema está na regra de filtragem da tela de etiquetas.
+Confirmei no banco para a ADECONEX:
 
-Para o seller `472990216`, a RPC atual retorna exatamente **13** em `Envios de hoje`, todos como `pronta_enviar`.
+Os 3 pedidos que o Mercado Livre mostra como "Para enviar amanhã / no dia 12 / no dia 16" (`2000013378932969`, `2000013363351761`, `2000013361395225`) estão no nosso cache com:
 
-Os exemplos enviados existem no cache, mas estão fora do filtro atual:
+- `shipment_status = 'pending'`
+- `shipment_substatus = 'buffered'`  ← marcador do ML para envios **agendados** (data futura de liberação)
+- `logistic_type = 'xd_drop_off'`
+- `label_available = false`
+- `estimated_handling_limit = NULL` e `estimated_schedule_limit = NULL`
 
-- `2000013248859093` → no banco é `pack_id`; pedido real `2000016684286938`; venda de `30/05`; shipment `47182817130`.
-- `2000013314214667` → no banco é `pack_id`; pedido real `2000016746942782`; venda de `02/06`; shipment `47210432443`.
-- `2000013322344495` → pack com 2 pedidos reais (`2000016754593296`, `2000016754597060`); shipment `47213816577`.
-- `2000013323256149` → pedido real `2000016755385572`; shipment `47214207345`.
+Por isso a soma "bate" (24 ≈ 21 do ML + 3 agendados), mas eles aparecem indevidamente em **Aguardando NF** e em **Envios de hoje**. O ML não os exibe no card "PARA ENVIAR / Até as 12:00h" justamente porque a data programada é futura.
 
-Todos estão com:
-
-- `shipment_status = ready_to_ship`
-- `shipment_substatus = printed`
-- `logistic_type = xd_drop_off`
-- `label_available = true`
-- `final_status = pronta_enviar`
-- `estimated_handling_limit` e `estimated_schedule_limit` nulos
-
-O bug principal é este trecho da RPC: quando o envio está **sem cutoff**, ela só inclui em `Envios de hoje` se a venda foi criada **ontem ou hoje**. O Mercado Livre, porém, mostra esses envios dentro do card de hoje porque estão prontos e precisam ser postados na agência hoje, mesmo sendo vendas antigas.
-
-Também há um segundo risco: pedidos enviados como `pack_id` são pesquisáveis no banco, mas a tela pode mostrar/filtrar pelo `order_id` interno do pedido, o que confunde quando o Mercado Livre exibe o número do pack.
+Na correção anterior, ao incluir shipments sem cutoff no `today_dispatch`, varremos junto os `buffered` — que precisam ficar fora.
 
 ## Plano de correção
 
-### 1. Corrigir a RPC `get_shipping_orders`
+### 1. RPC `get_shipping_orders` (migration)
 
-Ajustar a regra de `today_dispatch` para envios sem cutoff:
+a) Detectar agendados de forma única:
+```
+is_scheduled := (shipment_substatus = 'buffered')
+               OR (shipment_status = 'pending' AND shipment_substatus IN ('buffered','scheduled'))
+               OR (estimated_schedule_limit > now() AND label_available = false)
+```
 
-- manter a exclusão de Full, enviados, entregues, cancelados, `in_hub` e `dropped_off`;
-- incluir `ready_to_ship/printed` e `label_available = true` mesmo quando `estimated_*_limit` está nulo;
-- remover a trava artificial `created_at_meli >= ontem` para esses casos;
-- continuar usando `created_at_meli` apenas no filtro **Hoje / vendas de hoje**, não em **Envios de hoje**.
+b) Excluir `is_scheduled = true` de **todos** os buckets operacionais atuais:
+- `para_imprimir`
+- `aguardando_nf`
+- `pronta_enviar`
+- `today_dispatch` (`periodFilter = 'today'`)
+- contagem `all`
 
-Resultado esperado: pedidos prontos para enviar, sem cutoff, deixam de sumir do card operacional.
+c) Criar novo bucket/contagem **`agendadas`** (futuras) — não entra no total "Todos", igual ao ML.
 
-### 2. Tratar pack como unidade operacional
+d) Manter `estimated_schedule_limit` (quando existir no raw) como data exibida; quando ausente, exibir a data textual do ML se disponível, senão "Agendada".
 
-Na listagem e na deduplicação:
+### 2. Sync de shipments
 
-- manter a deduplicação por `shipment_id`, que é a unidade correta para etiqueta;
-- garantir que `pack_id` seja considerado na busca e retorno visual;
-- quando existir `pack_id`, preferir exibir o identificador do pack como referência principal, pois é o número que o Mercado Livre costuma mostrar ao vendedor.
+Garantir que o pipeline de sync de `meli_shipments_cache` persista `estimated_schedule_limit` quando o ML retornar para shipments `buffered` (hoje está vindo NULL). Caminho: `shipping.estimated_schedule_limit` ou `lead_time.estimated_schedule_limit` do payload `/shipments/{id}`.
 
-Isso evita a sensação de “pedido não existe” quando o usuário procura pelo número visto no Mercado Livre.
+### 3. Frontend
 
-### 3. Separar definitivamente os dois conceitos
+- `ShippingFilters.tsx`: adicionar chip **"Agendadas"** com contagem própria (separado de "Todos").
+- `useShippingLabelsV2.ts` / `useShippingLabels.ts`: mapear nova chave `statusCounts.agendadas` e novo `statusFilter='agendadas'`.
+- `shippingStatusMap.ts`: badge específico (ex.: cinza/âmbar) para `agendada` com tooltip "Liberada em DD/MM".
+- Traduções `pt-BR/en/es`: chave `status.scheduled` / `Agendadas` / `Scheduled` / `Programadas`.
 
-Reforçar a regra:
+### 4. Validação
 
-- **Hoje** = vendas criadas hoje em Brasília (`created_at_meli`).
-- **Envios de hoje** = envios acionáveis que precisam ir para despacho hoje, incluindo prontos sem cutoff.
+Após aplicar:
+- ADECONEX deve mostrar **Todos = 21**, **Aguardando NF = 18**, **Prontas = 2**, **Atrasadas/Para imprimir = 1**, **Agendadas = 3** (com `2000013378932969`, `2000013363351761`, `2000013361395225`).
+- Filtro "Envios de hoje" não deve incluir os 3 agendados.
+- Filtro "Agendadas" lista exatamente os 3, com a data futura visível.
 
-A UI já tem os dois filtros; o ajuste será garantir que a RPC não volte a misturar as regras.
+## Arquivos afetados
 
-### 4. Validação com os pedidos citados
-
-Depois da migration:
-
-- consultar novamente `get_shipping_orders('472990216', ..., 'today_dispatch')`;
-- confirmar que os shipments dos exemplos aparecem quando são acionáveis;
-- confirmar contador esperado contra o print do Mercado Livre;
-- confirmar que enviados/entregues/cancelados/Full continuam fora do total operacional.
-
-### 5. Proteção contra custo e estresse operacional
-
-A correção será feita na lógica de consulta e exibição, sem criar sincronização automática pesada.
-
-Não vou adicionar rotina que atualiza todos os vendedores, nem importação ampla. O botão **Atualizar** continua sendo o ponto controlado para reconciliação pontual.
+- Nova migration para `get_shipping_orders`
+- `supabase/functions/meli-shipments-sync/*` (persistência de `estimated_schedule_limit` para buffered)
+- `src/hooks/useShippingLabels.ts`, `useShippingLabelsV2.ts`
+- `src/components/shipping/ShippingFilters.tsx`
+- `src/lib/shippingStatusMap.ts`
+- `src/locales/{pt-BR,en,es}/shipping.json`

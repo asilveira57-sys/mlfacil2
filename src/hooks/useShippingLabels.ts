@@ -48,7 +48,7 @@ function isTrialExpiredResponse(response: { data?: any; error?: any }): boolean 
   return false;
 }
 
-export type FinalStatus = 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir' | 'pronta' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
+export type FinalStatus = 'aguardando_nf' | 'para_imprimir' | 'pronta_enviar' | 'reimprimir' | 'agendada' | 'pronta' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
 
 export interface StatusCounts {
   all: number;
@@ -56,6 +56,7 @@ export interface StatusCounts {
   para_imprimir: number;
   pronta_enviar: number;
   reimprimir: number;
+  agendadas: number;
   /** @deprecated mantido apenas para compatibilidade — use para_imprimir + pronta_enviar. */
   pronta?: number;
 }
@@ -376,7 +377,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
-      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 } as StatusCounts };
+      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0, agendadas: 0 } as StatusCounts };
 
       const { dateFrom, dateTo } = getDateRange();
 
@@ -393,7 +394,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         p_period_type: periodFilter === 'today' ? 'today_dispatch' : 'date_range',
       } as any);
 
-      const emptyCounts: StatusCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 };
+      const emptyCounts: StatusCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0, agendadas: 0 };
 
       if (error) {
         console.error('RPC get_shipping_orders error:', error);
@@ -416,6 +417,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           para_imprimir: sc.para_imprimir ?? 0,
           pronta_enviar: sc.pronta_enviar ?? 0,
           reimprimir: sc.reimprimir ?? 0,
+          agendadas: sc.agendadas ?? 0,
         } as StatusCounts,
       };
     },
@@ -1459,6 +1461,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     para_imprimir: 0,
     pronta_enviar: 0,
     reimprimir: 0,
+    agendadas: 0,
   };
 
   // === SILENT AUTO-REFRESH: Update shipment statuses every 5 minutes ===
