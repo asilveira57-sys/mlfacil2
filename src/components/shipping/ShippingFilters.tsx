@@ -51,6 +51,7 @@ const STATUS_VARIANTS: Record<FilterStatus, 'default' | 'secondary' | 'destructi
   para_imprimir: 'default',
   pronta_enviar: 'default',
   reimprimir: 'outline',
+  agendada: 'outline',
 };
 
 type QuickPeriod = Exclude<PeriodFilter, 'custom'>;
@@ -70,6 +71,7 @@ const STATUS_KEYS: { value: FilterStatus; labelKey: string }[] = [
   { value: 'aguardando_nf', labelKey: 'status.waiting_nf' },
   { value: 'pronta_enviar', labelKey: 'status.ready_to_ship' },
   { value: 'reimprimir', labelKey: 'status.reprint' },
+  { value: 'agendada', labelKey: 'status.scheduled' },
 ];
 
 const LOGISTIC_KEYS: { value: LogisticFilter; label: string }[] = [
