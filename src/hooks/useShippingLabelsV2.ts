@@ -464,7 +464,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders-v2', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
-      const emptyCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 };
+      const emptyCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0, agendadas: 0 };
       if (!sellerId) return { orders: [], totalCount: 0, statusCounts: emptyCounts };
 
       dbg('[query] fetching orders, hasActiveJob=', hasActiveJob);
