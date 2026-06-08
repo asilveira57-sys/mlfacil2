@@ -377,7 +377,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
-      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 } as StatusCounts };
+      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0, agendadas: 0 } as StatusCounts };
 
       const { dateFrom, dateTo } = getDateRange();
 
@@ -394,7 +394,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         p_period_type: periodFilter === 'today' ? 'today_dispatch' : 'date_range',
       } as any);
 
-      const emptyCounts: StatusCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0 };
+      const emptyCounts: StatusCounts = { all: 0, aguardando_nf: 0, para_imprimir: 0, pronta_enviar: 0, reimprimir: 0, agendadas: 0 };
 
       if (error) {
         console.error('RPC get_shipping_orders error:', error);
@@ -417,6 +417,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           para_imprimir: sc.para_imprimir ?? 0,
           pronta_enviar: sc.pronta_enviar ?? 0,
           reimprimir: sc.reimprimir ?? 0,
+          agendadas: sc.agendadas ?? 0,
         } as StatusCounts,
       };
     },
