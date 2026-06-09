@@ -159,21 +159,23 @@ serve(async (req) => {
     const layoutInfo = LAYOUTS[layout];
     console.log(`[labeltest-dispatcher] seller=${seller_id} format=${format} layout=${layout} shipments=${shipment_ids.length} (raw=${rawShipmentIds.length})`);
 
-    // ML account — allow titular owner OR active collaborator of the company
-    const { data: mlAccount } = await supabaseAdmin
-      .from('ml_accounts').select('access_token, ml_user_id, user_id, company_id')
-      .eq('ml_user_id', seller_id).eq('is_active', true).maybeSingle();
-    if (!mlAccount) return respond(false, { error: 'ML account not found' }, 404);
-
-    let authorized = mlAccount.user_id === user.id;
-    if (!authorized && mlAccount.company_id) {
-      const { data: membership } = await supabaseAdmin
-        .from('company_users').select('id')
-        .eq('user_id', user.id).eq('company_id', mlAccount.company_id).eq('status', 'active')
-        .maybeSingle();
-      authorized = !!membership;
+    // ML account — must be the titular account of the authenticated user.
+    // Do NOT use maybeSingle() only by seller_id: stale duplicate connections for
+    // the same ML user make PostgREST return “multiple rows”, causing a false 404.
+    const { data: mlAccount, error: mlAccountErr } = await supabaseAdmin
+      .from('ml_accounts')
+      .select('id, access_token, ml_user_id, user_id, company_id, connection_status, token_expires_at')
+      .eq('ml_user_id', seller_id)
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (mlAccountErr) {
+      console.error(`[labeltest-dispatcher] ML account lookup failed seller=${seller_id} user=${user.id}:`, mlAccountErr);
+      return respond(false, { error: 'Falha ao localizar a conta Mercado Livre', error_code: 'ML_ACCOUNT_LOOKUP_FAILED' }, 500);
     }
-    if (!authorized) return respond(false, { error: 'ML account not found' }, 404);
+    if (!mlAccount) return respond(false, { error: 'Conta Mercado Livre não encontrada para este usuário', error_code: 'ML_ACCOUNT_NOT_FOUND' }, 404);
 
     // ─── Validate shipments ────────────────────────────────────────
     const validationErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
