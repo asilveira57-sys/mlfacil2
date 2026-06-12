@@ -21528,6 +21528,21 @@ export type Database = {
       }
       check_snoozed_notifications: { Args: never; Returns: undefined }
       check_tenant_plan_limit: { Args: { p_company_id: string }; Returns: Json }
+      cleanup_print_payloads: {
+        Args: { p_hours?: number; p_limit?: number }
+        Returns: {
+          cleaned_rows: number
+          freed_estimate_bytes: number
+        }[]
+      }
+      compact_webhook_backlog_discard: {
+        Args: { p_limit?: number; p_topics?: string[] }
+        Returns: number
+      }
+      compact_webhook_backlog_duplicates: {
+        Args: { p_limit?: number }
+        Returns: number
+      }
       count_distinct_active_items: {
         Args: { p_seller_id: string }
         Returns: {
