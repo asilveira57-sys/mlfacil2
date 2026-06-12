@@ -20,9 +20,11 @@ export function usePrintHistory(sellerId: string | null, shipmentId?: string) {
     queryFn: async () => {
       if (!sellerId) return [];
 
+      // Cost guard: do NOT pull pdf_base64 / zpl_content / large payloads in
+      // the listing. Heavy fields are loaded on-demand when the user prints.
       let query = supabase
         .from('meli_print_queue')
-        .select('*')
+        .select('id, seller_id, format, shipment_ids, total_labels, status, file_url, error_log, created_at')
         .eq('seller_id', sellerId)
         .order('created_at', { ascending: false });
 

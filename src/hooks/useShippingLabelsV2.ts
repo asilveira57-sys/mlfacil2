@@ -821,9 +821,14 @@ export function usePrintHistoryV2(sellerId: string | null) {
     queryKey: ['print-history-v2', sellerId],
     queryFn: async () => {
       if (!sellerId) return [];
+      // Cost guard: listing must NOT pull heavy fields (pdf_base64,
+      // zpl_content, batches, per_shipment_log). They are fetched on-demand
+      // when the user opens or downloads a specific job.
       const { data, error } = await supabase
         .from('meli_print_queue_v2' as any)
-        .select('*')
+        .select(
+          'id, user_id, seller_id, version, format, layout, shipment_ids, total_labels, processed_labels, status, page_width_mm, page_height_mm, page_width_pt, page_height_pt, total_pages, file_url, error_log, download_filename, job_started_at, job_completed_at, duration_ms, created_at, updated_at, module'
+        )
         .eq('seller_id', sellerId)
         .order('created_at', { ascending: false })
         .limit(50);
