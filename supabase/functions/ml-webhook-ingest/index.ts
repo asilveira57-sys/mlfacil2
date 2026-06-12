@@ -9,131 +9,122 @@ const corsHeaders = {
 // Allowed application IDs (your ML app)
 const ALLOWED_APP_IDS = (Deno.env.get("ML_APP_ID") || "").split(",").filter(Boolean);
 
-// Allowlist de tópicos que o sistema EFETIVAMENTE processa em ml-worker-process.
-// Qualquer outro tópico é respondido 200 OK e descartado, sem gravar em webhook_events,
-// para evitar custo de invocação/insert/storage com eventos que nunca seriam tratados.
-const PROCESSED_TOPICS = new Set([
-  "items",
-  "orders",
-  "orders_v2",
-  "shipments",
-  "messages",
-  "questions",
-  "invoices",
-]);
+// ---------------------------------------------------------------------------
+// Cost-containment policy (Phase 1)
+// ---------------------------------------------------------------------------
+// 1) DISCARD list: topics that are stored at high volume but NOT processed
+//    operationally right now. They are answered 200 OK and dropped immediately.
+//    No SELECT, no INSERT, no dedupe. Configurable via env to roll back fast.
+// 2) ACCEPT list: topics that the system actually uses (shipments, orders,
+//    orders_v2). They are inserted, BUT we skip the costly SELECT-before-INSERT
+//    dedupe — the unique index on dedupe_key already prevents duplicates.
+// Any topic outside both lists is dropped silently (legacy behavior).
+// ---------------------------------------------------------------------------
 
+const DEFAULT_DISCARD_TOPICS = ["items", "messages", "questions", "invoices"];
+const DEFAULT_ACCEPT_TOPICS = ["shipments", "orders", "orders_v2"];
+
+const DISCARD_TOPICS = new Set(
+  (Deno.env.get("WEBHOOK_DISCARD_TOPICS") ?? DEFAULT_DISCARD_TOPICS.join(","))
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
+const ACCEPT_TOPICS = new Set(
+  (Deno.env.get("WEBHOOK_ACCEPT_TOPICS") ?? DEFAULT_ACCEPT_TOPICS.join(","))
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
+// Kill-switch: when set to "1" the function reverts to legacy "accept everything"
+// behavior (still skipping the redundant SELECT). Use only if something breaks.
+const COST_GUARD_DISABLED = Deno.env.get("WEBHOOK_COST_GUARD_DISABLED") === "1";
 
 /**
- * Generate a SHA-256 hash for deduplication
+ * SHA-256 dedupe key (kept for the unique index)
  */
 async function generateDedupeKey(input: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(input);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 Deno.serve(async (req) => {
   const startTime = Date.now();
 
-  // CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
-  // Only accept POST
-  if (req.method !== "POST") {
-    console.warn("[ml-webhook-ingest] Method not allowed:", req.method);
-    return new Response("Method not allowed", { status: 405 });
-  }
-
-  // Validate Content-Type
   const contentType = req.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
-    console.warn("[ml-webhook-ingest] Invalid content type:", contentType);
     return new Response("Invalid content type", { status: 400 });
   }
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
     // Parse body with size limit (100KB)
     const bodyText = await req.text();
     if (bodyText.length > 102400) {
-      console.error("[ml-webhook-ingest] Payload too large:", bodyText.length);
       return new Response("Payload too large", { status: 413 });
     }
 
     const payload = JSON.parse(bodyText);
-    console.log("[ml-webhook-ingest] Received:", JSON.stringify(payload).substring(0, 500));
-
-    // Validate minimum fields from ML webhook
-    const { topic, resource, user_id, application_id, _id, sent, attempts } = payload;
+    const { topic, resource, user_id, application_id, _id, sent } = payload;
 
     if (!topic || !resource || !user_id) {
-      console.error("[ml-webhook-ingest] Missing required fields:", { topic, resource, user_id });
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Cost guard: descartar silenciosamente tópicos que não são processados.
-    // Retorna 200 OK para o ML não retentar. Sem INSERT, sem custo de storage.
-    if (!PROCESSED_TOPICS.has(String(topic))) {
-      return new Response(JSON.stringify({ status: "ignored_topic", topic }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const topicStr = String(topic);
+
+    // ─── Cost guard: discard topics we don't operationally process ──────────
+    if (!COST_GUARD_DISABLED && DISCARD_TOPICS.has(topicStr)) {
+      // 200 OK, no DB work. ML won't retry.
+      return new Response(
+        JSON.stringify({ status: "discarded_topic", topic: topicStr }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
+    // ─── Cost guard: anything outside the accept list is also dropped ───────
+    if (!COST_GUARD_DISABLED && !ACCEPT_TOPICS.has(topicStr)) {
+      return new Response(
+        JSON.stringify({ status: "ignored_topic", topic: topicStr }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
-    // Validate application_id if configured
+    // Optional app id check
     if (ALLOWED_APP_IDS.length > 0 && application_id) {
       if (!ALLOWED_APP_IDS.includes(String(application_id))) {
         console.warn("[ml-webhook-ingest] Unknown application_id:", application_id);
-        // Still accept but log - ML might send for valid reasons
       }
     }
 
-    // Generate dedupe_key
-    // Format: provider:user_id:topic:resource:event_id_or_timestamp
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Generate dedupe_key (still used by the unique index)
     const eventId = _id || sent || Date.now().toString();
-    const dedupeRaw = `mercadolibre:${user_id}:${topic}:${resource}:${eventId}`;
+    const dedupeRaw = `mercadolibre:${user_id}:${topicStr}:${resource}:${eventId}`;
     const dedupeKey = await generateDedupeKey(dedupeRaw);
 
-    console.log("[ml-webhook-ingest] Dedupe key:", dedupeKey.substring(0, 16) + "...");
-
-    // Check for duplicate
-    const { data: existing } = await supabase
-      .from("webhook_events")
-      .select("id, status")
-      .eq("dedupe_key", dedupeKey)
-      .maybeSingle();
-
-    if (existing) {
-      console.log("[ml-webhook-ingest] Duplicate event, already exists:", existing.id);
-      // Return 200 to prevent ML from retrying
-      return new Response(JSON.stringify({
-        status: "duplicate",
-        event_id: existing.id,
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Insert into queue
+    // Direct INSERT — rely on the unique index instead of a separate SELECT.
+    // This removes one round-trip per webhook (we used to do ~1.8M reads/day).
     const { data: inserted, error: insertError } = await supabase
       .from("webhook_events")
       .insert({
         provider: "mercadolibre",
         ml_user_id: String(user_id),
         application_id: application_id ? String(application_id) : null,
-        topic,
+        topic: topicStr,
         resource,
         payload_raw: payload,
         dedupe_key: dedupeKey,
@@ -144,46 +135,33 @@ Deno.serve(async (req) => {
       .single();
 
     if (insertError) {
-      // If duplicate key error (race condition), still return 200
+      // 23505 = unique_violation → duplicate, fine
       if (insertError.code === "23505") {
-        console.log("[ml-webhook-ingest] Race condition duplicate, ignoring");
         return new Response(JSON.stringify({ status: "duplicate" }), {
           status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-
       console.error("[ml-webhook-ingest] Insert error:", insertError);
-      // Return 200 anyway to prevent infinite retries from ML
-      return new Response(JSON.stringify({
-        status: "error",
-        error: "queue_failed",
-      }), {
+      return new Response(JSON.stringify({ status: "error", error: "queue_failed" }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const duration = Date.now() - startTime;
-    console.log(`[ml-webhook-ingest] Queued event ${inserted.id} in ${duration}ms`);
-
-    return new Response(JSON.stringify({
-      status: "queued",
-      event_id: inserted.id,
-      topic,
-      duration_ms: duration,
-    }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-
+    return new Response(
+      JSON.stringify({
+        status: "queued",
+        event_id: inserted.id,
+        topic: topicStr,
+        duration_ms: Date.now() - startTime,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   } catch (err) {
     console.error("[ml-webhook-ingest] Error:", err);
     // Always return 200 to prevent ML from hammering us
-    return new Response(JSON.stringify({
-      status: "error",
-      message: "Internal error, event logged",
-    }), {
+    return new Response(JSON.stringify({ status: "error" }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
