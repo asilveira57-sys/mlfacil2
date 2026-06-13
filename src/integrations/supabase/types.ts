@@ -21379,6 +21379,10 @@ export type Database = {
       }
     }
     Functions: {
+      _economy_setting: {
+        Args: { p_default: Json; p_key: string }
+        Returns: Json
+      }
       activate_own_collaborator_invites: { Args: never; Returns: number }
       add_admin_by_email: { Args: { p_email: string }; Returns: undefined }
       admin_adjust_trial: {
@@ -21559,6 +21563,7 @@ export type Database = {
           total_pending: number
         }[]
       }
+      cron_gate_allows: { Args: { p_module?: string }; Returns: boolean }
       delete_email: {
         Args: { message_id: number; queue_name: string }
         Returns: boolean
