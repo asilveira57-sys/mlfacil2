@@ -3923,6 +3923,36 @@ export type Database = {
         }
         Relationships: []
       }
+      cost_alerts: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          payload: Json
+          resolved: boolean
+          resolved_at: string | null
+          severity: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind: string
+          payload?: Json
+          resolved?: boolean
+          resolved_at?: string | null
+          severity?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          payload?: Json
+          resolved?: boolean
+          resolved_at?: string | null
+          severity?: string
+        }
+        Relationships: []
+      }
       cost_bulk_jobs: {
         Row: {
           chunk_size: number
@@ -4113,6 +4143,69 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      cost_daily_report: {
+        Row: {
+          created_at: string
+          id: string
+          jobs_blocked_by_hours: number
+          jobs_blocked_by_inactivity: number
+          jobs_executed: number
+          orders_cache_size_mb: number
+          print_queue_size_mb: number
+          raw: Json
+          report_date: string
+          sellers_active: number
+          sellers_inactive_suspended: number
+          storage_freed_mb: number
+          updated_at: string
+          webhook_events_size_mb: number
+          webhooks_discarded: number
+          webhooks_pending: number
+          webhooks_processed: number
+          webhooks_received: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          jobs_blocked_by_hours?: number
+          jobs_blocked_by_inactivity?: number
+          jobs_executed?: number
+          orders_cache_size_mb?: number
+          print_queue_size_mb?: number
+          raw?: Json
+          report_date: string
+          sellers_active?: number
+          sellers_inactive_suspended?: number
+          storage_freed_mb?: number
+          updated_at?: string
+          webhook_events_size_mb?: number
+          webhooks_discarded?: number
+          webhooks_pending?: number
+          webhooks_processed?: number
+          webhooks_received?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          jobs_blocked_by_hours?: number
+          jobs_blocked_by_inactivity?: number
+          jobs_executed?: number
+          orders_cache_size_mb?: number
+          print_queue_size_mb?: number
+          raw?: Json
+          report_date?: string
+          sellers_active?: number
+          sellers_inactive_suspended?: number
+          storage_freed_mb?: number
+          updated_at?: string
+          webhook_events_size_mb?: number
+          webhooks_discarded?: number
+          webhooks_pending?: number
+          webhooks_processed?: number
+          webhooks_received?: number
+        }
+        Relationships: []
       }
       daily_messages: {
         Row: {
@@ -21928,6 +22021,10 @@ export type Database = {
       on_account_connected_check_limit: {
         Args: { p_account_id: string; p_company_id: string }
         Returns: Json
+      }
+      raise_cost_alert: {
+        Args: { p_kind: string; p_payload?: Json; p_severity?: string }
+        Returns: string
       }
       read_email_batch: {
         Args: { batch_size: number; queue_name: string; vt: number }
