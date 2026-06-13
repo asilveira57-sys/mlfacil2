@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { CostReportPanel } from "./CostReportPanel";
 
 interface SyncLogRow {
   id: string;
@@ -231,6 +232,8 @@ export function AdminEconomyMode() {
           </p>
         </CardContent>
       </Card>
+
+      <CostReportPanel />
     </div>
   );
 }
