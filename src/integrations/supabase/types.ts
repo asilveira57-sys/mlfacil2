@@ -7966,6 +7966,36 @@ export type Database = {
         }
         Relationships: []
       }
+      login_events: {
+        Row: {
+          created_at: string
+          id: string
+          ip_address: string | null
+          session_fingerprint: string | null
+          source: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          session_fingerprint?: string | null
+          source?: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          session_fingerprint?: string | null
+          source?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       market_keywords_cache: {
         Row: {
           category_id: string
@@ -21203,6 +21233,14 @@ export type Database = {
       }
     }
     Views: {
+      login_daily_counts: {
+        Row: {
+          contas_unicas: number | null
+          dia: string | null
+          total_eventos: number | null
+        }
+        Relationships: []
+      }
       meli_orders_ready_view: {
         Row: {
           buyer_nickname: string | null
