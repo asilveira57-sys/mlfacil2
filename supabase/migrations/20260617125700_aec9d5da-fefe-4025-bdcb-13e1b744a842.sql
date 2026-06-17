@@ -1,0 +1,1 @@
+ALTER VIEW public.login_daily_counts SET (security_invoker = on);
