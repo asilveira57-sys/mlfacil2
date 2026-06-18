@@ -18,6 +18,7 @@ import { usePostLoginPrefetch } from "@/hooks/usePostLoginPrefetch";
 
 import { TrialExpiredPaywall, BillingDataGate, ModuleAccessGuard } from "@/components/access";
 import { ShippingEligibilityGuard } from "@/components/access/ShippingEligibilityGuard";
+import { ZplConverterAccessGuard } from "@/components/access/ZplConverterAccessGuard";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoHead } from "@/components/seo/SeoHead";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
