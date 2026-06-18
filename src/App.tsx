@@ -18,6 +18,7 @@ import { usePostLoginPrefetch } from "@/hooks/usePostLoginPrefetch";
 
 import { TrialExpiredPaywall, BillingDataGate, ModuleAccessGuard } from "@/components/access";
 import { ShippingEligibilityGuard } from "@/components/access/ShippingEligibilityGuard";
+import { ZplConverterAccessGuard } from "@/components/access/ZplConverterAccessGuard";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoHead } from "@/components/seo/SeoHead";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -288,7 +289,7 @@ const App = () => {
                        Rota redireciona para /shipping-labels (mesmo recurso). */}
                   <Route path="/label-teste" element={<Navigate to="/shipping-labels" replace />} />
                   <Route path="/shipping-labels/header-settings" element={<ShippingEligibilityGuard><LabelHeaderSettings /></ShippingEligibilityGuard>} />
-                  <Route path="/zpl-converter" element={<ShippingEligibilityGuard><ZPLConverter /></ShippingEligibilityGuard>} />
+                  <Route path="/zpl-converter" element={<ZplConverterAccessGuard><ZPLConverter /></ZplConverterAccessGuard>} />
                   <Route path="/abc-analysis" element={<AbcAnalysis />} />
                   <Route path="/tendencias" element={<TendenciasV2 />} />
                   <Route path="/mercado" element={<Mercado />} />
