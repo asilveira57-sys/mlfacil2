@@ -289,7 +289,7 @@ const App = () => {
                        Rota redireciona para /shipping-labels (mesmo recurso). */}
                   <Route path="/label-teste" element={<Navigate to="/shipping-labels" replace />} />
                   <Route path="/shipping-labels/header-settings" element={<ShippingEligibilityGuard><LabelHeaderSettings /></ShippingEligibilityGuard>} />
-                  <Route path="/zpl-converter" element={<ShippingEligibilityGuard><ZPLConverter /></ShippingEligibilityGuard>} />
+                  <Route path="/zpl-converter" element={<ZplConverterAccessGuard><ZPLConverter /></ZplConverterAccessGuard>} />
                   <Route path="/abc-analysis" element={<AbcAnalysis />} />
                   <Route path="/tendencias" element={<TendenciasV2 />} />
                   <Route path="/mercado" element={<Mercado />} />
