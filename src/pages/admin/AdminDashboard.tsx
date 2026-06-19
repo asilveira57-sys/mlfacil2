@@ -111,6 +111,11 @@ export function AdminDashboard() {
         </Card>
       </div>
 
+      {/* Login Activity */}
+      <LoginActivityCard />
+
+
+
       {/* Alerts Section */}
       <div className="grid gap-4 md:grid-cols-2">
         {/* Trials Expiring */}
