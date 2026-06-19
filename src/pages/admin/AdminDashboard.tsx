@@ -13,6 +13,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { useAdminDashboardStats, useWebhookLogs } from '@/hooks/useAdmin';
+import { LoginActivityCard } from '@/components/admin/LoginActivityCard';
 
 export function AdminDashboard() {
   const { data: stats, isLoading: statsLoading, error: statsError } = useAdminDashboardStats();
@@ -109,6 +110,11 @@ export function AdminDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Login Activity */}
+      <LoginActivityCard />
+
+
 
       {/* Alerts Section */}
       <div className="grid gap-4 md:grid-cols-2">
