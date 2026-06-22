@@ -89,6 +89,16 @@ export function usePostLoginPrefetch() {
             console.info('[Prefetch] Outside sync window or no user — skipping background sync');
           }
 
+          // === Drena webhooks pendentes do usuário (lazy webhook processor) ===
+          if (session?.access_token) {
+            supabase.functions.invoke('ml-worker-process', {
+              headers: { Authorization: `Bearer ${session.access_token}` },
+              body: { source: 'post_login_drain' },
+            }).catch((err) => {
+              if (import.meta.env.DEV) console.info('[Prefetch] webhook drain skipped:', err?.message);
+            });
+          }
+
           if (import.meta.env.DEV) {
             console.info('[Prefetch] Post-login prefetch triggered');
           }
