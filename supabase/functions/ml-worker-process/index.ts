@@ -63,18 +63,45 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Validate internal key for security (supports x-internal-key for webhooks, x-cron-key for cron jobs)
+  // ── Modo Economia: 3 modos de auth ─────────────────────────────────────────
+  //   1) x-internal-key  → ingest interno (global)
+  //   2) x-cron-key      → cron (global, processa só sellers ATIVOS)
+  //   3) Bearer JWT      → drain on-demand do usuário (escopado ao próprio user)
+  // ───────────────────────────────────────────────────────────────────────────
   const internalKey = req.headers.get("x-internal-key");
   const cronKey = req.headers.get("x-cron-key");
+  const authHeader = req.headers.get("authorization") || "";
   const CRON_SECRET = Deno.env.get("CRON_JOB_SECRET") || "default-cron-secret";
-  if (internalKey !== INTERNAL_KEY && cronKey !== CRON_SECRET) {
-    console.error("[ml-worker] Unauthorized request");
-    return new Response("Unauthorized", { status: 401 });
-  }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase: SupabaseAny = createClient(supabaseUrl, supabaseServiceKey);
+
+  let authMode: "internal" | "cron" | "user" | null = null;
+  let scopedMlUserIds: string[] | null = null;
+
+  if (internalKey === INTERNAL_KEY) {
+    authMode = "internal";
+  } else if (cronKey === CRON_SECRET) {
+    authMode = "cron";
+  } else if (authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
+    if (!userErr && userData?.user) {
+      authMode = "user";
+      const { data: accounts } = await supabase
+        .from("ml_accounts")
+        .select("ml_user_id")
+        .eq("user_id", userData.user.id)
+        .eq("is_active", true);
+      scopedMlUserIds = (accounts || []).map((a: any) => String(a.ml_user_id)).filter(Boolean);
+    }
+  }
+
+  if (!authMode) {
+    console.error("[ml-worker] Unauthorized request");
+    return new Response("Unauthorized", { status: 401 });
+  }
 
   const startTime = Date.now();
   const stats = {
@@ -83,20 +110,32 @@ Deno.serve(async (req) => {
     errors: 0,
     skipped: 0,
     rate_limited: 0,
+    inactive_session: 0,
   };
 
   try {
-    console.log("[ml-worker] Starting batch processing");
+    console.log(`[ml-worker] Starting batch processing (mode=${authMode})`);
 
-    // Fetch pending events
+    // Fetch pending events — escopado por user quando authMode=user
     const now = new Date().toISOString();
-    const { data: events, error: fetchError } = await supabase
+    let query = supabase
       .from("webhook_events")
       .select("*")
       .eq("status", "pending")
       .or(`next_retry_at.is.null,next_retry_at.lte.${now}`)
       .order("received_at", { ascending: true })
       .limit(BATCH_SIZE);
+
+    if (authMode === "user") {
+      if (!scopedMlUserIds || scopedMlUserIds.length === 0) {
+        return new Response(JSON.stringify({ status: "idle", message: "No accounts" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      query = query.in("ml_user_id", scopedMlUserIds);
+    }
+
+    const { data: events, error: fetchError } = await query;
 
     if (fetchError) {
       throw new Error(`Failed to fetch events: ${fetchError.message}`);
@@ -185,6 +224,27 @@ Deno.serve(async (req) => {
           stats.skipped++;
           continue;
         }
+
+        // ── Modo Economia: em cron mode, adia eventos quando dono está offline ──
+        if (authMode === "cron") {
+          const { data: sessionActive } = await supabase.rpc("is_user_session_active", {
+            p_user_id: integration.user_id,
+          });
+          if (!sessionActive) {
+            const retryAt = new Date(Date.now() + 10 * 60_000).toISOString();
+            await supabase
+              .from("webhook_events")
+              .update({
+                status: "pending",
+                next_retry_at: retryAt,
+                last_error: "no_active_session",
+              })
+              .eq("id", event.id);
+            stats.inactive_session++;
+            continue;
+          }
+        }
+
 
         // Check daily limit
         const featureFlags = integration.feature_flags || {};
