@@ -225,6 +225,27 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        // ── Modo Economia: em cron mode, adia eventos quando dono está offline ──
+        if (authMode === "cron") {
+          const { data: sessionActive } = await supabase.rpc("is_user_session_active", {
+            p_user_id: integration.user_id,
+          });
+          if (!sessionActive) {
+            const retryAt = new Date(Date.now() + 10 * 60_000).toISOString();
+            await supabase
+              .from("webhook_events")
+              .update({
+                status: "pending",
+                next_retry_at: retryAt,
+                last_error: "no_active_session",
+              })
+              .eq("id", event.id);
+            stats.inactive_session++;
+            continue;
+          }
+        }
+
+
         // Check daily limit
         const featureFlags = integration.feature_flags || {};
         const dailyLimit = featureFlags.daily_event_limit || 5000;
