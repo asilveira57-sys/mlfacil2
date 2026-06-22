@@ -21983,8 +21983,16 @@ export type Database = {
         Args: { _company_id: string; _user_id: string }
         Returns: boolean
       }
+      is_seller_session_active: {
+        Args: { p_ml_user_id: string; p_window_minutes?: number }
+        Returns: boolean
+      }
       is_tenant_member: {
         Args: { _tenant_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_user_session_active: {
+        Args: { p_user_id: string; p_window_minutes?: number }
         Returns: boolean
       }
       is_workspace_member: {
