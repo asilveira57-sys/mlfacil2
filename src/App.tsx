@@ -14,6 +14,7 @@ import { AccountChangeInvalidator } from "@/components/layout/AccountChangeInval
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { queryPersister, PERSIST_MAX_AGE, PERSIST_BUSTER_KEY, shouldPersistQuery } from "@/lib/queryPersister";
 import { usePostLoginPrefetch } from "@/hooks/usePostLoginPrefetch";
+import { useActiveSessionTracker } from "@/hooks/useActiveSessionTracker";
 
 
 import { TrialExpiredPaywall, BillingDataGate, ModuleAccessGuard } from "@/components/access";
@@ -171,6 +172,7 @@ const LazyFallback = () => (
 /** Inner component that uses hooks requiring QueryClient context */
 function AppInner() {
   usePostLoginPrefetch();
+  useActiveSessionTracker();
   return null;
 }
 
