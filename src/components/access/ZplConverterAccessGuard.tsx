@@ -30,32 +30,54 @@ export function ZplConverterAccessGuard({ children }: { children: ReactNode }) {
     enabled: !!userId,
     staleTime: 2 * 60 * 1000,
     queryFn: async () => {
-      const { data: membership } = await supabase
+      // Collect candidate tenant IDs: user's own tenant_members + parent companies
+      // where the user is a collaborator (company_users). This ensures collaborators
+      // inherit the plan from the titular workspace.
+      const tenantIds = new Set<string>();
+
+      const { data: ownMemberships } = await supabase
         .from('tenant_members')
         .select('tenant_id')
-        .eq('user_id', userId!)
-        .limit(1)
-        .maybeSingle();
+        .eq('user_id', userId!);
+      (ownMemberships ?? []).forEach((m: any) => m?.tenant_id && tenantIds.add(m.tenant_id));
 
-      if (!membership?.tenant_id) {
+      const { data: companyUsers } = await supabase
+        .from('company_users')
+        .select('company_id')
+        .eq('user_id', userId!)
+        .eq('status', 'active');
+
+      const companyIds = (companyUsers ?? []).map((c: any) => c.company_id).filter(Boolean);
+      if (companyIds.length) {
+        const { data: comps } = await supabase
+          .from('companies')
+          .select('tenant_id')
+          .in('id', companyIds);
+        (comps ?? []).forEach((c: any) => c?.tenant_id && tenantIds.add(c.tenant_id));
+      }
+
+      if (tenantIds.size === 0) {
         return { state: 'no_plan' as const, periodEnd: null as string | null };
       }
 
-      const { data: ent } = await (supabase as any)
+      const { data: ents } = await (supabase as any)
         .from('tenant_entitlements')
-        .select('current_period_end, status')
-        .eq('tenant_id', membership.tenant_id)
+        .select('current_period_end, status, tenant_id')
+        .in('tenant_id', Array.from(tenantIds))
         .eq('entitlement_type', 'tier')
         .eq('status', 'active')
-        .order('current_period_end', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('current_period_end', { ascending: false });
 
-      if (!ent) return { state: 'no_plan' as const, periodEnd: null };
+      if (!ents || ents.length === 0) {
+        return { state: 'no_plan' as const, periodEnd: null };
+      }
 
-      const periodEnd = ent.current_period_end as string | null;
-      if (!periodEnd) return { state: 'active' as const, periodEnd: null };
+      // Pick the best one: any without expiry = active forever, else latest period_end
+      const noExpiry = ents.find((e: any) => !e.current_period_end);
+      if (noExpiry) return { state: 'active' as const, periodEnd: null };
 
+      const best = ents[0];
+      const periodEnd = best.current_period_end as string;
       const expired = new Date(periodEnd).getTime() < Date.now();
       return {
         state: expired ? ('expired' as const) : ('active' as const),
