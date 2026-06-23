@@ -60,23 +60,30 @@ export function ZplConverterAccessGuard({ children }: { children: ReactNode }) {
         return { state: 'no_plan' as const, periodEnd: null as string | null };
       }
 
+      // Aceita tanto plano (tier) quanto addon ZPL FULL (addon_zpl_full).
+      // O Conversor ZPL pode ser liberado por qualquer um dos dois.
       const { data: ents } = await (supabase as any)
         .from('tenant_entitlements')
-        .select('current_period_end, status, tenant_id')
+        .select('current_period_end, status, tenant_id, entitlement_type, addon_id, plan_addons:addon_id(code)')
         .in('tenant_id', Array.from(tenantIds))
-        .eq('entitlement_type', 'tier')
+        .in('entitlement_type', ['tier', 'addon'])
         .eq('status', 'active')
         .order('current_period_end', { ascending: false });
 
-      if (!ents || ents.length === 0) {
+      const valid = (ents ?? []).filter((e: any) =>
+        e.entitlement_type === 'tier' ||
+        (e.entitlement_type === 'addon' && e.plan_addons?.code === 'zpl_full')
+      );
+
+      if (valid.length === 0) {
         return { state: 'no_plan' as const, periodEnd: null };
       }
 
       // Pick the best one: any without expiry = active forever, else latest period_end
-      const noExpiry = ents.find((e: any) => !e.current_period_end);
+      const noExpiry = valid.find((e: any) => !e.current_period_end);
       if (noExpiry) return { state: 'active' as const, periodEnd: null };
 
-      const best = ents[0];
+      const best = valid[0];
       const periodEnd = best.current_period_end as string;
       const expired = new Date(periodEnd).getTime() < Date.now();
       return {
