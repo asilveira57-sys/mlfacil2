@@ -21,8 +21,15 @@ const ALLOWED_APP_IDS = (Deno.env.get("ML_APP_ID") || "").split(",").filter(Bool
 // Any topic outside both lists is dropped silently (legacy behavior).
 // ---------------------------------------------------------------------------
 
-const DEFAULT_DISCARD_TOPICS = ["items", "messages", "questions", "invoices"];
-const DEFAULT_ACCEPT_TOPICS = ["shipments", "orders", "orders_v2"];
+// V7 cost-containment whitelist: only the 4 operationally critical topics.
+// Everything else is dropped at the door (200 OK, no DB work).
+const DEFAULT_DISCARD_TOPICS = ["items", "invoices", "claims", "stock-locations", "fbm_stock_operations"];
+const DEFAULT_ACCEPT_TOPICS = ["shipments", "messages", "questions", "orders_v2"];
+
+// Topics for which we store only a SLIM payload (id + topic + received) to
+// avoid bloating webhook_events. Full details are fetched on demand by the
+// worker / sync flows when a user session is active.
+const SLIM_PAYLOAD_TOPICS = new Set(["orders_v2"]);
 
 const DISCARD_TOPICS = new Set(
   (Deno.env.get("WEBHOOK_DISCARD_TOPICS") ?? DEFAULT_DISCARD_TOPICS.join(","))
@@ -116,6 +123,19 @@ Deno.serve(async (req) => {
     const dedupeRaw = `mercadolibre:${user_id}:${topicStr}:${resource}:${eventId}`;
     const dedupeKey = await generateDedupeKey(dedupeRaw);
 
+    // Slim payload for orders_v2: only the minimum needed to fetch on demand.
+    // Drastically reduces row size (full payload was ~1-3KB per event).
+    const storedPayload = SLIM_PAYLOAD_TOPICS.has(topicStr)
+      ? {
+          topic: topicStr,
+          resource,
+          user_id: String(user_id),
+          received_at: new Date().toISOString(),
+          _id: _id ?? null,
+          sent: sent ?? null,
+        }
+      : payload;
+
     // Direct INSERT — rely on the unique index instead of a separate SELECT.
     // This removes one round-trip per webhook (we used to do ~1.8M reads/day).
     const { data: inserted, error: insertError } = await supabase
@@ -126,7 +146,7 @@ Deno.serve(async (req) => {
         application_id: application_id ? String(application_id) : null,
         topic: topicStr,
         resource,
-        payload_raw: payload,
+        payload_raw: storedPayload,
         dedupe_key: dedupeKey,
         status: "pending",
         received_at: new Date().toISOString(),

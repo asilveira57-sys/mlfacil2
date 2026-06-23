@@ -116,6 +116,38 @@ Deno.serve(async (req) => {
   try {
     console.log(`[ml-worker] Starting batch processing (mode=${authMode})`);
 
+    // ── V7 Circuit breaker: pause if recent error rate > 20% ─────────────────
+    // Cron-triggered runs are paused; user-triggered drains still go through so
+    // a logged-in seller can always force-process their own queue.
+    if (authMode === "cron") {
+      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { data: recent } = await supabase
+        .from("webhook_events")
+        .select("status")
+        .in("status", ["done", "error"])
+        .gte("received_at", since)
+        .limit(500);
+      if (recent && recent.length >= 50) {
+        const errors = recent.filter((r: any) => r.status === "error").length;
+        const errorRate = errors / recent.length;
+        if (errorRate > 0.2) {
+          console.warn(`[ml-worker] CIRCUIT OPEN: error_rate=${(errorRate * 100).toFixed(1)}% sample=${recent.length} — skipping batch`);
+          await supabase.from("system_logs").insert({
+            level: "warning",
+            source: "ml-worker-process",
+            message: "circuit_breaker_open",
+            metadata: { error_rate: errorRate, sample: recent.length, threshold: 0.2 },
+          }).then(() => {}, () => {});
+          return new Response(JSON.stringify({
+            status: "circuit_open",
+            error_rate: errorRate,
+            sample: recent.length,
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+    }
+
+
     // Fetch pending events — escopado por user quando authMode=user
     const now = new Date().toISOString();
     let query = supabase
