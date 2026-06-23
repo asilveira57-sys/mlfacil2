@@ -21,8 +21,15 @@ const ALLOWED_APP_IDS = (Deno.env.get("ML_APP_ID") || "").split(",").filter(Bool
 // Any topic outside both lists is dropped silently (legacy behavior).
 // ---------------------------------------------------------------------------
 
-const DEFAULT_DISCARD_TOPICS = ["items", "messages", "questions", "invoices"];
-const DEFAULT_ACCEPT_TOPICS = ["shipments", "orders", "orders_v2"];
+// V7 cost-containment whitelist: only the 4 operationally critical topics.
+// Everything else is dropped at the door (200 OK, no DB work).
+const DEFAULT_DISCARD_TOPICS = ["items", "invoices", "claims", "stock-locations", "fbm_stock_operations"];
+const DEFAULT_ACCEPT_TOPICS = ["shipments", "messages", "questions", "orders_v2"];
+
+// Topics for which we store only a SLIM payload (id + topic + received) to
+// avoid bloating webhook_events. Full details are fetched on demand by the
+// worker / sync flows when a user session is active.
+const SLIM_PAYLOAD_TOPICS = new Set(["orders_v2"]);
 
 const DISCARD_TOPICS = new Set(
   (Deno.env.get("WEBHOOK_DISCARD_TOPICS") ?? DEFAULT_DISCARD_TOPICS.join(","))
