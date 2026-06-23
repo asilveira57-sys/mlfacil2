@@ -123,6 +123,19 @@ Deno.serve(async (req) => {
     const dedupeRaw = `mercadolibre:${user_id}:${topicStr}:${resource}:${eventId}`;
     const dedupeKey = await generateDedupeKey(dedupeRaw);
 
+    // Slim payload for orders_v2: only the minimum needed to fetch on demand.
+    // Drastically reduces row size (full payload was ~1-3KB per event).
+    const storedPayload = SLIM_PAYLOAD_TOPICS.has(topicStr)
+      ? {
+          topic: topicStr,
+          resource,
+          user_id: String(user_id),
+          received_at: new Date().toISOString(),
+          _id: _id ?? null,
+          sent: sent ?? null,
+        }
+      : payload;
+
     // Direct INSERT — rely on the unique index instead of a separate SELECT.
     // This removes one round-trip per webhook (we used to do ~1.8M reads/day).
     const { data: inserted, error: insertError } = await supabase
@@ -133,7 +146,7 @@ Deno.serve(async (req) => {
         application_id: application_id ? String(application_id) : null,
         topic: topicStr,
         resource,
-        payload_raw: payload,
+        payload_raw: storedPayload,
         dedupe_key: dedupeKey,
         status: "pending",
         received_at: new Date().toISOString(),
