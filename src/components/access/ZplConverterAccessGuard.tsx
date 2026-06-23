@@ -80,10 +80,10 @@ export function ZplConverterAccessGuard({ children }: { children: ReactNode }) {
       }
 
       // Pick the best one: any without expiry = active forever, else latest period_end
-      const noExpiry = ents.find((e: any) => !e.current_period_end);
+      const noExpiry = valid.find((e: any) => !e.current_period_end);
       if (noExpiry) return { state: 'active' as const, periodEnd: null };
 
-      const best = ents[0];
+      const best = valid[0];
       const periodEnd = best.current_period_end as string;
       const expired = new Date(periodEnd).getTime() < Date.now();
       return {
