@@ -21670,6 +21670,7 @@ export type Database = {
           freed_estimate_bytes: number
         }[]
       }
+      cleanup_webhook_events_v7: { Args: { dry_run?: boolean }; Returns: Json }
       compact_webhook_backlog_discard: {
         Args: { p_limit?: number; p_topics?: string[] }
         Returns: number
@@ -22309,6 +22310,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      webhook_events_health_report: { Args: never; Returns: Json }
     }
     Enums: {
       account_state: "active" | "pending_upgrade" | "disabled" | "error"
