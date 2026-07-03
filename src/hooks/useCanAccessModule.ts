@@ -37,7 +37,7 @@ export function useCanAccessModule() {
       }
 
       // 1. PRIORITY: active paid entitlement (source of truth for paid customers).
-      // Resolves the tenant via tenant_members, then reads the active 'tier' entitlement.
+      // Full tiers always override ZPL when both exist for the same tenant.
       let planId: string | null = null;
 
       const { data: membership } = await supabase
@@ -48,18 +48,23 @@ export function useCanAccessModule() {
         .maybeSingle();
 
       if (membership?.tenant_id) {
-        const { data: ent } = await (supabase as any)
+        const { data: entitlements } = await (supabase as any)
           .from('tenant_entitlements')
-          .select('tier_id, current_period_end')
+          .select('tier_id, current_period_end, plan_tiers:tier_id(code, plan_group)')
           .eq('tenant_id', membership.tenant_id)
           .eq('entitlement_type', 'tier')
-          .eq('status', 'active')
-          .order('current_period_end', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .eq('status', 'active');
 
-        if (ent?.tier_id) {
-          planId = ent.tier_id as string;
+        if (entitlements?.length) {
+          const sorted = [...entitlements].sort((a: any, b: any) => {
+            const aIsZpl = a.plan_tiers?.plan_group === 'zpl' || String(a.plan_tiers?.code || '').startsWith('zpl');
+            const bIsZpl = b.plan_tiers?.plan_group === 'zpl' || String(b.plan_tiers?.code || '').startsWith('zpl');
+            if (aIsZpl !== bIsZpl) return aIsZpl ? 1 : -1;
+            const aEnd = a.current_period_end ? new Date(a.current_period_end).getTime() : Number.MAX_SAFE_INTEGER;
+            const bEnd = b.current_period_end ? new Date(b.current_period_end).getTime() : Number.MAX_SAFE_INTEGER;
+            return bEnd - aEnd;
+          });
+          planId = sorted[0]?.tier_id || null;
         }
       }
 
