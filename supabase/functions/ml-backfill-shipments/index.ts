@@ -1,6 +1,7 @@
 // @ts-nocheck - Deno types not available in build context
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { resolveAccessibleMlAccount } from "../_shared/ml-account-access.ts";
 
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
 
@@ -31,6 +32,70 @@ const FULL_LOGISTIC_TYPES = ['fulfillment'];
 const BATCH_SIZE = 50;
 const MAX_PER_EXECUTION = 200;
 const DELAY_BETWEEN_CALLS = 600; // Rate-limit safety
+
+type MlAccountCredentials = {
+  id?: string;
+  access_token: string;
+  refresh_token?: string | null;
+  token_expires_at?: string | null;
+};
+
+function isTokenExpired(expiresAt?: string | null): boolean {
+  if (!expiresAt) return false;
+  const expiryMs = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiryMs)) return false;
+  return expiryMs <= Date.now() + 5 * 60 * 1000;
+}
+
+async function refreshMlAccessToken(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  sellerId: string,
+  account: MlAccountCredentials,
+): Promise<string | null> {
+  if (!account.refresh_token) return account.access_token;
+  if (!isTokenExpired(account.token_expires_at)) return account.access_token;
+
+  try {
+    const response = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: Deno.env.get('MERCADO_LIBRE_CLIENT_ID') || '',
+        client_secret: Deno.env.get('MERCADO_LIBRE_CLIENT_SECRET') || '',
+        refresh_token: account.refresh_token,
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`[Backfill] Token refresh failed for seller ${sellerId}: HTTP ${response.status}`);
+      return account.access_token;
+    }
+
+    const data = await response.json();
+    if (!data?.access_token) return account.access_token;
+
+    await supabaseAdmin
+      .from('ml_accounts')
+      .update({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token || account.refresh_token,
+        token_expires_at: data.expires_in
+          ? new Date(Date.now() + Number(data.expires_in) * 1000).toISOString()
+          : account.token_expires_at,
+        connection_status: 'connected',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('ml_user_id', sellerId)
+      .eq('is_active', true);
+
+    console.log(`[Backfill] Token refreshed for seller ${sellerId}`);
+    return data.access_token;
+  } catch (error) {
+    console.warn(`[Backfill] Token refresh error for seller ${sellerId}:`, error instanceof Error ? error.message : error);
+    return account.access_token;
+  }
+}
 
 async function backfillInBackground(
   supabaseAdmin: ReturnType<typeof createClient>,
@@ -103,7 +168,10 @@ async function backfillInBackground(
     // Process up to MAX_PER_EXECUTION
     const toProcess = missingIds.slice(0, MAX_PER_EXECUTION);
     let synced = 0;
+    let placeholders = 0;
     let errors = 0;
+    let authErrors = 0;
+    let rateLimitErrors = 0;
 
     // Build order mapping — batch .in() to avoid limits
     const orderMap = new Map<string, string>();
@@ -135,17 +203,38 @@ async function backfillInBackground(
           });
 
           if (!resp.ok) {
-            if (resp.status === 404) {
-              // Shipment doesn't exist — insert placeholder so we don't retry
+            const responseText = await resp.text().catch(() => '');
+            console.warn(
+              `[Backfill] Shipment ${shipmentId} fetch failed: HTTP ${resp.status}${responseText ? ` ${responseText.slice(0, 180)}` : ''}`
+            );
+
+            if (resp.status === 401 || resp.status === 403) {
+              authErrors++;
+              errors++;
+              return;
+            }
+
+            if (resp.status === 429) {
+              rateLimitErrors++;
+              errors++;
+              return;
+            }
+
+            if ([400, 404, 410].includes(resp.status)) {
+              // Shipment is unavailable/not recoverable for this seller/order — insert placeholder so we don't retry forever
               await supabaseAdmin.from('meli_shipments_cache').upsert({
                 shipment_id: shipmentId,
                 order_id: orderId,
                 seller_id: sellerId,
                 user_id: userId,
-                shipment_status: 'not_found',
+                shipment_status: resp.status === 404 ? 'not_found' : 'unavailable',
                 label_available: false,
+                last_sync_at: new Date().toISOString(),
               }, { onConflict: 'seller_id,shipment_id' });
+              placeholders++;
+              return;
             }
+
             errors++;
             return;
           }
@@ -166,7 +255,7 @@ async function backfillInBackground(
           const isPrintable = SELLER_PRINTABLE_SUBSTATUSES.includes(shipment.substatus || '');
           const labelAvailable = isPrintable && !isFullLogistic;
 
-          await supabaseAdmin.from('meli_shipments_cache').upsert({
+          const { error: upsertError } = await supabaseAdmin.from('meli_shipments_cache').upsert({
             shipment_id: shipmentId,
             order_id: orderId,
             seller_id: sellerId,
@@ -182,7 +271,14 @@ async function backfillInBackground(
             shipping_state_uf: stateUf,
             shipping_zipcode: rawZipcode,
             shipping_neighborhood: rawNeighborhood,
+            last_sync_at: new Date().toISOString(),
           }, { onConflict: 'seller_id,shipment_id' });
+
+          if (upsertError) {
+            console.error(`[Backfill] Upsert error for shipment ${shipmentId}:`, upsertError);
+            errors++;
+            return;
+          }
 
           synced++;
         } catch (err) {
@@ -197,10 +293,15 @@ async function backfillInBackground(
       }
     }
 
-    console.log(`[Backfill] Done: ${synced} synced, ${errors} errors out of ${toProcess.length}`);
+    console.log(`[Backfill] Done: ${synced} synced, ${placeholders} placeholders, ${errors} errors out of ${toProcess.length}`);
+
+    if (authErrors > 0 && authErrors + rateLimitErrors === errors && synced === 0 && placeholders === 0) {
+      console.warn(`[Backfill] Stopping chain for seller ${sellerId}: ${authErrors} auth errors, ${rateLimitErrors} rate-limit errors`);
+      return;
+    }
 
     // Self-chain if there are more to process
-    if (missingIds.length > MAX_PER_EXECUTION) {
+    if (missingIds.length > MAX_PER_EXECUTION && (synced > 0 || placeholders > 0)) {
       const remaining = missingIds.length - MAX_PER_EXECUTION;
       console.log(`[Backfill] ${remaining} remaining, self-chaining...`);
       try {
@@ -229,6 +330,7 @@ async function backfillInBackground(
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            'x-internal-key': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
           },
           body: JSON.stringify({ seller_id: sellerId, user_id: userId }),
         }).catch(err => console.warn('[Backfill] Enrichment trigger failed:', err));
