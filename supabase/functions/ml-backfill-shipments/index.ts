@@ -53,9 +53,10 @@ async function refreshMlAccessToken(
   supabaseAdmin: ReturnType<typeof createClient>,
   sellerId: string,
   account: MlAccountCredentials,
+  force = false,
 ): Promise<string | null> {
   if (!account.refresh_token) return account.access_token;
-  if (!isTokenExpired(account.token_expires_at)) return account.access_token;
+  if (!force && !isTokenExpired(account.token_expires_at)) return account.access_token;
 
   try {
     if (!ML_APP_ID || !ML_SECRET_KEY) {
@@ -392,7 +393,7 @@ serve(async (req) => {
         });
       }
 
-      const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, body.seller_id, mlAccount);
+      const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, body.seller_id, mlAccount, true);
       if (!effectiveAccessToken) {
         return new Response(JSON.stringify({ error: 'ML token unavailable' }), {
           status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -461,7 +462,7 @@ serve(async (req) => {
       });
     }
 
-    const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, seller_id, mlAccount);
+    const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, seller_id, mlAccount, true);
     if (!effectiveAccessToken) {
       return new Response(JSON.stringify({ error: 'ML token unavailable' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
