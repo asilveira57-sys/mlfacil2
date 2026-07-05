@@ -32,6 +32,8 @@ const FULL_LOGISTIC_TYPES = ['fulfillment'];
 const BATCH_SIZE = 50;
 const MAX_PER_EXECUTION = 200;
 const DELAY_BETWEEN_CALLS = 600; // Rate-limit safety
+const ML_APP_ID = Deno.env.get('ML_APP_ID') || Deno.env.get('MERCADO_LIBRE_CLIENT_ID') || '';
+const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY') || Deno.env.get('MERCADO_LIBRE_CLIENT_SECRET') || '';
 
 type MlAccountCredentials = {
   id?: string;
@@ -56,13 +58,18 @@ async function refreshMlAccessToken(
   if (!isTokenExpired(account.token_expires_at)) return account.access_token;
 
   try {
+    if (!ML_APP_ID || !ML_SECRET_KEY) {
+      console.warn(`[Backfill] ML OAuth credentials unavailable; using stored token for seller ${sellerId}`);
+      return account.access_token;
+    }
+
     const response = await fetch('https://api.mercadolibre.com/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
-        client_id: Deno.env.get('MERCADO_LIBRE_CLIENT_ID') || '',
-        client_secret: Deno.env.get('MERCADO_LIBRE_CLIENT_SECRET') || '',
+        client_id: ML_APP_ID,
+        client_secret: ML_SECRET_KEY,
         refresh_token: account.refresh_token,
       }),
     });
@@ -86,8 +93,7 @@ async function refreshMlAccessToken(
         connection_status: 'connected',
         updated_at: new Date().toISOString(),
       })
-      .eq('ml_user_id', sellerId)
-      .eq('is_active', true);
+      .eq('id', account.id || '');
 
     console.log(`[Backfill] Token refreshed for seller ${sellerId}`);
     return data.access_token;
