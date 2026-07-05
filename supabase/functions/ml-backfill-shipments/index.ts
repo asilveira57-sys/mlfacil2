@@ -377,10 +377,10 @@ serve(async (req) => {
       }
       userId = body.user_id;
       
-      // Get ML access token
+      // Get ML access token for internal chained executions
       const { data: mlAccount } = await supabaseAdmin
         .from('ml_accounts')
-        .select('access_token')
+        .select('id, user_id, access_token, refresh_token, token_expires_at')
         .eq('user_id', userId)
         .eq('ml_user_id', body.seller_id)
         .eq('is_active', true)
@@ -392,11 +392,18 @@ serve(async (req) => {
         });
       }
 
+      const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, body.seller_id, mlAccount);
+      if (!effectiveAccessToken) {
+        return new Response(JSON.stringify({ error: 'ML token unavailable' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       // Start background processing
       if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
-        EdgeRuntime.waitUntil(backfillInBackground(supabaseAdmin, body.seller_id, userId, mlAccount.access_token));
+        EdgeRuntime.waitUntil(backfillInBackground(supabaseAdmin, body.seller_id, userId, effectiveAccessToken));
       } else {
-        backfillInBackground(supabaseAdmin, body.seller_id, userId, mlAccount.access_token)
+        backfillInBackground(supabaseAdmin, body.seller_id, userId, effectiveAccessToken)
           .catch(err => console.error('[Backfill] BG failed:', err));
       }
 
@@ -421,6 +428,12 @@ serve(async (req) => {
     }
 
     userId = user.id;
+    const supabaseAuth = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
     const { seller_id } = await req.json();
     if (!seller_id) {
       return new Response(JSON.stringify({ error: 'seller_id required' }), {
@@ -433,24 +446,34 @@ serve(async (req) => {
     const gate = await assertMlApiAccess(supabaseAdmin, userId);
     if (!gate.allowed) return gate.response!;
 
-    const { data: mlAccount } = await supabaseAdmin
-      .from('ml_accounts')
-      .select('access_token')
-      .eq('user_id', userId)
-      .eq('ml_user_id', seller_id)
-      .eq('is_active', true)
-      .maybeSingle();
+    const { data: mlAccount, error: mlError, reason: mlReason } = await resolveAccessibleMlAccount(
+      supabaseAdmin,
+      supabaseAuth,
+      userId,
+      seller_id,
+      'id, user_id, access_token, refresh_token, token_expires_at, ml_user_id, company_id',
+    );
 
-    if (!mlAccount?.access_token) {
+    if (mlError || !mlAccount?.access_token) {
+      console.warn('[Backfill] ML account not found:', mlError?.message || mlReason);
       return new Response(JSON.stringify({ error: 'ML account not found' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
+    const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, seller_id, mlAccount);
+    if (!effectiveAccessToken) {
+      return new Response(JSON.stringify({ error: 'ML token unavailable' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const accountOwnerUserId = mlAccount.user_id || userId;
+
     if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
-      EdgeRuntime.waitUntil(backfillInBackground(supabaseAdmin, seller_id, userId, mlAccount.access_token));
+      EdgeRuntime.waitUntil(backfillInBackground(supabaseAdmin, seller_id, accountOwnerUserId, effectiveAccessToken));
     } else {
-      backfillInBackground(supabaseAdmin, seller_id, userId, mlAccount.access_token)
+      backfillInBackground(supabaseAdmin, seller_id, accountOwnerUserId, effectiveAccessToken)
         .catch(err => console.error('[Backfill] BG failed:', err));
     }
 
