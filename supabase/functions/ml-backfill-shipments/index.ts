@@ -43,7 +43,7 @@ type MlAccountCredentials = {
 };
 
 function isTokenExpired(expiresAt?: string | null): boolean {
-  if (!expiresAt) return false;
+  if (!expiresAt) return true;
   const expiryMs = new Date(expiresAt).getTime();
   if (!Number.isFinite(expiryMs)) return false;
   return expiryMs <= Date.now() + 5 * 60 * 1000;
@@ -393,7 +393,7 @@ serve(async (req) => {
         });
       }
 
-      const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, body.seller_id, mlAccount, true);
+      const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, body.seller_id, mlAccount);
       if (!effectiveAccessToken) {
         return new Response(JSON.stringify({ error: 'ML token unavailable' }), {
           status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -462,7 +462,7 @@ serve(async (req) => {
       });
     }
 
-    const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, seller_id, mlAccount, true);
+    const effectiveAccessToken = await refreshMlAccessToken(supabaseAdmin, seller_id, mlAccount);
     if (!effectiveAccessToken) {
       return new Response(JSON.stringify({ error: 'ML token unavailable' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
