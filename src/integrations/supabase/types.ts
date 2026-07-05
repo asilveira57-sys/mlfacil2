@@ -21701,6 +21701,10 @@ export type Database = {
         Returns: boolean
       }
       email_queue_dispatch: { Args: never; Returns: undefined }
+      enforce_veterano_over_zpl: {
+        Args: { p_tenant_id: string }
+        Returns: undefined
+      }
       enqueue_email: {
         Args: { payload: Json; queue_name: string }
         Returns: number
