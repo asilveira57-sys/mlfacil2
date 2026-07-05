@@ -474,24 +474,38 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
 
   const handleFixAddresses = async () => {
     setFixingAddresses(true);
+    setEnrichmentStatus("Correção de endereços em andamento...");
     try {
-      const { error } = await supabase.functions.invoke('ml-backfill-shipments', {
+      const { data, error } = await supabase.functions.invoke('ml-backfill-shipments', {
         body: { seller_id: sellerId },
       });
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
       toast({
         title: "Correção iniciada",
-        description: "Os endereços estão sendo corrigidos em segundo plano. Aguarde alguns minutos e recarregue a página.",
+        description: "Os endereços estão sendo processados. A Curva ABC será atualizada automaticamente.",
       });
+
+      window.setTimeout(() => {
+        setEnrichmentStatus("Atualizando a Curva ABC com os endereços corrigidos...");
+        fetchData();
+      }, 8000);
+
+      window.setTimeout(() => {
+        fetchData();
+        setEnrichmentStatus(null);
+      }, 22000);
     } catch (err) {
       console.error("Fix addresses error:", err);
+      setEnrichmentStatus(null);
       toast({
         title: "Erro ao iniciar correção",
         description: err instanceof Error ? err.message : "Tente novamente mais tarde.",
         variant: "destructive",
       });
     } finally {
-      setTimeout(() => setFixingAddresses(false), 3000);
+      setTimeout(() => setFixingAddresses(false), 5000);
     }
   };
 
