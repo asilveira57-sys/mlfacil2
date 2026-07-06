@@ -98,8 +98,8 @@ export function useCanAccessModule() {
         if (assignment?.plan_tier_id) planId = assignment.plan_tier_id;
       }
 
-      // 2. Try user_plan_assignments (admin-assigned plans)
-      if (!planId) {
+      // 2b. Fallback to the current user's own assignment (non-collaborator path)
+      if (!planId && effectiveUserId !== userId) {
         const { data: assignment } = await (supabase as any)
           .from('user_plan_assignments')
           .select('plan_tier_id')
@@ -108,10 +108,7 @@ export function useCanAccessModule() {
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-
-        if (assignment?.plan_tier_id) {
-          planId = assignment.plan_tier_id;
-        }
+        if (assignment?.plan_tier_id) planId = assignment.plan_tier_id;
       }
 
       // 3. Fallback to user_access_state.selected_plan_id
