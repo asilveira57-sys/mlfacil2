@@ -38,12 +38,29 @@ export function useCanAccessModule() {
 
       // 1. PRIORITY: active paid entitlement (source of truth for paid customers).
       // Full tiers always override ZPL when both exist for the same tenant.
+      // Collaborators inherit the titular's plan — otherwise they'd be gated by
+      // their own (empty) tenant and see spurious "precisa de plano" blocks.
       let planId: string | null = null;
+
+      // Resolve which user_id owns the effective plan for this session.
+      let effectiveUserId = userId;
+      try {
+        const { data: collab } = await (supabase as any)
+          .from('collaborators')
+          .select('created_by')
+          .eq('auth_user_id', userId)
+          .eq('status', 'active')
+          .is('deleted_at', null)
+          .order('accepted_at', { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        if (collab?.created_by) effectiveUserId = collab.created_by;
+      } catch { /* fall back to own userId */ }
 
       const { data: membership } = await supabase
         .from('tenant_members')
         .select('tenant_id')
-        .eq('user_id', userId)
+        .eq('user_id', effectiveUserId)
         .limit(1)
         .maybeSingle();
 
@@ -66,6 +83,19 @@ export function useCanAccessModule() {
           });
           planId = sorted[0]?.tier_id || null;
         }
+      }
+
+      // 2. Try titular's user_plan_assignments (admin-assigned plans)
+      if (!planId) {
+        const { data: assignment } = await (supabase as any)
+          .from('user_plan_assignments')
+          .select('plan_tier_id')
+          .eq('user_id', effectiveUserId)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (assignment?.plan_tier_id) planId = assignment.plan_tier_id;
       }
 
       // 2. Try user_plan_assignments (admin-assigned plans)
