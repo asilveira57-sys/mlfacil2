@@ -134,11 +134,25 @@ async function triggerBackgroundOrderSync(userId: string) {
       return;
     }
 
-    const { data: accounts } = await (supabase as any)
-      .from('ml_accounts')
-      .select('id, ml_user_id, nickname')
-      .eq('user_id', session.user.id)
-      .eq('is_active', true);
+    // Include inherited ML accounts (collaborators) so the post-login sync
+    // covers every account of the titular the user has access to, not only
+    // the ones directly owned by the current user.
+    const { data: accessible, error: accessibleError } = await (supabase as any)
+      .rpc('get_accessible_ml_accounts');
+
+    let accounts: Array<{ id: string; ml_user_id: string; nickname?: string | null }> = [];
+    if (!accessibleError && Array.isArray(accessible) && accessible.length > 0) {
+      accounts = accessible
+        .filter((a: any) => a.is_active !== false && ['connected', 'attention'].includes(a.connection_status))
+        .map((a: any) => ({ id: a.id, ml_user_id: a.ml_user_id, nickname: a.nickname }));
+    } else {
+      const { data: owned } = await (supabase as any)
+        .from('ml_accounts')
+        .select('id, ml_user_id, nickname')
+        .eq('user_id', session.user.id)
+        .eq('is_active', true);
+      accounts = owned || [];
+    }
 
     if (!accounts || accounts.length === 0) return;
 
