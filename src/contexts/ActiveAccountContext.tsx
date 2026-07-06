@@ -383,6 +383,21 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         detail: { accountId, sellerId: account.sellerId } 
       }));
 
+      // Kick off a shipping-labels sync for the newly selected account so
+      // labels emitted after NF issuance appear without waiting for the next
+      // background poll. Fire-and-forget, respects backend eligibility gates.
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token && account.sellerId) {
+          supabase.functions.invoke('shipping-labels-sync', {
+            headers: { Authorization: `Bearer ${session.access_token}` },
+            body: { seller_id: account.sellerId, mode: 'incremental', manual: true, source: 'account_switch' },
+          }).catch((err) => {
+            if (import.meta.env.DEV) console.info('[ActiveAccountContext] switch sync skipped:', err?.message);
+          });
+        }
+      } catch { /* non-blocking */ }
+
       toast.success(`Conta ativa: ${account.nickname || account.email || account.sellerId}`);
       return true;
     } catch (err) {
