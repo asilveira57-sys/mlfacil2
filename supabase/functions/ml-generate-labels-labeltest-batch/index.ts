@@ -13,6 +13,62 @@ import {
   fetchVariationAttributesMap,
 } from "../_shared/labeltest-render.ts";
 
+async function resolveJobMlAccount(supabaseAdmin: any, job: any, batch: any) {
+  const fields = 'id, access_token, user_id, ml_user_id';
+
+  if (batch?.ml_account_id) {
+    const { data } = await supabaseAdmin
+      .from('ml_accounts')
+      .select(fields)
+      .eq('id', batch.ml_account_id)
+      .eq('ml_user_id', job.seller_id)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  const { data: ownAccount } = await supabaseAdmin
+    .from('ml_accounts')
+    .select(fields)
+    .eq('user_id', job.user_id)
+    .eq('ml_user_id', job.seller_id)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (ownAccount) return ownAccount;
+
+  const { data: collab } = await supabaseAdmin
+    .from('collaborators')
+    .select('created_by')
+    .eq('auth_user_id', job.user_id)
+    .eq('status', 'active')
+    .is('deleted_at', null)
+    .order('accepted_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (collab?.created_by) {
+    const { data: inheritedAccount } = await supabaseAdmin
+      .from('ml_accounts')
+      .select(fields)
+      .eq('user_id', collab.created_by)
+      .eq('ml_user_id', job.seller_id)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (inheritedAccount) return inheritedAccount;
+  }
+
+  const { data: fallbackAccounts } = await supabaseAdmin
+    .from('ml_accounts')
+    .select(fields)
+    .eq('ml_user_id', job.seller_id)
+    .eq('is_active', true)
+    .in('connection_status', ['connected', 'attention'])
+    .order('updated_at', { ascending: false })
+    .limit(1);
+
+  return fallbackAccounts?.[0] || null;
+}
+
 // Dispara o finalize em uma invocation isolada (sem competir CPU com o
 // rendering deste worker). Não-bloqueante via waitUntil para não atrasar
 // a resposta do worker.
@@ -39,17 +95,23 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   const t0 = Date.now();
+  let supabaseAdmin: any = null;
+  let supabaseUrl = '';
+  let serviceKey = '';
+  let jobId: string | null = null;
+  let batchIdx: number | null = null;
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+    supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    supabaseAdmin = createClient(supabaseUrl, serviceKey);
 
     const body = await req.json().catch(() => null);
     if (!body?.job_id || typeof body.batch_index !== 'number') {
       return new Response(JSON.stringify({ error: 'job_id and batch_index required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { job_id: jobId, batch_index: batchIdx } = body;
+    jobId = body.job_id;
+    batchIdx = body.batch_index;
     console.log(`[labeltest-batch] start job=${jobId} batch=${batchIdx}`);
 
     // Carrega job
@@ -79,9 +141,7 @@ serve(async (req) => {
     if (!layoutInfo) throw new Error(`Invalid layout: ${layout}`);
 
     // ML account token
-    const { data: mlAccount } = await supabaseAdmin
-      .from('ml_accounts').select('access_token')
-      .eq('user_id', job.user_id).eq('ml_user_id', job.seller_id).eq('is_active', true).maybeSingle();
+    const mlAccount = await resolveJobMlAccount(supabaseAdmin, job, batch);
     if (!mlAccount) throw new Error('ML account not found');
 
     // Shipments cache
@@ -262,6 +322,34 @@ serve(async (req) => {
     return new Response(JSON.stringify({ ok: true, success_count: successCount, errors: errors.length, all_done: allDone }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {
     console.error(`[labeltest-batch] Unhandled error:`, error);
+    if (supabaseAdmin && jobId && typeof batchIdx === 'number') {
+      try {
+        const errorMessage = error?.message || 'Internal error';
+        const batchPatch = {
+          status: 'error',
+          success_count: 0,
+          error_count: 1,
+          pages: 0,
+          completed_at: new Date().toISOString(),
+          elapsed_ms: Date.now() - t0,
+          error: errorMessage,
+        };
+        const { data: rpcRows } = await supabaseAdmin.rpc('labeltest_complete_batch', {
+          p_job_id: jobId,
+          p_batch_index: batchIdx,
+          p_batch_patch: batchPatch as any,
+          p_success_count: 0,
+          p_log_entries: [{ status: 'error', reason_code: 'BATCH_WORKER_ERROR', error: errorMessage, batch_index: batchIdx }] as any,
+        });
+        const rpcRow: any = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+        if (rpcRow?.all_done) {
+          // @ts-ignore - EdgeRuntime global
+          EdgeRuntime.waitUntil(triggerFinalize(supabaseUrl, serviceKey, jobId));
+        }
+      } catch (markError: any) {
+        console.error(`[labeltest-batch] failed to mark batch error:`, markError?.message || markError);
+      }
+    }
     return new Response(JSON.stringify({ error: error.message || 'Internal error' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
