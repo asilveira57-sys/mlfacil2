@@ -34,17 +34,37 @@ export function ZplConverterAccessGuard({ children }: { children: ReactNode }) {
       // where the user is a collaborator (company_users). This ensures collaborators
       // inherit the plan from the titular workspace.
       const tenantIds = new Set<string>();
+      const candidateUserIds = new Set<string>([userId!]);
+
+      // Collaborator inheritance: resolve titular (created_by) so this
+      // guard mirrors useCanAccessModule and doesn't block collaborators
+      // of a plan-holding titular. Fixes "Nenhum plano ativo" on /zpl-converter
+      // for users like Marlon (adeconexexped@gmail.com).
+      try {
+        const { data: collab } = await (supabase as any)
+          .from('collaborators')
+          .select('created_by')
+          .eq('auth_user_id', userId!)
+          .eq('status', 'active')
+          .is('deleted_at', null)
+          .order('accepted_at', { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        if (collab?.created_by) candidateUserIds.add(collab.created_by);
+      } catch { /* fall back to own userId */ }
+
+      const userIdList = Array.from(candidateUserIds);
 
       const { data: ownMemberships } = await supabase
         .from('tenant_members')
         .select('tenant_id')
-        .eq('user_id', userId!);
+        .in('user_id', userIdList);
       (ownMemberships ?? []).forEach((m: any) => m?.tenant_id && tenantIds.add(m.tenant_id));
 
       const { data: companyUsers } = await supabase
         .from('company_users')
         .select('company_id')
-        .eq('user_id', userId!)
+        .in('user_id', userIdList)
         .eq('status', 'active');
 
       const companyIds = (companyUsers ?? []).map((c: any) => c.company_id).filter(Boolean);

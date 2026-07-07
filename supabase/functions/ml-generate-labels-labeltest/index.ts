@@ -159,23 +159,24 @@ serve(async (req) => {
     const layoutInfo = LAYOUTS[layout];
     console.log(`[labeltest-dispatcher] seller=${seller_id} format=${format} layout=${layout} shipments=${shipment_ids.length} (raw=${rawShipmentIds.length})`);
 
-    // ML account — must be the titular account of the authenticated user.
-    // Do NOT use maybeSingle() only by seller_id: stale duplicate connections for
-    // the same ML user make PostgREST return “multiple rows”, causing a false 404.
-    const { data: mlAccount, error: mlAccountErr } = await supabaseAdmin
-      .from('ml_accounts')
-      .select('id, access_token, ml_user_id, user_id, company_id, connection_status, token_expires_at')
-      .eq('ml_user_id', seller_id)
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (mlAccountErr) {
-      console.error(`[labeltest-dispatcher] ML account lookup failed seller=${seller_id} user=${user.id}:`, mlAccountErr);
+    // ML account — must be accessible to the authenticated user.
+    // Collaborators inherit the titular's ML accounts, so we use the shared
+    // resolver instead of a strict user_id filter (which was returning 404
+    // for collaborators like Marlon/adeconex).
+    const { resolveAccessibleMlAccount } = await import("../_shared/ml-account-access.ts");
+    const acctResult = await resolveAccessibleMlAccount(
+      supabaseAdmin,
+      supabaseAuth,
+      user.id,
+      seller_id,
+      'id, access_token, ml_user_id, user_id, company_id, connection_status, token_expires_at',
+    );
+    if (acctResult.error) {
+      console.error(`[labeltest-dispatcher] ML account lookup failed seller=${seller_id} user=${user.id}:`, acctResult.error);
       return respond(false, { error: 'Falha ao localizar a conta Mercado Livre', error_code: 'ML_ACCOUNT_LOOKUP_FAILED' }, 500);
     }
-    if (!mlAccount) return respond(false, { error: 'Conta Mercado Livre não encontrada para este usuário', error_code: 'ML_ACCOUNT_NOT_FOUND' }, 404);
+    const mlAccount = acctResult.data;
+    if (!mlAccount) return respond(false, { error: 'Conta Mercado Livre não encontrada ou sem acesso', error_code: 'ML_ACCOUNT_NOT_FOUND' }, 404);
 
     // ─── Validate shipments ────────────────────────────────────────
     const validationErrors: { shipment_id: string; reason_code: string; reason_message: string }[] = [];
