@@ -21,6 +21,19 @@ function mapStatus(s: string): string {
   }
 }
 
+async function triggerBatchRetry(supabaseUrl: string, serviceKey: string, jobId: string, batchIndex: number) {
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/ml-generate-labels-labeltest-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+      body: JSON.stringify({ job_id: jobId, batch_index: batchIndex }),
+    });
+    await response.text().catch(() => '');
+  } catch (error) {
+    console.error('[status-v2] recovery retry failed:', error);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -37,10 +50,10 @@ serve(async (req) => {
 
     const token = authHeader.replace('Bearer ', '');
 
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+    const supabaseAdmin = createClient(supabaseUrl, serviceKey);
 
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
 
@@ -84,6 +97,35 @@ serve(async (req) => {
     }
 
     const batches = Array.isArray(job.batches) ? job.batches : [];
+    const now = Date.now();
+    const startedAt = job.job_started_at ? new Date(job.job_started_at).getTime() : now;
+    const staleProcessing = job.status === 'processando' && now - startedAt > 60_000;
+
+    if (staleProcessing) {
+      const retryCandidates = batches.filter((b: any) => {
+        if (['success', 'error'].includes(b?.status)) return false;
+        const lastRecoveryAt = b?.recovery_dispatched_at ? new Date(b.recovery_dispatched_at).getTime() : 0;
+        return !lastRecoveryAt || now - lastRecoveryAt > 60_000;
+      });
+
+      if (retryCandidates.length > 0) {
+        const patchedBatches = batches.map((b: any) => retryCandidates.some((r: any) => r.idx === b.idx)
+          ? { ...b, status: 'retrying', recovery_dispatched_at: new Date().toISOString() }
+          : b
+        );
+        await supabaseAdmin
+          .from('meli_print_queue_v2')
+          .update({ batches: patchedBatches as any } as any)
+          .eq('id', job.id);
+
+        for (const batch of retryCandidates) {
+          // @ts-ignore - EdgeRuntime global
+          EdgeRuntime.waitUntil(triggerBatchRetry(supabaseUrl, serviceKey, job.id, batch.idx));
+        }
+        job.batches = patchedBatches;
+      }
+    }
+
     const completedBatches = batches.filter((b: any) => b?.status === 'success' || b?.status === 'completed').length;
     const errorBatches = batches.filter((b: any) => b?.status === 'error').length;
     const processingBatches = batches.filter((b: any) => b?.status === 'processing' || b?.status === 'retrying').length;
