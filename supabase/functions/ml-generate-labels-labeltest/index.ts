@@ -312,6 +312,7 @@ serve(async (req) => {
 
     const batches = chunks.map((sids, idx) => ({
       idx, sids, status: 'pending' as const,
+      ml_account_id: mlAccount.id,
       success_count: 0, error_count: 0, pages: 0,
     }));
 
