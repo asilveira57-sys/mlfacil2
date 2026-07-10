@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { FileText, Printer, X, Loader2, ChevronDown, ClipboardList } from 'lucide-react';
 import { LabelGenerationProgress, GenerationProgress } from './LabelGenerationProgress';
+import { DraggableFloatingBar } from './DraggableFloatingBar';
 import { LabelLayout } from '@/hooks/useShippingLabels';
 import { SelectionCapabilities } from '@/lib/shippingLabelRules';
 import {
@@ -35,8 +36,8 @@ export function BulkActionsBar({
   if (selectedCount === 0 && generationProgress.status === 'idle') return null;
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-      <div className="bg-primary text-primary-foreground rounded-lg shadow-lg px-6 py-3 flex flex-col gap-2 min-w-[500px]">
+    <DraggableFloatingBar storageKey="bulk-actions-bar-pos">
+      <>
         {/* Progress indicator */}
         {generationProgress.status !== 'idle' && (
           <div className="text-primary-foreground">
@@ -172,7 +173,7 @@ export function BulkActionsBar({
             </Button>
           </div>
         )}
-      </div>
-    </div>
+      </>
+    </DraggableFloatingBar>
   );
 }
