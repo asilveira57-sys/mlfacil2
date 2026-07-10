@@ -190,7 +190,7 @@ export function BulkActionsBarV2({
             </Button>
           </div>
         )}
-      </div>
-    </div>
+      </>
+    </DraggableFloatingBar>
   );
 }
