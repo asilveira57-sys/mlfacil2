@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { FileText, Printer, X, Loader2, ChevronDown, AlertTriangle, ClipboardList } from 'lucide-react';
 import { LabelGenerationProgress, GenerationProgress } from '@/components/shipping/LabelGenerationProgress';
+import { DraggableFloatingBar } from '@/components/shipping/DraggableFloatingBar';
 import type { LabelTestLayout, SelectionCapabilitiesV2, SelectionDiagnostics } from '@/lib/labeltestEligibility';
 import {
   DropdownMenu,
