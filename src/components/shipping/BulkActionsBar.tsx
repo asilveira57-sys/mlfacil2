@@ -173,7 +173,7 @@ export function BulkActionsBar({
             </Button>
           </div>
         )}
-      </div>
-    </div>
+      </>
+    </DraggableFloatingBar>
   );
 }
