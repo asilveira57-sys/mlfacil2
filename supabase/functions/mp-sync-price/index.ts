@@ -48,15 +48,28 @@ serve(async (req) => {
     let updateData: Record<string, string | null> = {};
 
     if (isSubscription) {
-      // Create preapproval plan in Mercado Pago
+      // Derive real charge cadence from billing_cycle (monthly | quarterly | semiannual | annual)
+      const cycle = String(priceData.billing_cycle || "monthly").toLowerCase();
+      const cycleToMonths: Record<string, number> = {
+        monthly: 1,
+        quarterly: 3,
+        semiannual: 6,
+        annual: 12,
+      };
+      const periodMonths = cycleToMonths[cycle] ?? 1;
+      const isYearlyMonthlyBilled = periodMonths === 12;
+
+      const autoRecurring: Record<string, unknown> = {
+        frequency: isYearlyMonthlyBilled ? 1 : periodMonths,
+        frequency_type: "months",
+        transaction_amount: amountBRL,
+        currency_id: "BRL",
+      };
+      if (isYearlyMonthlyBilled) autoRecurring.repetitions = 12;
+
       const body = {
         reason: `${plan.name} - Assinatura`,
-        auto_recurring: {
-          frequency: 1,
-          frequency_type: "months",
-          transaction_amount: amountBRL,
-          currency_id: "BRL",
-        },
+        auto_recurring: autoRecurring,
         back_url: "https://mlfacil2.lovable.app/auth",
       };
 

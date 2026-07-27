@@ -155,14 +155,21 @@ serve(async (req) => {
         initPoint = mpData.init_point || mpData.sandbox_init_point || null;
       } else {
         // Create ad-hoc preapproval plan
+        // IMPORTANT: MP frequency defines the interval between charges.
+        // - Trimestral (period_months=3) → charge once every 3 months
+        // - Semestral (period_months=6) → charge once every 6 months
+        // - Anual (period_months=12) → historically billed monthly ×12 (discounted monthly price)
+        // - Mensal (period_months=1) → charge every month
+        const periodMonths = Number(offer.period_months) || 1;
+        const isYearlyMonthlyBilled = periodMonths === 12;
         const autoRecurring: any = {
-          frequency: 1,
+          frequency: isYearlyMonthlyBilled ? 1 : periodMonths,
           frequency_type: "months",
           transaction_amount: Number(offer.price_brl),
           currency_id: "BRL",
         };
 
-        if (offer.period_months === 12) {
+        if (isYearlyMonthlyBilled) {
           autoRecurring.repetitions = 12;
         }
 
