@@ -114,7 +114,11 @@ export function ZplConverterAccessGuard({ children }: { children: ReactNode }) {
     },
   });
 
+  // Trial de 14 dias: acesso total ao módulo, sem exigir plano/entitlement.
+  if (trialActive) return <>{children}</>;
+
   if (isLoading || !data) return <SystemLoading message="Verificando seu plano…" />;
+
 
   if (data.state === 'active') return <>{children}</>;
 
