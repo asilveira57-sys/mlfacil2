@@ -21,14 +21,15 @@ import { useNavigate } from 'react-router-dom';
  *  - vigente       → children
  */
 export function ZplConverterAccessGuard({ children }: { children: ReactNode }) {
-  const { status } = useUserAccessState();
+  const { status, trialActive } = useUserAccessState();
   const userId = status?.user_id;
   const navigate = useNavigate();
 
   const { data, isLoading } = useQuery({
     queryKey: ['zpl-converter-access', userId],
-    enabled: !!userId,
+    enabled: !!userId && !trialActive,
     staleTime: 2 * 60 * 1000,
+
     queryFn: async () => {
       // Collect candidate tenant IDs: user's own tenant_members + parent companies
       // where the user is a collaborator (company_users). This ensures collaborators
