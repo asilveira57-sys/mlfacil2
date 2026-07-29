@@ -116,6 +116,39 @@ serve(async (req) => {
       ? `${tier.name} - ${offer.offer_code}`
       : `${addon.name} - ${offer.offer_code}`;
 
+    // ─── DUPLICATE-SUBSCRIPTION GUARD ───
+    // Block a new recurring checkout when the tenant already has an active,
+    // auto-renewing entitlement of the same tier/addon. Prevents the "ghost
+    // subscription" pattern where multiple preapprovals get created in MP
+    // for the same product and the tenant is billed twice.
+    if (offer.billing_mode === "recurring") {
+      const dupQuery = supabase
+        .from("tenant_entitlements")
+        .select("id, status, auto_renew, current_period_end")
+        .eq("tenant_id", tenantId)
+        .eq("entitlement_type", entitlementType)
+        .in("status", ["active", "trial"])
+        .eq("auto_renew", true);
+      if (entitlementType === "tier") dupQuery.eq("tier_id", tier.id);
+      else dupQuery.eq("addon_id", addon.id);
+
+      const { data: existing } = await dupQuery.limit(1).maybeSingle();
+      if (existing) {
+        await auditLog(supabase, {
+          level: "warn", area: "billing", action: "checkout_blocked_duplicate",
+          userId: user.id, success: false,
+          message: `Checkout bloqueado: assinatura ativa já existe (${offerName})`,
+          meta: { offer_id, existing_entitlement_id: existing.id, entitlement_type: entitlementType, entity_code: entityCode },
+        });
+        return new Response(JSON.stringify({
+          status: "already_subscribed",
+          error: "Você já possui uma assinatura ativa deste plano. Cancele a atual antes de contratar novamente.",
+          existing_entitlement_id: existing.id,
+          current_period_end: existing.current_period_end,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409 });
+      }
+    }
+
     let initPoint: string | null = null;
     let mpData: any;
 
