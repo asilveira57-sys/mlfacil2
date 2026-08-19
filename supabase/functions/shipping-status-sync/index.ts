@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { ensureFreshToken } from "../_shared/ml-token.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -305,7 +306,7 @@ Deno.serve(async (req) => {
 
     const { data: account } = await supabase
       .from("ml_accounts")
-      .select("ml_user_id, access_token")
+      .select("id, ml_user_id, access_token, refresh_token, token_expires_at")
       .eq("ml_user_id", cached.seller_id)
       .eq("is_active", true)
       .maybeSingle();
@@ -318,8 +319,9 @@ Deno.serve(async (req) => {
     }
 
     const stats = { checked: 0, updated: 0, errors: 0 };
+    const manualToken = await ensureFreshToken(supabase, account as any, "[shipping-status-sync]");
     const ok = await checkAndUpdateShipment(
-      { supabase, accessToken: account.access_token, sellerId: account.ml_user_id, stats },
+      { supabase, accessToken: manualToken || account.access_token, sellerId: account.ml_user_id, stats },
       cached as ShipmentRow
     );
 
@@ -386,7 +388,7 @@ Deno.serve(async (req) => {
 
     const { data: allAccounts, error: accError } = await supabase
       .from("ml_accounts")
-      .select("id, ml_user_id, user_id, access_token")
+      .select("id, ml_user_id, user_id, access_token, refresh_token, token_expires_at")
       .eq("is_active", true);
 
     if (accError || !allAccounts || allAccounts.length === 0) {
@@ -429,9 +431,15 @@ Deno.serve(async (req) => {
 
     for (const account of accounts) {
       stats.accounts++;
+      // Token expirado = 401 silencioso; renovar antes de tocar na API do ML.
+      const freshToken = await ensureFreshToken(supabase, account as any, "[shipping-status-sync]");
+      if (!freshToken) {
+        console.warn(`[shipping-status-sync] Skipping ${account.ml_user_id}: connection revoked`);
+        continue;
+      }
       const ctx: CheckContext = {
         supabase,
-        accessToken: account.access_token,
+        accessToken: freshToken,
         sellerId: account.ml_user_id,
         stats: { checked: 0, updated: 0, errors: 0 },
       };
