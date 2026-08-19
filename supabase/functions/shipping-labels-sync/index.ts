@@ -563,7 +563,14 @@ Deno.serve(async (req) => {
     for (const account of accounts) {
       stats.accounts++;
       try {
-        await processAccount(supabase, account, lookbackHours, stats);
+        // Token expirado = 401 silencioso e conta parava de sincronizar para sempre.
+        const freshToken = await ensureFreshToken(supabase, account, "[shipping-labels-sync]");
+        if (!freshToken) {
+          console.warn(`[shipping-labels-sync] Skipping ${account.ml_user_id}: connection revoked`);
+          stats.errors++;
+          continue;
+        }
+        await processAccount(supabase, { ...account, access_token: freshToken }, lookbackHours, stats);
       } catch (err) {
         console.error(`[shipping-labels-sync] Account ${account.ml_user_id} error:`, err);
         stats.errors++;
