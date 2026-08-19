@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { logSyncEvent, syncStartTimer, syncDuration } from "../_shared/sync-audit.ts";
 import { resolveAccessibleMlAccount } from "../_shared/ml-account-access.ts";
+import { ensureFreshToken } from "../_shared/ml-token.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
