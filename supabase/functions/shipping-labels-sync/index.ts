@@ -262,8 +262,12 @@ async function seedRecentOrders(
   stats: SyncStats
 ): Promise<void> {
   const rows: any[] = [];
+  const itemRows: any[] = [];
   let offset = 0;
   const LIMIT = 50;
+
+  const productKey = (itemId: string, variationId: string | null, sku: string | null) =>
+    sku && sku.trim() ? sku.trim().toUpperCase() : `${itemId}:${variationId || '0'}`;
 
   while (offset < 1000) {
     const url = `https://api.mercadolibre.com/orders/search?seller=${sellerId}` +
@@ -280,17 +284,60 @@ async function seedRecentOrders(
     if (results.length === 0) break;
 
     for (const o of results) {
+      const orderId = String(o.id);
+      const shipmentId = o.shipping?.id ? String(o.shipping.id) : null;
+      const buyerName = o.buyer?.first_name || o.buyer?.last_name
+        ? `${o.buyer?.first_name ?? ''} ${o.buyer?.last_name ?? ''}`.trim()
+        : (o.buyer?.nickname ?? null);
+
+      const orderItems: any[] = Array.isArray(o.order_items) ? o.order_items : [];
+      let itemCount = 0;
+      for (const it of orderItems) {
+        const itemId = it.item?.id || 'unknown';
+        const variationId = it.item?.variation_id != null ? String(it.item.variation_id) : '';
+        const sku = it.item?.seller_sku || it.item?.seller_custom_field || null;
+        const title = it.item?.title || 'Produto sem título';
+        const qty = it.quantity || 1;
+        itemCount += qty;
+        const attrs = Array.isArray(it.item?.variation_attributes)
+          ? it.item.variation_attributes
+              .filter((a: any) => a?.name && a?.value_name)
+              .map((a: any) => ({ name: a.name, value: a.value_name }))
+          : null;
+        itemRows.push({
+          user_id: userId,
+          seller_id: sellerId,
+          order_id: orderId,
+          shipment_id: shipmentId,
+          item_id: itemId,
+          variation_id: variationId,
+          sku,
+          title,
+          title_short: title.substring(0, 50).trim(),
+          quantity: qty,
+          unit_price: it.unit_price || 0,
+          currency_id: it.currency_id || 'BRL',
+          product_key: productKey(itemId, variationId || null, sku),
+          created_at_meli: o.date_created,
+          variation_attributes: attrs && attrs.length > 0 ? attrs : null,
+          last_sync_at: new Date().toISOString(),
+        });
+      }
+
       rows.push({
         user_id: userId,
         seller_id: sellerId,
-        order_id: String(o.id),
+        order_id: orderId,
         created_at_meli: o.date_created,
         order_status: o.status,
-        shipment_id: o.shipping?.id ? String(o.shipping.id) : null,
+        shipment_id: shipmentId,
         pack_id: o.pack_id ? String(o.pack_id) : null,
         buyer_nickname: o.buyer?.nickname ?? null,
+        buyer_name: buyerName,
+        order_comment: o.comments ?? null,
         total_amount: o.total_amount ?? null,
-        items_count: Array.isArray(o.order_items) ? o.order_items.length : 0,
+        items_count: itemCount,
+        items_synced_at: itemCount > 0 ? new Date().toISOString() : null,
         last_sync_at: new Date().toISOString(),
       });
     }
@@ -312,8 +359,22 @@ async function seedRecentOrders(
       stats.errors++;
     }
   }
-  console.log(`[shipping-labels-sync] ${sellerId}: seeded ${rows.length} orders from ML`);
+
+  for (let i = 0; i < itemRows.length; i += 200) {
+    const { error } = await supabase
+      .from("meli_order_items_cache")
+      .upsert(itemRows.slice(i, i + 200), {
+        onConflict: "seller_id,order_id,item_id,variation_id",
+        ignoreDuplicates: false,
+      });
+    if (error) {
+      console.error(`[shipping-labels-sync] order items upsert error ${sellerId}:`, error.message);
+      stats.errors++;
+    }
+  }
+  console.log(`[shipping-labels-sync] ${sellerId}: seeded ${rows.length} orders / ${itemRows.length} items from ML`);
 }
+
 
 /**
  * Process one account: find missing shipments, sync them, update active statuses, sync invoices
