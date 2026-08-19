@@ -245,6 +245,77 @@ async function syncInvoiceBatch(
 }
 
 /**
+ * Pass 0 — puxa os pedidos recentes direto da API do ML e alimenta o
+ * meli_orders_cache.
+ *
+ * Antes, o cache de pedidos só era preenchido pelo ml-sync-orders, que roda
+ * apenas para a conta ML ativa na tela. Contas secundárias do mesmo titular
+ * (ex.: UPMARKET/DBE/VITRINE do maistech) nunca recebiam pedidos e, por
+ * consequência, nunca tinham etiquetas — o módulo mostrava "sem vendas".
+ */
+async function seedRecentOrders(
+  supabase: any,
+  accessToken: string,
+  sellerId: string,
+  userId: string,
+  cutoff: string,
+  stats: SyncStats
+): Promise<void> {
+  const rows: any[] = [];
+  let offset = 0;
+  const LIMIT = 50;
+
+  while (offset < 1000) {
+    const url = `https://api.mercadolibre.com/orders/search?seller=${sellerId}` +
+      `&order.date_created.from=${encodeURIComponent(cutoff)}` +
+      `&sort=date_desc&limit=${LIMIT}&offset=${offset}`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!resp.ok) {
+      console.error(`[shipping-labels-sync] orders/search ${sellerId} -> ${resp.status}`);
+      stats.errors++;
+      break;
+    }
+    const json = await resp.json();
+    const results: any[] = json?.results || [];
+    if (results.length === 0) break;
+
+    for (const o of results) {
+      rows.push({
+        user_id: userId,
+        seller_id: sellerId,
+        order_id: String(o.id),
+        created_at_meli: o.date_created,
+        order_status: o.status,
+        shipment_id: o.shipping?.id ? String(o.shipping.id) : null,
+        pack_id: o.pack_id ? String(o.pack_id) : null,
+        buyer_nickname: o.buyer?.nickname ?? null,
+        total_amount: o.total_amount ?? null,
+        items_count: Array.isArray(o.order_items) ? o.order_items.length : 0,
+        last_sync_at: new Date().toISOString(),
+      });
+    }
+
+    const total = json?.paging?.total ?? results.length;
+    offset += LIMIT;
+    if (offset >= total) break;
+    await sleep(120);
+  }
+
+  if (rows.length === 0) return;
+
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await supabase
+      .from("meli_orders_cache")
+      .upsert(rows.slice(i, i + 200), { onConflict: "seller_id,order_id", ignoreDuplicates: false });
+    if (error) {
+      console.error(`[shipping-labels-sync] orders upsert error ${sellerId}:`, error.message);
+      stats.errors++;
+    }
+  }
+  console.log(`[shipping-labels-sync] ${sellerId}: seeded ${rows.length} orders from ML`);
+}
+
+/**
  * Process one account: find missing shipments, sync them, update active statuses, sync invoices
  */
 async function processAccount(
@@ -258,7 +329,11 @@ async function processAccount(
   const accessToken = account.access_token;
   const cutoff = new Date(Date.now() - lookbackHours * 3600000).toISOString();
 
+  // 0. Garante que os pedidos recentes existam no cache (contas secundárias inclusive)
+  await seedRecentOrders(supabase, accessToken, sellerId, userId, cutoff, stats);
+
   // 1. Get recent orders with shipment_id — paginação completa (sem limite artificial)
+
   const orders: { order_id: string; shipment_id: string | null }[] = [];
   const PAGE = 1000;
   let from = 0;
