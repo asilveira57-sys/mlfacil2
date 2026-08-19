@@ -518,7 +518,7 @@ Deno.serve(async (req) => {
     // Get active accounts (todos, ou filtrado por seller_id quando informado)
     let accountsQuery = supabase
       .from("ml_accounts")
-      .select("id, ml_user_id, user_id, access_token")
+      .select("id, ml_user_id, user_id, access_token, refresh_token, token_expires_at")
       .eq("is_active", true);
     if (targetSellerId) accountsQuery = accountsQuery.eq("ml_user_id", targetSellerId);
 
