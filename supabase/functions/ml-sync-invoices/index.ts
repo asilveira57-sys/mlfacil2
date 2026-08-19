@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { resolveAccessibleMlAccount } from "../_shared/ml-account-access.ts";
+import { ensureFreshToken } from "../_shared/ml-token.ts";
 
 // Declare EdgeRuntime for Supabase Edge Functions
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
@@ -267,7 +268,7 @@ serve(async (req) => {
       supabaseAuth,
       user.id,
       seller_id,
-      'id, user_id, access_token, ml_user_id, company_id',
+      'id, user_id, access_token, refresh_token, token_expires_at, ml_user_id, company_id',
     );
 
     if (mlError || !mlAccount) {
@@ -277,6 +278,11 @@ serve(async (req) => {
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Renova o token quando expirado — sem isso a API do ML devolve 401 e o
+    // seller fica sem sincronizar indefinidamente.
+    const freshToken = await ensureFreshToken(supabaseAdmin, mlAccount as any, '[ml-sync-invoices]');
+    if (freshToken) mlAccount.access_token = freshToken;
 
     // Resolve tenant_id for sync_jobs
     let tenantId: string | null = null;
