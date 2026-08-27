@@ -303,39 +303,44 @@ Deno.serve(async (req) => {
 
     console.log(`${logPrefix} Parsed ${promotions.length} promotions from ML`);
 
-    // Fetch items for each promotion
-    for (const promo of promotions) {
-      const itemsUrl = `https://api.mercadolibre.com/seller-promotions/promotions/${promo.id}/items?promotion_type=${encodeURIComponent(promo.type)}&app_version=v2&seller_id=${mlAccount.ml_user_id}`;
-      const { data: itemsData, error: itemsError } = await safeFetchJson<{
-        results?: Record<string, unknown>[];
-      }>(itemsUrl, { headers: mlHeaders }, `ML-Items-${promo.id}`);
+    // Fetch items for each promotion (parallel pool — sequential fetches caused 150s idle timeouts)
+    const ITEMS_CONCURRENCY = 6;
+    for (let pi = 0; pi < promotions.length; pi += ITEMS_CONCURRENCY) {
+      const slice = promotions.slice(pi, pi + ITEMS_CONCURRENCY);
+      await Promise.all(slice.map(async (promo) => {
+        const itemsUrl = `https://api.mercadolibre.com/seller-promotions/promotions/${promo.id}/items?promotion_type=${encodeURIComponent(promo.type)}&app_version=v2&seller_id=${mlAccount.ml_user_id}`;
+        const { data: itemsData, error: itemsError } = await safeFetchJson<{
+          results?: Record<string, unknown>[];
+        }>(itemsUrl, { headers: mlHeaders }, `ML-Items-${promo.id}`);
 
-      if (itemsError) {
-        console.warn(`${logPrefix} Failed to fetch items for promo ${promo.id}:`, itemsError);
-        continue;
-      }
+        if (itemsError) {
+          console.warn(`${logPrefix} Failed to fetch items for promo ${promo.id}:`, itemsError);
+          return;
+        }
 
-      if (itemsData) {
-        const rawItems = itemsData.results || [];
-        promo.items = rawItems.map((i) => {
-          const netProceeds = i.net_proceeds as Record<string, unknown> | undefined;
-          return {
-            item_id: (i.item_id as string) || (i.id as string),
-            status: i.status as string,
-            original_price: i.original_price as number,
-            deal_price: i.deal_price as number,
-            effective_price: (i.price as number) || null,
-            net_proceeds_amount: netProceeds?.amount as number || null,
-            net_proceeds_currency: netProceeds?.currency_id as string || null,
-            suggested_price: (i.suggested_discounted_price as number) || null,
-            max_discounted_price: (i.max_discounted_price as number) || null,
-            min_discounted_price: (i.min_discounted_price as number) || null,
-            error: (i.error_message as string) || (i.error as string),
-            raw: i,
-          };
-        });
-      }
+        if (itemsData) {
+          const rawItems = itemsData.results || [];
+          promo.items = rawItems.map((i) => {
+            const netProceeds = i.net_proceeds as Record<string, unknown> | undefined;
+            return {
+              item_id: (i.item_id as string) || (i.id as string),
+              status: i.status as string,
+              original_price: i.original_price as number,
+              deal_price: i.deal_price as number,
+              effective_price: (i.price as number) || null,
+              net_proceeds_amount: netProceeds?.amount as number || null,
+              net_proceeds_currency: netProceeds?.currency_id as string || null,
+              suggested_price: (i.suggested_discounted_price as number) || null,
+              max_discounted_price: (i.max_discounted_price as number) || null,
+              min_discounted_price: (i.min_discounted_price as number) || null,
+              error: (i.error_message as string) || (i.error as string),
+              raw: i,
+            };
+          });
+        }
+      }));
     }
+
 
     // Process promotions and create events
     const eventsToCreate: {
@@ -389,6 +394,8 @@ Deno.serve(async (req) => {
       const ineligibleItems: { item_id: string; error: string }[] = [];
       const startedItems: string[] = [];
 
+      const itemRowsToUpsert: Record<string, unknown>[] = [];
+
       for (const item of promo.items || []) {
         const previousStatus = existingItemStatuses.get(item.item_id);
 
@@ -402,37 +409,26 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Upsert item snapshot with enriched data
-        const { error: itemError } = await supabase
-          .from('promotion_items_snapshots')
-          .upsert({
-            workspace_id: workspaceId,
-            account_id: accountId,
-            seller_id: accountId,
-            promotion_id: promo.id,
-            item_id: item.item_id,
-            item_status: item.status,
-            original_price: item.original_price,
-            promo_price: item.deal_price,
-            effective_price: item.effective_price,
-            net_proceeds_amount: item.net_proceeds_amount,
-            net_proceeds_currency: item.net_proceeds_currency,
-            suggested_price: item.suggested_price,
-            max_discounted_price: item.max_discounted_price,
-            min_discounted_price: item.min_discounted_price,
-            discount_percent: discountPercent,
-            error_reason: item.error,
-            raw_item_data: item.raw || null,
-            updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'workspace_id,promotion_id,item_id',
-          });
-
-        if (itemError) {
-          console.error(`${logPrefix} Upsert item snapshot failed:`, itemError);
-        } else {
-          itemsSynced++;
-        }
+        itemRowsToUpsert.push({
+          workspace_id: workspaceId,
+          account_id: accountId,
+          seller_id: accountId,
+          promotion_id: promo.id,
+          item_id: item.item_id,
+          item_status: item.status,
+          original_price: item.original_price,
+          promo_price: item.deal_price,
+          effective_price: item.effective_price,
+          net_proceeds_amount: item.net_proceeds_amount,
+          net_proceeds_currency: item.net_proceeds_currency,
+          suggested_price: item.suggested_price,
+          max_discounted_price: item.max_discounted_price,
+          min_discounted_price: item.min_discounted_price,
+          discount_percent: discountPercent,
+          error_reason: item.error,
+          raw_item_data: item.raw || null,
+          updated_at: new Date().toISOString(),
+        });
 
         // Track status for events
         if (item.status === 'candidate' || item.status === 'pending') {
@@ -443,6 +439,22 @@ Deno.serve(async (req) => {
           startedItems.push(item.item_id);
         }
       }
+
+      // Batched upsert (one row at a time was the main cause of the 150s timeout)
+      const ITEM_UPSERT_CHUNK = 500;
+      for (let ii = 0; ii < itemRowsToUpsert.length; ii += ITEM_UPSERT_CHUNK) {
+        const chunk = itemRowsToUpsert.slice(ii, ii + ITEM_UPSERT_CHUNK);
+        const { error: itemError } = await supabase
+          .from('promotion_items_snapshots')
+          .upsert(chunk, { onConflict: 'workspace_id,promotion_id,item_id' });
+
+        if (itemError) {
+          console.error(`${logPrefix} Upsert item snapshots failed:`, itemError);
+        } else {
+          itemsSynced += chunk.length;
+        }
+      }
+
 
       // === Enrich missing items in meli_listings_cache ===
       const promoItemIds = (promo.items || []).map(i => i.item_id).filter(Boolean);
