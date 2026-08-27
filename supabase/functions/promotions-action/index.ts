@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { auditLog } from '../_shared/audit-log.ts';
+import { ensureFreshToken } from '../_shared/ml-token.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
