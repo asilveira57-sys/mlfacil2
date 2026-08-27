@@ -2,6 +2,13 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { fetchAllRows } from '../_shared/fetch-all-rows.ts';
 import { ensureFreshToken } from '../_shared/ml-token.ts';
 
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<unknown>): void;
+};
+
+const ML_FETCH_TIMEOUT_MS = 20_000;
+const AGENT_FETCH_TIMEOUT_MS = 120_000;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -69,7 +76,10 @@ async function safeFetchJson<T>(
   context: string
 ): Promise<{ data: T | null; error: string | null; status: number; isEmpty: boolean }> {
   try {
-    const response = await fetch(url, options);
+    const response = await fetch(url, {
+      ...options,
+      signal: options.signal || AbortSignal.timeout(ML_FETCH_TIMEOUT_MS),
+    });
     const status = response.status;
     const contentType = response.headers.get('content-type') || '';
     
@@ -478,6 +488,7 @@ Deno.serve(async (req) => {
               const idsParam = batch.join(',');
               const enrichRes = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,thumbnail,permalink`, {
                 headers: mlHeaders,
+                signal: AbortSignal.timeout(ML_FETCH_TIMEOUT_MS),
               });
               if (enrichRes.ok) {
                 const enrichResults = await enrichRes.json() as { code: number; body: { id: string; title: string; thumbnail: string; permalink: string } }[];
@@ -680,20 +691,26 @@ Deno.serve(async (req) => {
       log_id: logId,
     };
 
-    // Chain promotion-agent-run after successful sync
-    try {
+    // Run the agent after responding. Awaiting it here caused promotions-sync to
+    // inherit the agent's 150s idle timeout even though the sync had succeeded.
+    const runPromotionAgent = async () => {
+      try {
       const agentRunId = `sync-${logId || Date.now()}-${accountId}`;
       console.log(`${logPrefix} Triggering promotion-agent-run (run_id=${agentRunId})`);
       const agentRes = await fetch(`${supabaseUrl}/functions/v1/promotion-agent-run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseServiceKey}` },
         body: JSON.stringify({ workspace_id: workspaceId, seller_id: accountId, triggered_by: 'promotions-sync', run_id: agentRunId }),
+        signal: AbortSignal.timeout(AGENT_FETCH_TIMEOUT_MS),
       });
       const agentText = await agentRes.text();
       console.log(`${logPrefix} promotion-agent-run response: ${agentRes.status} ${agentText.substring(0, 200)}`);
-    } catch (agentErr) {
-      console.warn(`${logPrefix} promotion-agent-run chain failed (non-blocking):`, agentErr);
-    }
+      } catch (agentErr) {
+        console.warn(`${logPrefix} promotion-agent-run chain failed (non-blocking):`, agentErr);
+      }
+    };
+
+    EdgeRuntime.waitUntil(runPromotionAgent());
 
     return successResponse(result);
 
