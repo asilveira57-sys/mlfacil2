@@ -394,6 +394,8 @@ Deno.serve(async (req) => {
       const ineligibleItems: { item_id: string; error: string }[] = [];
       const startedItems: string[] = [];
 
+      const itemRowsToUpsert: Record<string, unknown>[] = [];
+
       for (const item of promo.items || []) {
         const previousStatus = existingItemStatuses.get(item.item_id);
 
@@ -407,37 +409,26 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Upsert item snapshot with enriched data
-        const { error: itemError } = await supabase
-          .from('promotion_items_snapshots')
-          .upsert({
-            workspace_id: workspaceId,
-            account_id: accountId,
-            seller_id: accountId,
-            promotion_id: promo.id,
-            item_id: item.item_id,
-            item_status: item.status,
-            original_price: item.original_price,
-            promo_price: item.deal_price,
-            effective_price: item.effective_price,
-            net_proceeds_amount: item.net_proceeds_amount,
-            net_proceeds_currency: item.net_proceeds_currency,
-            suggested_price: item.suggested_price,
-            max_discounted_price: item.max_discounted_price,
-            min_discounted_price: item.min_discounted_price,
-            discount_percent: discountPercent,
-            error_reason: item.error,
-            raw_item_data: item.raw || null,
-            updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'workspace_id,promotion_id,item_id',
-          });
-
-        if (itemError) {
-          console.error(`${logPrefix} Upsert item snapshot failed:`, itemError);
-        } else {
-          itemsSynced++;
-        }
+        itemRowsToUpsert.push({
+          workspace_id: workspaceId,
+          account_id: accountId,
+          seller_id: accountId,
+          promotion_id: promo.id,
+          item_id: item.item_id,
+          item_status: item.status,
+          original_price: item.original_price,
+          promo_price: item.deal_price,
+          effective_price: item.effective_price,
+          net_proceeds_amount: item.net_proceeds_amount,
+          net_proceeds_currency: item.net_proceeds_currency,
+          suggested_price: item.suggested_price,
+          max_discounted_price: item.max_discounted_price,
+          min_discounted_price: item.min_discounted_price,
+          discount_percent: discountPercent,
+          error_reason: item.error,
+          raw_item_data: item.raw || null,
+          updated_at: new Date().toISOString(),
+        });
 
         // Track status for events
         if (item.status === 'candidate' || item.status === 'pending') {
@@ -448,6 +439,22 @@ Deno.serve(async (req) => {
           startedItems.push(item.item_id);
         }
       }
+
+      // Batched upsert (one row at a time was the main cause of the 150s timeout)
+      const ITEM_UPSERT_CHUNK = 500;
+      for (let ii = 0; ii < itemRowsToUpsert.length; ii += ITEM_UPSERT_CHUNK) {
+        const chunk = itemRowsToUpsert.slice(ii, ii + ITEM_UPSERT_CHUNK);
+        const { error: itemError } = await supabase
+          .from('promotion_items_snapshots')
+          .upsert(chunk, { onConflict: 'workspace_id,promotion_id,item_id' });
+
+        if (itemError) {
+          console.error(`${logPrefix} Upsert item snapshots failed:`, itemError);
+        } else {
+          itemsSynced += chunk.length;
+        }
+      }
+
 
       // === Enrich missing items in meli_listings_cache ===
       const promoItemIds = (promo.items || []).map(i => i.item_id).filter(Boolean);
