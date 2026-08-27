@@ -303,39 +303,44 @@ Deno.serve(async (req) => {
 
     console.log(`${logPrefix} Parsed ${promotions.length} promotions from ML`);
 
-    // Fetch items for each promotion
-    for (const promo of promotions) {
-      const itemsUrl = `https://api.mercadolibre.com/seller-promotions/promotions/${promo.id}/items?promotion_type=${encodeURIComponent(promo.type)}&app_version=v2&seller_id=${mlAccount.ml_user_id}`;
-      const { data: itemsData, error: itemsError } = await safeFetchJson<{
-        results?: Record<string, unknown>[];
-      }>(itemsUrl, { headers: mlHeaders }, `ML-Items-${promo.id}`);
+    // Fetch items for each promotion (parallel pool — sequential fetches caused 150s idle timeouts)
+    const ITEMS_CONCURRENCY = 6;
+    for (let pi = 0; pi < promotions.length; pi += ITEMS_CONCURRENCY) {
+      const slice = promotions.slice(pi, pi + ITEMS_CONCURRENCY);
+      await Promise.all(slice.map(async (promo) => {
+        const itemsUrl = `https://api.mercadolibre.com/seller-promotions/promotions/${promo.id}/items?promotion_type=${encodeURIComponent(promo.type)}&app_version=v2&seller_id=${mlAccount.ml_user_id}`;
+        const { data: itemsData, error: itemsError } = await safeFetchJson<{
+          results?: Record<string, unknown>[];
+        }>(itemsUrl, { headers: mlHeaders }, `ML-Items-${promo.id}`);
 
-      if (itemsError) {
-        console.warn(`${logPrefix} Failed to fetch items for promo ${promo.id}:`, itemsError);
-        continue;
-      }
+        if (itemsError) {
+          console.warn(`${logPrefix} Failed to fetch items for promo ${promo.id}:`, itemsError);
+          return;
+        }
 
-      if (itemsData) {
-        const rawItems = itemsData.results || [];
-        promo.items = rawItems.map((i) => {
-          const netProceeds = i.net_proceeds as Record<string, unknown> | undefined;
-          return {
-            item_id: (i.item_id as string) || (i.id as string),
-            status: i.status as string,
-            original_price: i.original_price as number,
-            deal_price: i.deal_price as number,
-            effective_price: (i.price as number) || null,
-            net_proceeds_amount: netProceeds?.amount as number || null,
-            net_proceeds_currency: netProceeds?.currency_id as string || null,
-            suggested_price: (i.suggested_discounted_price as number) || null,
-            max_discounted_price: (i.max_discounted_price as number) || null,
-            min_discounted_price: (i.min_discounted_price as number) || null,
-            error: (i.error_message as string) || (i.error as string),
-            raw: i,
-          };
-        });
-      }
+        if (itemsData) {
+          const rawItems = itemsData.results || [];
+          promo.items = rawItems.map((i) => {
+            const netProceeds = i.net_proceeds as Record<string, unknown> | undefined;
+            return {
+              item_id: (i.item_id as string) || (i.id as string),
+              status: i.status as string,
+              original_price: i.original_price as number,
+              deal_price: i.deal_price as number,
+              effective_price: (i.price as number) || null,
+              net_proceeds_amount: netProceeds?.amount as number || null,
+              net_proceeds_currency: netProceeds?.currency_id as string || null,
+              suggested_price: (i.suggested_discounted_price as number) || null,
+              max_discounted_price: (i.max_discounted_price as number) || null,
+              min_discounted_price: (i.min_discounted_price as number) || null,
+              error: (i.error_message as string) || (i.error as string),
+              raw: i,
+            };
+          });
+        }
+      }));
     }
+
 
     // Process promotions and create events
     const eventsToCreate: {
