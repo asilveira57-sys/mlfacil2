@@ -168,7 +168,7 @@ Deno.serve(async (req) => {
     // Fetch ML account credentials
     const { data: mlAccount, error: mlError } = await supabase
       .from('ml_accounts')
-      .select('id, access_token, ml_user_id, token_expires_at')
+      .select('id, access_token, refresh_token, ml_user_id, token_expires_at')
       .eq('ml_user_id', accountId)
       .eq('is_active', true)
       .maybeSingle();
@@ -201,40 +201,13 @@ Deno.serve(async (req) => {
         .maybeSingle();
       wsAccountId = wsAcc?.id || null;
     }
-    let accessToken = (mlAccount as { access_token: string }).access_token;
+    // Ensure a fresh token (refreshes + persists when expired/near expiry)
+    const accessToken = await ensureFreshToken(supabase, mlAccount as any, logPrefix);
 
-    // Refresh token if expired
-    const tokenExpiresAt = (mlAccount as { token_expires_at: string | null }).token_expires_at;
-    if (tokenExpiresAt && new Date(tokenExpiresAt) <= new Date()) {
-      console.log(`${logPrefix} Token expired, attempting refresh...`);
-      const authHeader = req.headers.get('Authorization') || `Bearer ${supabaseServiceKey}`;
-      try {
-        const refreshResponse = await fetch(`${supabaseUrl}/functions/v1/ml-token-refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
-          body: JSON.stringify({ account_id: mlAccountId, seller_id: (mlAccount as { ml_user_id: string }).ml_user_id }),
-        });
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
-          if (refreshData.access_token) {
-            accessToken = refreshData.access_token;
-            console.log(`${logPrefix} Token refreshed successfully`);
-          } else {
-            console.error(`${logPrefix} Token refresh returned no access_token`);
-            await updateSyncLog(supabase, logId, 'error', startTime, { error_message: 'Token refresh failed' });
-            return errorResponse('TOKEN_REFRESH_FAILED', 'Não foi possível renovar o token. Reconecte sua conta do Mercado Livre.', 401);
-          }
-        } else {
-          const errText = await refreshResponse.text();
-          console.error(`${logPrefix} Token refresh failed: ${refreshResponse.status} ${errText}`);
-          await updateSyncLog(supabase, logId, 'error', startTime, { error_message: 'Token refresh failed' });
-          return errorResponse('TOKEN_REFRESH_FAILED', 'Não foi possível renovar o token. Reconecte sua conta do Mercado Livre.', 401);
-        }
-      } catch (refreshErr) {
-        console.error(`${logPrefix} Token refresh error:`, refreshErr);
-        await updateSyncLog(supabase, logId, 'error', startTime, { error_message: 'Token refresh error' });
-        return errorResponse('TOKEN_REFRESH_FAILED', 'Erro ao renovar token. Tente novamente.', 500);
-      }
+    if (!accessToken) {
+      console.error(`${logPrefix} Token refresh failed (connection revoked)`);
+      await updateSyncLog(supabase, logId, 'error', startTime, { error_message: 'Token refresh failed' });
+      return errorResponse('TOKEN_REFRESH_FAILED', 'Não foi possível renovar o token. Reconecte sua conta do Mercado Livre.', 401);
     }
 
     console.log(JSON.stringify({
