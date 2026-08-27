@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { auditLog } from '../_shared/audit-log.ts';
+import { ensureFreshToken } from '../_shared/ml-token.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -68,40 +69,13 @@ Deno.serve(async (req) => {
       if (seller_id) {
         const { data: mlAcc } = await supabase
           .from('ml_accounts')
-          .select('id, access_token, ml_user_id, token_expires_at')
+          .select('id, access_token, refresh_token, ml_user_id, token_expires_at')
           .eq('ml_user_id', seller_id)
           .eq('is_active', true)
           .maybeSingle();
         if (mlAcc) {
-          let token = (mlAcc as { access_token: string }).access_token;
-          const tokenExpiresAt = (mlAcc as { token_expires_at: string | null }).token_expires_at;
-          
-          // Refresh token if expired
-          if (tokenExpiresAt && new Date(tokenExpiresAt) <= new Date()) {
-            console.log(`[promotions-action] Token expired for seller ${seller_id}, refreshing...`);
-            const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-            const authHeader = req.headers.get('Authorization') || `Bearer ${supabaseServiceKey}`;
-            try {
-              const refreshRes = await fetch(`${supabaseUrl}/functions/v1/ml-token-refresh`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
-                body: JSON.stringify({ account_id: (mlAcc as { id: string }).id, seller_id: (mlAcc as { ml_user_id: string }).ml_user_id }),
-              });
-              if (refreshRes.ok) {
-                const refreshData = await refreshRes.json();
-                if (refreshData.access_token) {
-                  token = refreshData.access_token;
-                  console.log(`[promotions-action] Token refreshed successfully`);
-                }
-              } else {
-                console.warn(`[promotions-action] Token refresh failed: ${refreshRes.status}`);
-              }
-            } catch (refreshErr) {
-              console.warn(`[promotions-action] Token refresh error:`, refreshErr);
-            }
-          }
-          
-          authHeaders = { 'Authorization': `Bearer ${token}` };
+          const token = await ensureFreshToken(supabase, mlAcc as any, '[promotions-action]');
+          if (token) authHeaders = { 'Authorization': `Bearer ${token}` };
         }
       }
 
