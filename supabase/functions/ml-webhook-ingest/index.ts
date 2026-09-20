@@ -24,7 +24,7 @@ const ALLOWED_APP_IDS = (Deno.env.get("ML_APP_ID") || "").split(",").filter(Bool
 // V7 cost-containment whitelist: only the 4 operationally critical topics.
 // Everything else is dropped at the door (200 OK, no DB work).
 const DEFAULT_DISCARD_TOPICS = ["items", "invoices", "claims", "stock-locations", "fbm_stock_operations"];
-const DEFAULT_ACCEPT_TOPICS = ["shipments", "messages", "questions", "orders_v2"];
+const DEFAULT_ACCEPT_TOPICS = ["messages", "questions", "orders_v2"];
 
 // Topics for which we store only a SLIM payload (id + topic + received) to
 // avoid bloating webhook_events. Full details are fetched on demand by the
@@ -48,6 +48,11 @@ const ACCEPT_TOPICS = new Set(
 // Kill-switch: when set to "1" the function reverts to legacy "accept everything"
 // behavior (still skipping the redundant SELECT). Use only if something breaks.
 const COST_GUARD_DISABLED = Deno.env.get("WEBHOOK_COST_GUARD_DISABLED") === "1";
+
+// `shipments` é redundante com o cron `shipping-status-sync`, que já mantém
+// `meli_shipments_cache`. Descartado na porta para não gravar ~30 mil linhas/dia.
+// Kill-switch: defina WEBHOOK_ALLOW_SHIPMENTS=1 para voltar a aceitar.
+const ALLOW_SHIPMENTS = Deno.env.get("WEBHOOK_ALLOW_SHIPMENTS") === "1";
 
 /**
  * SHA-256 dedupe key (kept for the unique index)
@@ -89,6 +94,14 @@ Deno.serve(async (req) => {
     }
 
     const topicStr = String(topic);
+
+    // ─── shipments: descartado incondicionalmente (redundante com o cron) ────
+    if (!ALLOW_SHIPMENTS && topicStr === "shipments") {
+      return new Response(
+        JSON.stringify({ status: "discarded_topic", topic: topicStr, reason: "redundant_with_cron" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // ─── Cost guard: discard topics we don't operationally process ──────────
     if (!COST_GUARD_DISABLED && DISCARD_TOPICS.has(topicStr)) {
