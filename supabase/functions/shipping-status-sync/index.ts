@@ -541,6 +541,8 @@ Deno.serve(async (req) => {
           }
         }
 
+        await flushTouches(ctx);
+
         // Aggregate per-account stats
         stats.checked += ctx.stats.checked;
         stats.updated += ctx.stats.updated;
