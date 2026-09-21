@@ -21700,6 +21700,7 @@ export type Database = {
         Args: { message_id: number; queue_name: string }
         Returns: boolean
       }
+      eligible_ml_user_ids: { Args: never; Returns: string[] }
       email_queue_dispatch: { Args: never; Returns: undefined }
       enforce_veterano_over_zpl: {
         Args: { p_tenant_id: string }
@@ -22108,6 +22109,7 @@ export type Database = {
         Args: { p_notification_id: string }
         Returns: undefined
       }
+      resolve_plan_group: { Args: { p_user_id: string }; Returns: string }
       rpc_activate_entitlement:
         | {
             Args: {
