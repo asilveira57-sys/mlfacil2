@@ -54,6 +54,30 @@ const COST_GUARD_DISABLED = Deno.env.get("WEBHOOK_COST_GUARD_DISABLED") === "1";
 // Kill-switch: defina WEBHOOK_ALLOW_SHIPMENTS=1 para voltar a aceitar.
 const ALLOW_SHIPMENTS = Deno.env.get("WEBHOOK_ALLOW_SHIPMENTS") === "1";
 
+// Elegibilidade por plano: só aceita evento de conta cujo titular tem plano
+// vigente que usa marketplace (full/veterano). A lista vem da RPC
+// `eligible_ml_user_ids` e fica em cache por 5 min para não pagar uma consulta
+// por evento. Kill-switch: WEBHOOK_SKIP_PLAN_CHECK=1 desliga a checagem.
+const SKIP_PLAN_CHECK = Deno.env.get("WEBHOOK_SKIP_PLAN_CHECK") === "1";
+const ELIGIBLE_TTL_MS = 5 * 60 * 1000;
+let eligibleCache: { ids: Set<string>; at: number } | null = null;
+
+async function isEligibleAccount(supabase: any, mlUserId: string): Promise<boolean> {
+  const now = Date.now();
+  if (!eligibleCache || now - eligibleCache.at > ELIGIBLE_TTL_MS) {
+    const { data, error } = await supabase.rpc("eligible_ml_user_ids");
+    if (error) {
+      console.error("[ml-webhook-ingest] eligible_ml_user_ids failed:", error);
+      return true; // fail-open: na dúvida, aceita o evento
+    }
+    const ids = new Set<string>(
+      (data ?? []).map((r: any) => String(typeof r === "string" ? r : r.eligible_ml_user_ids)),
+    );
+    eligibleCache = { ids, at: now };
+  }
+  return eligibleCache.ids.has(String(mlUserId));
+}
+
 /**
  * SHA-256 dedupe key (kept for the unique index)
  */
@@ -130,6 +154,14 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // ─── Elegibilidade por plano: descarta evento de conta sem plano que use ML ─
+    if (!SKIP_PLAN_CHECK && !(await isEligibleAccount(supabase, String(user_id)))) {
+      return new Response(
+        JSON.stringify({ status: "discarded_account", reason: "plan_not_eligible" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Generate dedupe_key (still used by the unique index)
     const eventId = _id || sent || Date.now().toString();
