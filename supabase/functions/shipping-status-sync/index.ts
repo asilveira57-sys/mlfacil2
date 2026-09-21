@@ -348,10 +348,15 @@ Deno.serve(async (req) => {
 
     const stats = { checked: 0, updated: 0, errors: 0 };
     const manualToken = await ensureFreshToken(supabase, account as any, "[shipping-status-sync]");
-    const ok = await checkAndUpdateShipment(
-      { supabase, accessToken: manualToken || account.access_token, sellerId: account.ml_user_id, stats },
-      cached as ShipmentRow
-    );
+    const manualCtx: CheckContext = {
+      supabase,
+      accessToken: manualToken || account.access_token,
+      sellerId: account.ml_user_id,
+      touchIds: [],
+      stats,
+    };
+    const ok = await checkAndUpdateShipment(manualCtx, cached as ShipmentRow);
+    await flushTouches(manualCtx);
 
     const { data: after } = await supabase
       .from("meli_shipments_cache")
@@ -469,6 +474,7 @@ Deno.serve(async (req) => {
         supabase,
         accessToken: freshToken,
         sellerId: account.ml_user_id,
+        touchIds: [],
         stats: { checked: 0, updated: 0, errors: 0 },
       };
 
