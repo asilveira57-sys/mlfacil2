@@ -350,20 +350,70 @@ async function seedRecentOrders(
 
   if (rows.length === 0) return;
 
-  for (let i = 0; i < rows.length; i += 200) {
+  // Só grava o que mudou. Um SELECT indexado é muito mais barato do que um
+  // UPDATE, que reescreve a linha inteira e todos os índices dela.
+  const orderIds = rows.map((r) => String(r.order_id));
+  const existingOrders = new Map<string, any>();
+  for (let i = 0; i < orderIds.length; i += 200) {
+    const { data } = await supabase
+      .from("meli_orders_cache")
+      .select("order_id, order_status, shipment_id, pack_id, buyer_nickname, buyer_name, total_amount, items_count")
+      .eq("seller_id", sellerId)
+      .in("order_id", orderIds.slice(i, i + 200));
+    (data || []).forEach((r: any) => existingOrders.set(String(r.order_id), r));
+  }
+
+  const norm = (v: any) => (v === null || v === undefined ? "" : String(v));
+  const changedOrders = rows.filter((r) => {
+    const cur = existingOrders.get(String(r.order_id));
+    if (!cur) return true;
+    return norm(cur.order_status) !== norm(r.order_status)
+      || norm(cur.shipment_id) !== norm(r.shipment_id)
+      || norm(cur.pack_id) !== norm(r.pack_id)
+      || norm(cur.buyer_nickname) !== norm(r.buyer_nickname)
+      || norm(cur.buyer_name) !== norm(r.buyer_name)
+      || Number(cur.total_amount ?? 0) !== Number(r.total_amount ?? 0)
+      || Number(cur.items_count ?? 0) !== Number(r.items_count ?? 0);
+  });
+
+  for (let i = 0; i < changedOrders.length; i += 200) {
     const { error } = await supabase
       .from("meli_orders_cache")
-      .upsert(rows.slice(i, i + 200), { onConflict: "seller_id,order_id", ignoreDuplicates: false });
+      .upsert(changedOrders.slice(i, i + 200), { onConflict: "seller_id,order_id", ignoreDuplicates: false });
     if (error) {
       console.error(`[shipping-labels-sync] orders upsert error ${sellerId}:`, error.message);
       stats.errors++;
     }
   }
 
-  for (let i = 0; i < itemRows.length; i += 200) {
+  // Mesma comparação para os itens, pela chave composta.
+  const itemKey = (r: any) => `${r.order_id}|${r.item_id}|${r.variation_id ?? ""}`;
+  const existingItems = new Map<string, any>();
+  const itemOrderIds = [...new Set(itemRows.map((r) => String(r.order_id)))];
+  for (let i = 0; i < itemOrderIds.length; i += 200) {
+    const { data } = await supabase
+      .from("meli_order_items_cache")
+      .select("order_id, item_id, variation_id, quantity, unit_price, title, sku, product_key, shipment_id")
+      .eq("seller_id", sellerId)
+      .in("order_id", itemOrderIds.slice(i, i + 200));
+    (data || []).forEach((r: any) => existingItems.set(itemKey(r), r));
+  }
+
+  const changedItems = itemRows.filter((r) => {
+    const cur = existingItems.get(itemKey(r));
+    if (!cur) return true;
+    return Number(cur.quantity ?? 0) !== Number(r.quantity ?? 0)
+      || Number(cur.unit_price ?? 0) !== Number(r.unit_price ?? 0)
+      || norm(cur.title) !== norm(r.title)
+      || norm(cur.sku) !== norm(r.sku)
+      || norm(cur.product_key) !== norm(r.product_key)
+      || norm(cur.shipment_id) !== norm(r.shipment_id);
+  });
+
+  for (let i = 0; i < changedItems.length; i += 200) {
     const { error } = await supabase
       .from("meli_order_items_cache")
-      .upsert(itemRows.slice(i, i + 200), {
+      .upsert(changedItems.slice(i, i + 200), {
         onConflict: "seller_id,order_id,item_id,variation_id",
         ignoreDuplicates: false,
       });
@@ -372,7 +422,10 @@ async function seedRecentOrders(
       stats.errors++;
     }
   }
-  console.log(`[shipping-labels-sync] ${sellerId}: seeded ${rows.length} orders / ${itemRows.length} items from ML`);
+
+  console.log(
+    `[shipping-labels-sync] ${sellerId}: ${changedOrders.length}/${rows.length} pedidos e ${changedItems.length}/${itemRows.length} itens gravados (resto sem mudança)`,
+  );
 }
 
 
@@ -459,20 +512,20 @@ async function processAccount(
   // 4. Update active shipments (statuses that may change)
   const { data: activeShipments } = await supabase
     .from("meli_shipments_cache")
-    .select("shipment_id")
+    .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available")
     .eq("seller_id", sellerId)
     .in("shipment_status", ACTIVE_SHIPMENT_STATUSES)
     .order("last_sync_at", { ascending: true })
     .limit(150);
 
   if (activeShipments && activeShipments.length > 0) {
-    const activeIds = activeShipments.map((s: any) => s.shipment_id);
-    console.log(`[shipping-labels-sync] ${sellerId}: updating ${activeIds.length} active shipments`);
+    const activeRows = activeShipments as any[];
+    console.log(`[shipping-labels-sync] ${sellerId}: updating ${activeRows.length} active shipments`);
 
-    for (const sid of activeIds) {
+    for (const cur of activeRows) {
       try {
         const resp = await fetch(
-          `https://api.mercadolibre.com/shipments/${sid}`,
+          `https://api.mercadolibre.com/shipments/${cur.shipment_id}`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         if (resp.status === 429) { await sleep(5000); break; }
@@ -480,27 +533,30 @@ async function processAccount(
         if (!resp.ok) { stats.errors++; await sleep(200); continue; }
 
         const data = await resp.json();
-        const statusChanged = data.status !== undefined;
 
-        if (statusChanged) {
-          const isFullLogistic = FULL_LOGISTIC_TYPES.includes(data.logistic_type);
-          const isPrintable = SELLER_PRINTABLE_SUBSTATUSES.includes(data.substatus || "");
+        const isFullLogistic = FULL_LOGISTIC_TYPES.includes(data.logistic_type);
+        const isPrintable = SELLER_PRINTABLE_SUBSTATUSES.includes(data.substatus || "");
+        const labelAvailable = isPrintable && !isFullLogistic;
 
+        const mudou =
+          cur.shipment_status !== data.status ||
+          (cur.shipment_substatus ?? null) !== (data.substatus || null) ||
+          (cur.tracking_number ?? null) !== (data.tracking_number || null) ||
+          (cur.logistic_type ?? null) !== (data.logistic_type || null) ||
+          cur.label_available !== labelAvailable;
+
+        if (mudou) {
           const updateData: Record<string, any> = {
             shipment_status: data.status,
             shipment_substatus: data.substatus || null,
             tracking_number: data.tracking_number || null,
             logistic_type: data.logistic_type || null,
-            label_available: isPrintable && !isFullLogistic,
+            label_available: labelAvailable,
             last_sync_at: new Date().toISOString(),
           };
-
-          // Extract handling limit
           if (data.shipping_option?.estimated_handling_limit?.date) {
             updateData.estimated_handling_limit = data.shipping_option.estimated_handling_limit.date;
           }
-
-          // Extract schedule limit (real ML cutoff)
           if (data.shipping_option?.estimated_schedule_limit?.date) {
             updateData.estimated_schedule_limit = data.shipping_option.estimated_schedule_limit.date;
           } else if (data.lead_time?.estimated_schedule_limit?.date) {
@@ -511,7 +567,7 @@ async function processAccount(
             .from("meli_shipments_cache")
             .update(updateData)
             .eq("seller_id", sellerId)
-            .eq("shipment_id", sid);
+            .eq("shipment_id", cur.shipment_id);
 
           stats.shipments_updated++;
         }
@@ -524,21 +580,6 @@ async function processAccount(
   }
 
   // 5. Sync invoices for orders without invoice
-  const { data: ordersWithoutInvoice } = await supabase
-    .from("meli_orders_cache")
-    .select("order_id")
-    .eq("seller_id", sellerId)
-    .not("order_status", "in", "(cancelled)")
-    .gte("created_at_meli", cutoff)
-    .not("order_id", "in", `(${
-      (await supabase
-        .from("meli_invoices_cache")
-        .select("order_id")
-        .eq("seller_id", sellerId)
-        .eq("invoice_status", "emitida")
-      ).data?.map((i: any) => i.order_id).join(",") || "___none___"
-    })`)
-    .limit(500);
 
   // Simpler approach: get orders that don't have 'emitida' status
   const { data: invoicedOrders } = await supabase
