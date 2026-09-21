@@ -41,13 +41,33 @@ interface ShipmentRow {
   shipment_id: string | number;
   shipment_status: string | null;
   shipment_substatus: string | null;
+  tracking_number?: string | null;
+  logistic_type?: string | null;
+  label_available?: boolean | null;
+  estimated_handling_limit?: string | null;
+  estimated_schedule_limit?: string | null;
 }
 
 interface CheckContext {
   supabase: any;
   accessToken: string;
   sellerId: string | number;
+  touchIds: string[];
   stats: { checked: number; updated: number; errors: number };
+}
+
+/** Carimba last_sync_at em lote, evitando 1 UPDATE por remessa sem mudança. */
+async function flushTouches(ctx: CheckContext): Promise<void> {
+  if (ctx.touchIds.length === 0) return;
+  const ids = [...new Set(ctx.touchIds)];
+  ctx.touchIds = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    await ctx.supabase
+      .from("meli_shipments_cache")
+      .update({ last_sync_at: new Date().toISOString() })
+      .eq("seller_id", ctx.sellerId)
+      .in("shipment_id", ids.slice(i, i + 200));
+  }
 }
 
 /** Returns true to continue processing, false to break (token expired / rate limit). */
@@ -109,9 +129,21 @@ async function checkAndUpdateShipment(
     const statusChanged = data.status !== shipment.shipment_status ||
       data.substatus !== shipment.shipment_substatus;
 
-    if (statusChanged || estimatedHandlingLimit || estimatedScheduleLimit) {
+    const labelAvailable = data.substatus === "ready_to_print" || data.substatus === "printed";
+    const novoHandling = estimatedHandlingLimit ?? shipment.estimated_handling_limit ?? null;
+    const novoSchedule = estimatedScheduleLimit ?? shipment.estimated_schedule_limit ?? null;
+
+    const mudou =
+      data.status !== shipment.shipment_status ||
+      (data.substatus || null) !== (shipment.shipment_substatus ?? null) ||
+      (data.tracking_number || null) !== (shipment.tracking_number ?? null) ||
+      (data.logistic_type || null) !== (shipment.logistic_type ?? null) ||
+      labelAvailable !== (shipment.label_available ?? null) ||
+      novoHandling !== (shipment.estimated_handling_limit ?? null) ||
+      novoSchedule !== (shipment.estimated_schedule_limit ?? null);
+
+    if (mudou) {
       const receiverAddress = data.receiver_address || {};
-      const labelAvailable = data.substatus === "ready_to_print" || data.substatus === "printed";
 
       const updateData: Record<string, any> = {
         shipment_status: data.status,
@@ -141,12 +173,8 @@ async function checkAndUpdateShipment(
         );
       }
     } else {
-      // Touch last_sync_at so it doesn't get re-picked immediately
-      await ctx.supabase
-        .from("meli_shipments_cache")
-        .update({ last_sync_at: new Date().toISOString() })
-        .eq("seller_id", ctx.sellerId)
-        .eq("shipment_id", shipment.shipment_id);
+      // Carimbo de last_sync_at em lote (ver flushTouches)
+      ctx.touchIds.push(String(shipment.shipment_id));
     }
 
     await sleep(DELAY_BETWEEN_CALLS_MS);
@@ -293,7 +321,7 @@ Deno.serve(async (req) => {
     console.log(`[shipping-status-sync] Manual recovery for shipment ${manualShipmentId}`);
     const { data: cached, error: cacheErr } = await supabase
       .from("meli_shipments_cache")
-      .select("shipment_id, shipment_status, shipment_substatus, seller_id")
+      .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available, estimated_handling_limit, estimated_schedule_limit, seller_id")
       .eq("shipment_id", manualShipmentId)
       .maybeSingle();
 
@@ -320,10 +348,15 @@ Deno.serve(async (req) => {
 
     const stats = { checked: 0, updated: 0, errors: 0 };
     const manualToken = await ensureFreshToken(supabase, account as any, "[shipping-status-sync]");
-    const ok = await checkAndUpdateShipment(
-      { supabase, accessToken: manualToken || account.access_token, sellerId: account.ml_user_id, stats },
-      cached as ShipmentRow
-    );
+    const manualCtx: CheckContext = {
+      supabase,
+      accessToken: manualToken || account.access_token,
+      sellerId: account.ml_user_id,
+      touchIds: [],
+      stats,
+    };
+    const ok = await checkAndUpdateShipment(manualCtx, cached as ShipmentRow);
+    await flushTouches(manualCtx);
 
     const { data: after } = await supabase
       .from("meli_shipments_cache")
@@ -441,6 +474,7 @@ Deno.serve(async (req) => {
         supabase,
         accessToken: freshToken,
         sellerId: account.ml_user_id,
+        touchIds: [],
         stats: { checked: 0, updated: 0, errors: 0 },
       };
 
@@ -451,7 +485,7 @@ Deno.serve(async (req) => {
         // ===== Pass 1: stale stuck shipments (ready_to_ship/printed-or-ready_for_pickup) =====
         const { data: staleShipments } = await supabase
           .from("meli_shipments_cache")
-          .select("shipment_id, shipment_status, shipment_substatus")
+          .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available, estimated_handling_limit, estimated_schedule_limit")
           .eq("seller_id", account.ml_user_id)
           .eq("shipment_status", "ready_to_ship")
           .in("shipment_substatus", ["printed", "ready_for_pickup"])
@@ -471,7 +505,7 @@ Deno.serve(async (req) => {
         // ===== Pass 2: regular active shipments =====
         const { data: activeShipments, error: shipError } = await supabase
           .from("meli_shipments_cache")
-          .select("shipment_id, shipment_status, shipment_substatus")
+          .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available, estimated_handling_limit, estimated_schedule_limit")
           .eq("seller_id", account.ml_user_id)
           .in("shipment_status", ACTIVE_STATUSES)
           .order("last_sync_at", { ascending: true, nullsFirst: true })
@@ -491,7 +525,7 @@ Deno.serve(async (req) => {
         // ===== Pass 3: terminal-state safety net (shipped >7d, not yet delivered) =====
         const { data: shippedOld } = await supabase
           .from("meli_shipments_cache")
-          .select("shipment_id, shipment_status, shipment_substatus")
+          .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available, estimated_handling_limit, estimated_schedule_limit")
           .eq("seller_id", account.ml_user_id)
           .eq("shipment_status", "shipped")
           .lt("last_sync_at", shipped7dCutoff)
@@ -506,6 +540,8 @@ Deno.serve(async (req) => {
             if (!cont) break;
           }
         }
+
+        await flushTouches(ctx);
 
         // Aggregate per-account stats
         stats.checked += ctx.stats.checked;
