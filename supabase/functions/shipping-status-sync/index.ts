@@ -321,7 +321,7 @@ Deno.serve(async (req) => {
     console.log(`[shipping-status-sync] Manual recovery for shipment ${manualShipmentId}`);
     const { data: cached, error: cacheErr } = await supabase
       .from("meli_shipments_cache")
-      .select("shipment_id, shipment_status, shipment_substatus, seller_id")
+      .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available, estimated_handling_limit, estimated_schedule_limit, seller_id")
       .eq("shipment_id", manualShipmentId)
       .maybeSingle();
 
@@ -479,7 +479,7 @@ Deno.serve(async (req) => {
         // ===== Pass 1: stale stuck shipments (ready_to_ship/printed-or-ready_for_pickup) =====
         const { data: staleShipments } = await supabase
           .from("meli_shipments_cache")
-          .select("shipment_id, shipment_status, shipment_substatus")
+          .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available, estimated_handling_limit, estimated_schedule_limit")
           .eq("seller_id", account.ml_user_id)
           .eq("shipment_status", "ready_to_ship")
           .in("shipment_substatus", ["printed", "ready_for_pickup"])
@@ -499,7 +499,7 @@ Deno.serve(async (req) => {
         // ===== Pass 2: regular active shipments =====
         const { data: activeShipments, error: shipError } = await supabase
           .from("meli_shipments_cache")
-          .select("shipment_id, shipment_status, shipment_substatus")
+          .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available, estimated_handling_limit, estimated_schedule_limit")
           .eq("seller_id", account.ml_user_id)
           .in("shipment_status", ACTIVE_STATUSES)
           .order("last_sync_at", { ascending: true, nullsFirst: true })
@@ -519,7 +519,7 @@ Deno.serve(async (req) => {
         // ===== Pass 3: terminal-state safety net (shipped >7d, not yet delivered) =====
         const { data: shippedOld } = await supabase
           .from("meli_shipments_cache")
-          .select("shipment_id, shipment_status, shipment_substatus")
+          .select("shipment_id, shipment_status, shipment_substatus, tracking_number, logistic_type, label_available, estimated_handling_limit, estimated_schedule_limit")
           .eq("seller_id", account.ml_user_id)
           .eq("shipment_status", "shipped")
           .lt("last_sync_at", shipped7dCutoff)
