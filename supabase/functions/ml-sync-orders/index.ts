@@ -573,12 +573,6 @@ async function processOrdersInBackground(
           itemsWritten += changedItems.length;
         }
 
-        if (itemsUpsertError) {
-          console.error(`[Job ${jobId}] Items batch upsert error:`, itemsUpsertError);
-          itemsErrors++;
-          // Continue processing - don't stop sync for individual item errors
-        }
-
         itemsProcessed += itemsBatch.length;
 
         // Yield between batches
