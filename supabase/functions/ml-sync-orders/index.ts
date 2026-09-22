@@ -590,7 +590,7 @@ async function processOrdersInBackground(
       console.log(`[Job ${jobId}] Order items synced: ${itemsProcessed}, errors: ${itemsErrors}`);
     }
 
-    console.log(`[Job ${jobId}] Sync complete: ${processed} orders, ${allOrderItems.length} items`);
+    console.log(`[Job ${jobId}] Sync complete: ${ordersWritten}/${processed} pedidos e ${itemsWritten}/${allOrderItems.length} itens gravados (resto sem mudança)`);
 
     // ====== ENRICH MISSING BUYER NAMES ======
     // The search API sometimes doesn't return buyer.first_name/last_name
