@@ -262,6 +262,8 @@ async function processOrdersInBackground(
     // ====== BATCH UPSERT ORDERS (100 at a time) ======
     const BATCH_SIZE = 100;
     let processed = 0;
+    let ordersWritten = 0;
+    let itemsWritten = 0;
 
     // Collect all order items for batch insert
     interface OrderItemData {
