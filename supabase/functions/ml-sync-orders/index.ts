@@ -262,6 +262,8 @@ async function processOrdersInBackground(
     // ====== BATCH UPSERT ORDERS (100 at a time) ======
     const BATCH_SIZE = 100;
     let processed = 0;
+    let ordersWritten = 0;
+    let itemsWritten = 0;
 
     // Collect all order items for batch insert
     interface OrderItemData {
@@ -440,16 +442,45 @@ async function processOrdersInBackground(
         };
       });
 
-      const { error: upsertError } = await supabaseAdmin
-        .from('meli_orders_cache')
-        .upsert(orderData, {
-          onConflict: 'seller_id,order_id',
-          ignoreDuplicates: false,
-        });
+      // Só grava o que mudou — um SELECT indexado é muito mais barato que um
+      // UPDATE, que reescreve a linha inteira e todos os índices dela.
+      const norm = (v: any) => (v === null || v === undefined ? '' : String(v));
+      const batchOrderIds = orderData.map((o) => String(o.order_id));
+      const existingOrders = new Map<string, any>();
+      {
+        const { data: existingData } = await supabaseAdmin
+          .from('meli_orders_cache')
+          .select('order_id, order_status, shipment_id, pack_id, buyer_nickname, buyer_name, total_amount, items_count')
+          .eq('seller_id', sellerId)
+          .in('order_id', batchOrderIds);
+        (existingData || []).forEach((r: any) => existingOrders.set(String(r.order_id), r));
+      }
 
-      if (upsertError) {
-        console.error(`[Job ${jobId}] Batch upsert error:`, upsertError);
-        // Continue processing other batches
+      const changedOrders = orderData.filter((o) => {
+        const cur = existingOrders.get(String(o.order_id));
+        if (!cur) return true;
+        return norm(cur.order_status) !== norm(o.order_status)
+          || norm(cur.shipment_id) !== norm(o.shipment_id)
+          || norm(cur.pack_id) !== norm(o.pack_id)
+          || norm(cur.buyer_nickname) !== norm(o.buyer_nickname)
+          || norm(cur.buyer_name) !== norm(o.buyer_name)
+          || Number(cur.total_amount ?? 0) !== Number(o.total_amount ?? 0)
+          || Number(cur.items_count ?? 0) !== Number(o.items_count ?? 0);
+      });
+
+      if (changedOrders.length > 0) {
+        const { error: upsertError } = await supabaseAdmin
+          .from('meli_orders_cache')
+          .upsert(changedOrders, {
+            onConflict: 'seller_id,order_id',
+            ignoreDuplicates: false,
+          });
+
+        if (upsertError) {
+          console.error(`[Job ${jobId}] Batch upsert error:`, upsertError);
+          // Continue processing other batches
+        }
+        ordersWritten += changedOrders.length;
       }
 
       processed += batch.length;
@@ -501,17 +532,45 @@ async function processOrdersInBackground(
           thumbnail: item.thumbnail,
         }));
 
-        const { error: itemsUpsertError } = await supabaseAdmin
-          .from('meli_order_items_cache')
-          .upsert(itemsData, {
-            onConflict: 'seller_id,order_id,item_id,variation_id',
-            ignoreDuplicates: false,
-          });
+        const itemKey = (r: any) => `${r.order_id}|${r.item_id}|${r.variation_id ?? ''}`;
+        const batchItemOrderIds = [...new Set(itemsData.map((r: any) => String(r.order_id)))];
+        const existingItems = new Map<string, any>();
+        {
+          const { data: existingItemData } = await supabaseAdmin
+            .from('meli_order_items_cache')
+            .select('order_id, item_id, variation_id, quantity, unit_price, title, sku, product_key, shipment_id, thumbnail, permalink')
+            .eq('seller_id', sellerId)
+            .in('order_id', batchItemOrderIds);
+          (existingItemData || []).forEach((r: any) => existingItems.set(itemKey(r), r));
+        }
 
-        if (itemsUpsertError) {
-          console.error(`[Job ${jobId}] Items batch upsert error:`, itemsUpsertError);
-          itemsErrors++;
-          // Continue processing - don't stop sync for individual item errors
+        const changedItems = itemsData.filter((r: any) => {
+          const cur = existingItems.get(itemKey(r));
+          if (!cur) return true;
+          return Number(cur.quantity ?? 0) !== Number(r.quantity ?? 0)
+            || Number(cur.unit_price ?? 0) !== Number(r.unit_price ?? 0)
+            || String(cur.title ?? '') !== String(r.title ?? '')
+            || String(cur.sku ?? '') !== String(r.sku ?? '')
+            || String(cur.product_key ?? '') !== String(r.product_key ?? '')
+            || String(cur.shipment_id ?? '') !== String(r.shipment_id ?? '')
+            || String(cur.thumbnail ?? '') !== String(r.thumbnail ?? '')
+            || String(cur.permalink ?? '') !== String(r.permalink ?? '');
+        });
+
+        if (changedItems.length > 0) {
+          const { error: itemsUpsertError } = await supabaseAdmin
+            .from('meli_order_items_cache')
+            .upsert(changedItems, {
+              onConflict: 'seller_id,order_id,item_id,variation_id',
+              ignoreDuplicates: false,
+            });
+
+          if (itemsUpsertError) {
+            console.error(`[Job ${jobId}] Items batch upsert error:`, itemsUpsertError);
+            itemsErrors++;
+            // Continue processing - don't stop sync for individual item errors
+          }
+          itemsWritten += changedItems.length;
         }
 
         itemsProcessed += itemsBatch.length;
@@ -525,7 +584,7 @@ async function processOrdersInBackground(
       console.log(`[Job ${jobId}] Order items synced: ${itemsProcessed}, errors: ${itemsErrors}`);
     }
 
-    console.log(`[Job ${jobId}] Sync complete: ${processed} orders, ${allOrderItems.length} items`);
+    console.log(`[Job ${jobId}] Sync complete: ${ordersWritten}/${processed} pedidos e ${itemsWritten}/${allOrderItems.length} itens gravados (resto sem mudança)`);
 
     // ====== ENRICH MISSING BUYER NAMES ======
     // The search API sometimes doesn't return buyer.first_name/last_name
