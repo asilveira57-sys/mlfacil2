@@ -532,12 +532,46 @@ async function processOrdersInBackground(
           thumbnail: item.thumbnail,
         }));
 
-        const { error: itemsUpsertError } = await supabaseAdmin
-          .from('meli_order_items_cache')
-          .upsert(itemsData, {
-            onConflict: 'seller_id,order_id,item_id,variation_id',
-            ignoreDuplicates: false,
-          });
+        const itemKey = (r: any) => `${r.order_id}|${r.item_id}|${r.variation_id ?? ''}`;
+        const batchItemOrderIds = [...new Set(itemsData.map((r: any) => String(r.order_id)))];
+        const existingItems = new Map<string, any>();
+        {
+          const { data: existingItemData } = await supabaseAdmin
+            .from('meli_order_items_cache')
+            .select('order_id, item_id, variation_id, quantity, unit_price, title, sku, product_key, shipment_id, thumbnail, permalink')
+            .eq('seller_id', sellerId)
+            .in('order_id', batchItemOrderIds);
+          (existingItemData || []).forEach((r: any) => existingItems.set(itemKey(r), r));
+        }
+
+        const changedItems = itemsData.filter((r: any) => {
+          const cur = existingItems.get(itemKey(r));
+          if (!cur) return true;
+          return Number(cur.quantity ?? 0) !== Number(r.quantity ?? 0)
+            || Number(cur.unit_price ?? 0) !== Number(r.unit_price ?? 0)
+            || String(cur.title ?? '') !== String(r.title ?? '')
+            || String(cur.sku ?? '') !== String(r.sku ?? '')
+            || String(cur.product_key ?? '') !== String(r.product_key ?? '')
+            || String(cur.shipment_id ?? '') !== String(r.shipment_id ?? '')
+            || String(cur.thumbnail ?? '') !== String(r.thumbnail ?? '')
+            || String(cur.permalink ?? '') !== String(r.permalink ?? '');
+        });
+
+        if (changedItems.length > 0) {
+          const { error: itemsUpsertError } = await supabaseAdmin
+            .from('meli_order_items_cache')
+            .upsert(changedItems, {
+              onConflict: 'seller_id,order_id,item_id,variation_id',
+              ignoreDuplicates: false,
+            });
+
+          if (itemsUpsertError) {
+            console.error(`[Job ${jobId}] Items batch upsert error:`, itemsUpsertError);
+            itemsErrors++;
+            // Continue processing - don't stop sync for individual item errors
+          }
+          itemsWritten += changedItems.length;
+        }
 
         if (itemsUpsertError) {
           console.error(`[Job ${jobId}] Items batch upsert error:`, itemsUpsertError);
