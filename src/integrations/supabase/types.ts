@@ -9752,6 +9752,21 @@ export type Database = {
         }
         Relationships: []
       }
+      ml_eligible_accounts: {
+        Row: {
+          ml_user_id: string
+          refreshed_at: string
+        }
+        Insert: {
+          ml_user_id: string
+          refreshed_at?: string
+        }
+        Update: {
+          ml_user_id?: string
+          refreshed_at?: string
+        }
+        Relationships: []
+      }
       ml_integrations: {
         Row: {
           application_id: string | null
@@ -21617,6 +21632,7 @@ export type Database = {
         Args: { p_date?: string }
         Returns: undefined
       }
+      calc_eligible_ml_user_ids: { Args: never; Returns: string[] }
       calculate_category_eligibility: {
         Args: {
           p_category_id: string
@@ -22091,6 +22107,7 @@ export type Database = {
         Args: { p_seller_id: string; p_tenant_id: string; p_user_id: string }
         Returns: undefined
       }
+      refresh_ml_eligible_accounts: { Args: never; Returns: number }
       register_system_log: {
         Args: {
           p_action: string
