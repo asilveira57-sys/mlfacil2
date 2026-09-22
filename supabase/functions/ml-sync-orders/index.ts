@@ -442,16 +442,45 @@ async function processOrdersInBackground(
         };
       });
 
-      const { error: upsertError } = await supabaseAdmin
-        .from('meli_orders_cache')
-        .upsert(orderData, {
-          onConflict: 'seller_id,order_id',
-          ignoreDuplicates: false,
-        });
+      // Só grava o que mudou — um SELECT indexado é muito mais barato que um
+      // UPDATE, que reescreve a linha inteira e todos os índices dela.
+      const norm = (v: any) => (v === null || v === undefined ? '' : String(v));
+      const batchOrderIds = orderData.map((o) => String(o.order_id));
+      const existingOrders = new Map<string, any>();
+      {
+        const { data: existingData } = await supabaseAdmin
+          .from('meli_orders_cache')
+          .select('order_id, order_status, shipment_id, pack_id, buyer_nickname, buyer_name, total_amount, items_count')
+          .eq('seller_id', sellerId)
+          .in('order_id', batchOrderIds);
+        (existingData || []).forEach((r: any) => existingOrders.set(String(r.order_id), r));
+      }
 
-      if (upsertError) {
-        console.error(`[Job ${jobId}] Batch upsert error:`, upsertError);
-        // Continue processing other batches
+      const changedOrders = orderData.filter((o) => {
+        const cur = existingOrders.get(String(o.order_id));
+        if (!cur) return true;
+        return norm(cur.order_status) !== norm(o.order_status)
+          || norm(cur.shipment_id) !== norm(o.shipment_id)
+          || norm(cur.pack_id) !== norm(o.pack_id)
+          || norm(cur.buyer_nickname) !== norm(o.buyer_nickname)
+          || norm(cur.buyer_name) !== norm(o.buyer_name)
+          || Number(cur.total_amount ?? 0) !== Number(o.total_amount ?? 0)
+          || Number(cur.items_count ?? 0) !== Number(o.items_count ?? 0);
+      });
+
+      if (changedOrders.length > 0) {
+        const { error: upsertError } = await supabaseAdmin
+          .from('meli_orders_cache')
+          .upsert(changedOrders, {
+            onConflict: 'seller_id,order_id',
+            ignoreDuplicates: false,
+          });
+
+        if (upsertError) {
+          console.error(`[Job ${jobId}] Batch upsert error:`, upsertError);
+          // Continue processing other batches
+        }
+        ordersWritten += changedOrders.length;
       }
 
       processed += batch.length;
