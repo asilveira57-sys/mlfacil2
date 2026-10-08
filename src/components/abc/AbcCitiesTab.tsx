@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Download, MapPin, ChevronRight, ArrowLeft, Loader2, DollarSign, Package, TrendingUp, Map as MapIcon, RefreshCw, AlertTriangle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { AbcMapDrawer, MapMarkerData } from "./AbcMapDrawer";
+import { isFlexLocation } from "@/lib/flexAreas";
 import {
   Select,
   SelectContent,
@@ -34,10 +35,14 @@ interface GeographicItem {
   orders: number;
   units: number;
   revenue: number;
+  flexOrders: number;
   children?: GeographicItem[];
 }
 
 type DrillLevel = "uf" | "city" | "neighborhood";
+type FlexFilter = "all" | "flex" | "nonflex";
+
+const isFlexItem = (item: GeographicItem) => item.orders > 0 && item.flexOrders / item.orders >= 0.5;
 
 const INDICATOR_OPTIONS: { value: AbcIndicator; label: string; icon: React.ReactNode }[] = [
   { value: "revenue", label: "Valor comprado", icon: <DollarSign className="h-4 w-4" /> },
@@ -93,6 +98,7 @@ function classifyItems(
       percentage,
       cumulative,
       classification,
+      isFlex: isFlexItem(item),
     };
   });
 }
@@ -102,6 +108,9 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   const [drillLevel, setDrillLevel] = useState<DrillLevel>("uf");
   const [selectedUf, setSelectedUf] = useState<string | null>(null);
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
+  const [flexFilter, setFlexFilter] = useState<FlexFilter>("all");
+  const [flexOrderIds, setFlexOrderIds] = useState<Set<string>>(new Set());
+  const [exportingFlex, setExportingFlex] = useState(false);
   
   const [data, setData] = useState<GeographicItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -168,7 +177,7 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         const batch = shipmentIds.slice(i, i + BATCH_SIZE);
         const { data: batchData, error: shipmentsError } = await supabase
           .from("meli_shipments_cache")
-          .select("shipment_id, shipping_state_uf, shipping_city, shipping_neighborhood, receiver_address")
+          .select("shipment_id, shipping_state_uf, shipping_city, shipping_neighborhood, receiver_address, shipping_zipcode")
           .eq("seller_id", sellerId)
           .in("shipment_id", batch);
 
@@ -213,6 +222,20 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
 
       // Aggregate by geographic level
       const ufMap = new Map<string, GeographicItem>();
+      const flexIds = new Set<string>();
+
+      const bump = (list: GeographicItem[], key: string, units: number, revenue: number, flex: boolean): GeographicItem => {
+        let node = list.find(n => n.id === key);
+        if (!node) {
+          node = { id: key, name: key, orders: 0, units: 0, revenue: 0, flexOrders: 0, children: [] };
+          list.push(node);
+        }
+        node.orders += 1;
+        node.units += units;
+        node.revenue += revenue;
+        if (flex) node.flexOrders += 1;
+        return node;
+      };
 
       filteredOrders.forEach(order => {
         const shipment = shipmentMap.get(order.shipment_id || "");
@@ -229,78 +252,25 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
           neighborhood = parsed.neighborhood;
         }
 
-        // Update UF level
-        const existingUf = ufMap.get(uf);
-        if (existingUf) {
-          existingUf.orders += 1;
-          existingUf.units += order.items_count || 0;
-          existingUf.revenue += order.total_amount || 0;
+        const flex = isFlexLocation({ uf, city, zipcode: shipment?.shipping_zipcode });
+        if (flex) flexIds.add(order.order_id);
+        const units = order.items_count || 0;
+        const revenue = order.total_amount || 0;
 
-          // Update city within UF
-          let cityItem = existingUf.children?.find(c => c.id === city);
-          if (cityItem) {
-            cityItem.orders += 1;
-            cityItem.units += order.items_count || 0;
-            cityItem.revenue += order.total_amount || 0;
-
-            // Update neighborhood
-            let neighborhoodItem = cityItem.children?.find(n => n.id === neighborhood);
-            if (neighborhoodItem) {
-              neighborhoodItem.orders += 1;
-              neighborhoodItem.units += order.items_count || 0;
-              neighborhoodItem.revenue += order.total_amount || 0;
-            } else {
-              cityItem.children = cityItem.children || [];
-              cityItem.children.push({
-                id: neighborhood,
-                name: neighborhood,
-                orders: 1,
-                units: order.items_count || 0,
-                revenue: order.total_amount || 0,
-              });
-            }
-          } else {
-            existingUf.children = existingUf.children || [];
-            existingUf.children.push({
-              id: city,
-              name: city,
-              orders: 1,
-              units: order.items_count || 0,
-              revenue: order.total_amount || 0,
-              children: [{
-                id: neighborhood,
-                name: neighborhood,
-                orders: 1,
-                units: order.items_count || 0,
-                revenue: order.total_amount || 0,
-              }],
-            });
-          }
-        } else {
-          ufMap.set(uf, {
-            id: uf,
-            name: uf,
-            orders: 1,
-            units: order.items_count || 0,
-            revenue: order.total_amount || 0,
-            children: [{
-              id: city,
-              name: city,
-              orders: 1,
-              units: order.items_count || 0,
-              revenue: order.total_amount || 0,
-              children: [{
-                id: neighborhood,
-                name: neighborhood,
-                orders: 1,
-                units: order.items_count || 0,
-                revenue: order.total_amount || 0,
-              }],
-            }],
-          });
+        let ufItem = ufMap.get(uf);
+        if (!ufItem) {
+          ufItem = { id: uf, name: uf, orders: 0, units: 0, revenue: 0, flexOrders: 0, children: [] };
+          ufMap.set(uf, ufItem);
         }
+        ufItem.orders += 1;
+        ufItem.units += units;
+        ufItem.revenue += revenue;
+        if (flex) ufItem.flexOrders += 1;
+        const cityItem = bump(ufItem.children!, city, units, revenue, flex);
+        bump(cityItem.children!, neighborhood, units, revenue, flex);
       });
 
+      setFlexOrderIds(flexIds);
       setData(Array.from(ufMap.values()));
     } catch (err) {
       console.error("Cities ABC error:", err);
@@ -330,7 +300,11 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
     return [];
   };
 
-  const currentItems = getCurrentItems();
+  const levelItems = getCurrentItems();
+  const hasFlexAtLevel = drillLevel !== "uf" && levelItems.some(isFlexItem);
+  const currentItems = drillLevel === "uf" || flexFilter === "all"
+    ? levelItems
+    : levelItems.filter(i => (flexFilter === "flex" ? isFlexItem(i) : !isFlexItem(i)));
   const classifiedItems = classifyItems(currentItems, config, indicator);
 
   const handleDrillDown = (item: AbcItem) => {
@@ -431,6 +405,78 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportFlexProducts = async () => {
+    if (flexOrderIds.size === 0) return;
+    setExportingFlex(true);
+    try {
+      const ids = Array.from(flexOrderIds);
+      const rowsData: Array<{ order_id: string; item_id: string; sku: string | null; title: string | null; quantity: number | null; unit_price: number | null }> = [];
+      const BATCH = 500;
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const batch = ids.slice(i, i + BATCH);
+        const part = await fetchAllRows<typeof rowsData[number]>(
+          supabase
+            .from("meli_order_items_cache")
+            .select("order_id, item_id, sku, title, quantity, unit_price")
+            .eq("seller_id", sellerId)
+            .in("order_id", batch)
+        );
+        rowsData.push(...part);
+      }
+
+      const agg = new Map<string, { item_id: string; sku: string; title: string; units: number; revenue: number; orders: Set<string> }>();
+      rowsData.forEach(r => {
+        const key = r.item_id || "N/D";
+        let e = agg.get(key);
+        if (!e) {
+          e = { item_id: key, sku: r.sku || "", title: r.title || "", units: 0, revenue: 0, orders: new Set() };
+          agg.set(key, e);
+        }
+        const q = Number(r.quantity) || 0;
+        e.units += q;
+        e.revenue += q * (Number(r.unit_price) || 0);
+        e.orders.add(r.order_id);
+        if (!e.sku && r.sku) e.sku = r.sku;
+        if (!e.title && r.title) e.title = r.title;
+      });
+
+      const list = Array.from(agg.values()).sort((a, b) => b.revenue - a.revenue);
+      const total = list.reduce((s, i) => s + i.revenue, 0);
+      if (list.length === 0) {
+        toast({ title: "Nenhum produto encontrado", description: "Não há itens vendidos na área Flex no período." });
+        return;
+      }
+      let cum = 0;
+      const clean = (v: string) => v.replace(/[;\n\r]/g, " ");
+      const rows = list.map((i, idx) => {
+        const pct = total > 0 ? (i.revenue / total) * 100 : 0;
+        cum += pct;
+        const cls = cum <= config.percentA ? "A" : cum <= config.percentA + config.percentB ? "B" : "C";
+        return [idx + 1, clean(i.sku), i.item_id, clean(i.title), i.orders.size, i.units, i.revenue.toFixed(2), pct.toFixed(2), cum.toFixed(2), cls];
+      });
+      const headers = ["Rank", "SKU", "Item ID", "Título", "Pedidos", "Unidades", "Faturamento", "% Participação", "% Acumulado", "Classe"];
+      const csv = [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `produtos-area-flex-${new Date().toISOString().split("T")[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Flex export error:", err);
+      toast({
+        title: "Erro ao exportar produtos Flex",
+        description: err instanceof Error ? err.message : "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingFlex(false);
+    }
+  };
+
+  const flexSuffix = drillLevel !== "uf" && flexFilter !== "all" ? (flexFilter === "flex" ? " (só Flex)" : " (fora do Flex)") : "";
+
   const totals = {
     totalItems: classifiedItems.length,
     totalValue: currentItems.reduce((sum, i) => sum + i.revenue, 0),
@@ -442,18 +488,18 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
 
   const summaryCards = [
     {
-      label: drillLevel === "uf" ? "Estados" : drillLevel === "city" ? "Cidades" : "Bairros",
+      label: (drillLevel === "uf" ? "Estados" : drillLevel === "city" ? "Cidades" : "Bairros") + flexSuffix,
       value: totals.totalItems,
       icon: <MapPin className="h-5 w-5 text-primary" />,
       description: `${totals.classACount} na classe A`,
     },
     {
-      label: "Total de Pedidos",
+      label: "Total de Pedidos" + flexSuffix,
       value: totals.totalOrders,
       icon: <Package className="h-5 w-5 text-primary" />,
     },
     {
-      label: "Valor Total",
+      label: "Valor Total" + flexSuffix,
       value: new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(totals.totalValue),
       icon: <DollarSign className="h-5 w-5 text-primary" />,
     },
@@ -536,6 +582,18 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
               ))}
             </SelectContent>
           </Select>
+          {drillLevel !== "uf" && (
+            <Select value={flexFilter} onValueChange={(v: FlexFilter) => setFlexFilter(v)}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="flex">Só Flex</SelectItem>
+                <SelectItem value="nonflex">Fora do Flex</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -554,6 +612,10 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
           <Button variant="outline" onClick={handleExportCSV} disabled={classifiedItems.length === 0}>
             <Download className="h-4 w-4 mr-2" />
             Exportar CSV
+          </Button>
+          <Button variant="outline" onClick={handleExportFlexProducts} disabled={!hasFlexAtLevel || exportingFlex}>
+            {exportingFlex ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+            {exportingFlex ? "Exportando..." : "Exportar produtos Flex"}
           </Button>
         </div>
       </div>
