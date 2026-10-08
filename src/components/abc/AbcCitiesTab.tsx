@@ -305,7 +305,8 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   const currentItems = drillLevel === "uf" || flexFilter === "all"
     ? levelItems
     : levelItems.filter(i => (flexFilter === "flex" ? isFlexItem(i) : !isFlexItem(i)));
-  const classifiedItems = classifyItems(currentItems, config, indicator);
+  const classifiedItems = classifyItems(currentItems, config, indicator)
+    .map(i => (drillLevel === "uf" ? { ...i, isFlex: false } : i));
 
   const handleDrillDown = (item: AbcItem) => {
     if (drillLevel === "uf") {
