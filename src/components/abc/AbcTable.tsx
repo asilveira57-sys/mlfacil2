@@ -25,6 +25,7 @@ export interface AbcItem {
   percentage: number;
   cumulative: number;
   classification: "A" | "B" | "C";
+  isFlex?: boolean;
 }
 
 interface AbcTableColumn {
@@ -193,7 +194,18 @@ export function AbcTable({
               </TableCell>
               <TableCell>
                 <div>
-                  <div className="font-medium">{item.name}</div>
+                  <div className="font-medium flex items-center gap-2">
+                    <span>{item.name}</span>
+                    {item.isFlex && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs px-1.5 py-0 bg-success/20 text-success border-success/30"
+                        title="Área de entrega Mercado Envios Flex"
+                      >
+                        Flex
+                      </Badge>
+                    )}
+                  </div>
                   {item.subtitle && (
                     <div className="text-sm text-muted-foreground">{item.subtitle}</div>
                   )}
