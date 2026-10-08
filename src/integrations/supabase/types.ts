@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      _pgss_snap3: {
+        Row: {
+          calls: number | null
+          ms: number | null
+          q: string | null
+          queryid: number | null
+          t: string | null
+        }
+        Insert: {
+          calls?: number | null
+          ms?: number | null
+          q?: string | null
+          queryid?: number | null
+          t?: string | null
+        }
+        Update: {
+          calls?: number | null
+          ms?: number | null
+          q?: string | null
+          queryid?: number | null
+          t?: string | null
+        }
+        Relationships: []
+      }
       abc_config: {
         Row: {
           created_at: string
