@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
-import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { useMemo, lazy, Suspense } from 'react';
 import { useWidgetCatalog, useUserWidgets, useWidgetActions } from '@/hooks/useWidgetHub';
-import { WidgetCard } from './WidgetCard';
 import { WidgetCatalogDrawer } from './WidgetCatalogDrawer';
 import { Button } from '@/components/ui/button';
 import { RotateCcw, LayoutGrid } from 'lucide-react';
+
+// Drag-and-drop lib only loads when the user actually has widgets.
+const WidgetHubDndList = lazy(() => import('./WidgetHubDndList'));
 
 export function WidgetHubGrid() {
   const { data: catalog = [] } = useWidgetCatalog();
@@ -16,14 +17,6 @@ export function WidgetHubGrid() {
     catalog.forEach(c => m.set(c.slug, { nome: c.nome, icone: c.icone }));
     return m;
   }, [catalog]);
-
-  const onDragEnd = (result: DropResult) => {
-    if (!result.destination) return;
-    const items = [...userWidgets];
-    const [moved] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, moved);
-    reorderWidgets.mutate(items.map(i => i.id));
-  };
 
   if (isLoading) {
     return (
@@ -62,36 +55,21 @@ export function WidgetHubGrid() {
           <WidgetCatalogDrawer />
         </div>
       ) : (
-        <DragDropContext onDragEnd={onDragEnd}>
-          <Droppable droppableId="widget-hub" direction="horizontal">
-            {(provided) => (
-              <div
-                ref={provided.innerRef}
-                {...provided.droppableProps}
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 auto-rows-auto"
-              >
-                {userWidgets.map((w, index) => {
-                  const info = catalogMap.get(w.widget_slug);
-                  return (
-                    <Draggable key={w.id} draggableId={w.id} index={index} isDragDisabled={w.fixado}>
-                      {(prov) => (
-                        <div ref={prov.innerRef} {...prov.draggableProps} className="animate-fade-in">
-                          <WidgetCard
-                            widget={w}
-                            catalogName={info?.nome ?? w.widget_slug}
-                            catalogIcon={info?.icone ?? null}
-                            dragHandleProps={prov.dragHandleProps}
-                          />
-                        </div>
-                      )}
-                    </Draggable>
-                  );
-                })}
-                {provided.placeholder}
-              </div>
-            )}
-          </Droppable>
-        </DragDropContext>
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {userWidgets.map((w) => (
+                <div key={w.id} className="h-40 rounded-lg bg-muted/50 animate-pulse" />
+              ))}
+            </div>
+          }
+        >
+          <WidgetHubDndList
+            userWidgets={userWidgets}
+            catalogMap={catalogMap}
+            onReorder={(ids) => reorderWidgets.mutate(ids)}
+          />
+        </Suspense>
       )}
     </div>
   );

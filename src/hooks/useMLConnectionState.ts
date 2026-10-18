@@ -52,9 +52,11 @@ async function logConnectionEvent(
   }
 }
 
+const NO_ACCOUNT_KEY = '__no_account__';
+const lastLoggedStateByAccount = new Map<string, MLConnectionState>();
+
 export function useMLConnectionState(): MLConnectionInfo {
   const { activeAccount, accounts, loading, initialized, isRefreshingToken } = useActiveAccount();
-  const prevStateRef = useRef<MLConnectionState | null>(null);
   const userIdRef = useRef<string | null>(null);
 
   // Get userId once for telemetry
@@ -90,23 +92,27 @@ export function useMLConnectionState(): MLConnectionInfo {
     return null;
   }, [initialized, loading, accounts, activeAccount, isRefreshingToken]);
 
-  // Log state transitions (telemetry only — never trigger side effects on the connection)
+  // Log state transitions (telemetry only — never trigger side effects on the connection).
+  // Last-logged state lives at module level, keyed by accountId, so remounts and
+  // simultaneous instances don't log the same state again.
   useEffect(() => {
-    if (state && state !== prevStateRef.current) {
-      const eventMap: Record<MLConnectionState, string> = {
-        FIRST_CONNECTION: 'dashboard_connection_state_first_connection',
-        RECONNECTING: 'dashboard_connection_state_validating',
-        CONNECTED: 'dashboard_connection_state_connected',
-        RECONNECT_REQUIRED: 'dashboard_connection_state_reconnect_required',
-      };
-      console.info(`[MLConnectionState] ${prevStateRef.current} → ${state}`);
-      logConnectionEvent(eventMap[state], userIdRef.current, {
-        accountId: activeAccount?.id,
-        sellerId: activeAccount?.sellerId,
-        previousState: prevStateRef.current,
-      });
-      prevStateRef.current = state;
-    }
+    if (!state) return;
+    const key = activeAccount?.id || NO_ACCOUNT_KEY;
+    const previous = lastLoggedStateByAccount.get(key) ?? null;
+    if (state === previous) return;
+    lastLoggedStateByAccount.set(key, state);
+    const eventMap: Record<MLConnectionState, string> = {
+      FIRST_CONNECTION: 'dashboard_connection_state_first_connection',
+      RECONNECTING: 'dashboard_connection_state_validating',
+      CONNECTED: 'dashboard_connection_state_connected',
+      RECONNECT_REQUIRED: 'dashboard_connection_state_reconnect_required',
+    };
+    console.info(`[MLConnectionState] ${previous} → ${state}`);
+    logConnectionEvent(eventMap[state], userIdRef.current, {
+      accountId: activeAccount?.id,
+      sellerId: activeAccount?.sellerId,
+      previousState: previous,
+    });
   }, [state, activeAccount?.id, activeAccount?.sellerId]);
 
   return {
