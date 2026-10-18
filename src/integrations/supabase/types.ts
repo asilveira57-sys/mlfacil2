@@ -10,34 +10,10 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
-      _pgss_snap3: {
-        Row: {
-          calls: number | null
-          ms: number | null
-          q: string | null
-          queryid: number | null
-          t: string | null
-        }
-        Insert: {
-          calls?: number | null
-          ms?: number | null
-          q?: string | null
-          queryid?: number | null
-          t?: string | null
-        }
-        Update: {
-          calls?: number | null
-          ms?: number | null
-          q?: string | null
-          queryid?: number | null
-          t?: string | null
-        }
-        Relationships: []
-      }
       abc_config: {
         Row: {
           created_at: string
@@ -9411,6 +9387,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      mktp_pausa_estado: {
+        Row: {
+          estava_ativo: boolean | null
+          jobid: number | null
+          jobname: string | null
+          pausado_em: string | null
+          schedule: string | null
+        }
+        Insert: {
+          estava_ativo?: boolean | null
+          jobid?: number | null
+          jobname?: string | null
+          pausado_em?: string | null
+          schedule?: string | null
+        }
+        Update: {
+          estava_ativo?: boolean | null
+          jobid?: number | null
+          jobname?: string | null
+          pausado_em?: string | null
+          schedule?: string | null
+        }
+        Relationships: []
       }
       mktpfacil_announcement_reads: {
         Row: {

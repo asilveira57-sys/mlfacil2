@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useUserAccessState } from './useUserAccessState';
+import { useUserAccess } from '@/contexts/UserAccessContext';
 import { useCallback, useMemo } from 'react';
 
 /**
@@ -22,7 +22,7 @@ interface UserPlanModules {
 }
 
 export function useCanAccessModule() {
-  const { status, trialActive } = useUserAccessState();
+  const { status, trialActive } = useUserAccess();
   const userId = status?.user_id;
 
   const { data, isLoading } = useQuery({
