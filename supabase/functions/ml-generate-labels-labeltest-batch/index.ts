@@ -12,6 +12,7 @@ import {
   uint8ToBase64, DEFAULT_HEADER_PREFS,
   fetchVariationAttributesMap,
 } from "../_shared/labeltest-render.ts";
+import { isLegacyPayload, batchPath, uploadFile } from "../_shared/print-labels-storage.ts";
 
 async function resolveJobMlAccount(supabaseAdmin: any, job: any, batch: any) {
   const fields = 'id, access_token, user_id, ml_user_id';
@@ -279,20 +280,32 @@ serve(async (req) => {
       errors.push(...result.errors); log.push(...result.log);
     }
 
-    const batchPdfB64 = pdfBytes ? uint8ToBase64(pdfBytes) : null;
+    // Conteúdo do lote: Storage (padrão) ou base64 no banco (LABELS_LEGACY_PAYLOAD=1)
+    const legacy = isLegacyPayload();
+    let batchPdfB64: string | null = null;
+    let storagePath: string | null = null;
+    if (pdfBytes) {
+      if (legacy) {
+        batchPdfB64 = uint8ToBase64(pdfBytes);
+      } else {
+        storagePath = batchPath(job.user_id, job.seller_id, jobId!, batchIdx!);
+        await uploadFile(supabaseAdmin, storagePath, pdfBytes, 'application/pdf');
+      }
+    }
     const elapsed = Date.now() - t0;
-    console.log(`[labeltest-batch] job=${jobId} batch=${batchIdx} done: success=${successCount}/${sids.length} pages=${pages} errors=${errors.length} elapsed=${elapsed}ms`);
+    console.log(`[labeltest-batch] job=${jobId} batch=${batchIdx} done: success=${successCount}/${sids.length} pages=${pages} errors=${errors.length} elapsed=${elapsed}ms legacy=${legacy}`);
 
     // ─── Atualiza estado via RPC atômica (lock por job_id) ──────────────
-    const batchPatch = {
+    const batchPatch: Record<string, unknown> = {
       status: pdfBytes ? 'success' : 'error',
       success_count: successCount,
       error_count: errors.length,
       pages,
-      pdf_b64: batchPdfB64,
       completed_at: new Date().toISOString(),
       elapsed_ms: elapsed,
     };
+    if (legacy) batchPatch.pdf_b64 = batchPdfB64;
+    else batchPatch.storage_path = storagePath;
     const logEntries = [
       ...log,
       ...errors.map(e => ({ shipment_id: e.shipment_id, status: 'error', error: e.reason_message, reason_code: e.reason_code, batch_index: batchIdx })),
