@@ -93,26 +93,14 @@ serve(async (req) => {
         );
       }
 
-      const nowMs = Date.now();
-      const startedMs = st.job_started_at ? new Date(st.job_started_at).getTime() : nowMs;
-      if (st.status === 'processando' && nowMs - startedMs > 60_000) {
-        // Só aqui lemos o array (pequeno: apenas metadados por lote)
-        const { data: jb } = await supabaseAdmin.from('meli_print_queue_v2').select('batches').eq('id', job_id).maybeSingle();
-        const bs: any[] = Array.isArray(jb?.batches) ? jb!.batches : [];
-        const retryCandidates = bs.filter((b: any) => {
-          if (['success', 'error'].includes(b?.status)) return false;
-          const lastRecoveryAt = b?.recovery_dispatched_at ? new Date(b.recovery_dispatched_at).getTime() : 0;
-          return !lastRecoveryAt || nowMs - lastRecoveryAt > 60_000;
-        });
-        if (retryCandidates.length > 0) {
-          const patched = bs.map((b: any) => retryCandidates.some((r: any) => r.idx === b.idx)
-            ? { ...b, status: 'retrying', recovery_dispatched_at: new Date().toISOString() }
-            : b);
-          await supabaseAdmin.from('meli_print_queue_v2').update({ batches: patched as any } as any).eq('id', job_id);
-          for (const batch of retryCandidates) {
-            // @ts-ignore - EdgeRuntime global
-            EdgeRuntime.waitUntil(triggerBatchRetry(supabaseUrl, serviceKey, job_id, batch.idx));
-          }
+      if (st.status === 'processando') {
+        // Marcação atômica (mesmo advisory lock de labeltest_complete_batch),
+        // com idade avaliada por lote (started_at / recovery_dispatched_at).
+        const { data: staleIdx, error: staleErr } = await supabaseAdmin.rpc('labeltest_mark_stale_batches', { p_job_id: job_id, p_stale_seconds: 60 });
+        if (staleErr) console.warn('[status-v2] mark stale failed:', staleErr.message);
+        for (const idx of (Array.isArray(staleIdx) ? staleIdx : []) as number[]) {
+          // @ts-ignore - EdgeRuntime global
+          EdgeRuntime.waitUntil(triggerBatchRetry(supabaseUrl, serviceKey, job_id, idx));
         }
       }
 

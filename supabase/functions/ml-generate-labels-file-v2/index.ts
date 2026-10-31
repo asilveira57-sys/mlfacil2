@@ -2,9 +2,14 @@
 // Chamado UMA vez, quando o status vira terminal com has_file=true.
 // Lê do Storage (file_url); para jobs antigos/legados, cai em pdf_base64/zpl_content.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { downloadFile } from "../_shared/print-labels-storage.ts";
 import { uint8ToBase64 } from "../_shared/labeltest-render.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

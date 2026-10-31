@@ -319,8 +319,18 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
                 headers,
                 body: { job_id: jobId },
               });
-              if (fileErr || !file) console.error('[V2] file fetch error:', fileErr);
-              handleGenerationComplete({ ...data, ...(file || {}) }, format);
+              if (fileErr || !file) {
+                console.error('[V2] file fetch error:', fileErr);
+                toast({
+                  title: 'Arquivo não baixado',
+                  description: 'As etiquetas foram geradas, mas o arquivo não pôde ser baixado. Tente novamente pelo botão "Baixar novamente" no histórico.',
+                  variant: 'destructive',
+                });
+                // Job concluído no servidor: o arquivo segue disponível no histórico.
+                finalizeJob(status);
+              } else {
+                handleGenerationComplete({ ...data, ...file }, format);
+              }
             } else {
               finalizeJob(status as any);
             }

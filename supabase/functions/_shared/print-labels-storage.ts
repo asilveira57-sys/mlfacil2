@@ -42,10 +42,15 @@ export async function removeFiles(supabaseAdmin: any, paths: string[]) {
 // anteriores deste seller e limpa file_url (a linha fica no histórico).
 export async function enforceLatestOnly(supabaseAdmin: any, sellerId: string, keepJobId: string) {
   try {
+    // Retenção = último arquivo por USUÁRIO naquele vendedor (titular e colaborador não se apagam).
+    const { data: keep } = await supabaseAdmin
+      .from('meli_print_queue_v2').select('user_id').eq('id', keepJobId).maybeSingle();
+    if (!keep?.user_id) return;
     const { data: old } = await supabaseAdmin
       .from('meli_print_queue_v2')
       .select('id, file_url')
       .eq('seller_id', sellerId)
+      .eq('user_id', keep.user_id)
       .not('file_url', 'is', null)
       .neq('id', keepJobId);
     const rows = (old || []) as { id: string; file_url: string }[];
