@@ -242,6 +242,7 @@ serve(async (req) => {
         total_pages: job.total_pages,
         error_log: job.error_log,
         per_shipment_log: job.per_shipment_log,
+        has_file: !!(job.file_url || job.pdf_base64 || job.zpl_content),
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
