@@ -327,7 +327,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
                   variant: 'destructive',
                 });
                 // Job concluído no servidor: o arquivo segue disponível no histórico.
-                finalizeJob(status === 'erro' ? 'error' : status === 'parcial' ? 'partial' : 'completed');
+                finalizeJob(status);
               } else {
                 handleGenerationComplete({ ...data, ...file }, format);
               }
