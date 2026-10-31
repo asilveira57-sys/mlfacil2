@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isLegacyPayload } from "../_shared/print-labels-storage.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -73,6 +74,79 @@ serve(async (req) => {
       );
     }
 
+    // Caminho novo (padrão): status leve calculado no banco, sem batches/PDF/log.
+    // LABELS_LEGACY_PAYLOAD=1 → cai no caminho antigo abaixo (sem redeploy).
+    if (!isLegacyPayload()) {
+      const { data: rows, error: stErr } = await supabaseAdmin.rpc('labels_v2_job_status', { p_job_id: job_id, p_user_id: user.id });
+      if (stErr) {
+        console.error('[status-v2] DB error:', stErr);
+        return new Response(
+          JSON.stringify({ error: 'DB error', detail: stErr.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      const st: any = Array.isArray(rows) ? rows[0] : rows;
+      if (!st) {
+        return new Response(
+          JSON.stringify({ error: 'Job not found', job_id }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const nowMs = Date.now();
+      const startedMs = st.job_started_at ? new Date(st.job_started_at).getTime() : nowMs;
+      if (st.status === 'processando' && nowMs - startedMs > 60_000) {
+        // Só aqui lemos o array (pequeno: apenas metadados por lote)
+        const { data: jb } = await supabaseAdmin.from('meli_print_queue_v2').select('batches').eq('id', job_id).maybeSingle();
+        const bs: any[] = Array.isArray(jb?.batches) ? jb!.batches : [];
+        const retryCandidates = bs.filter((b: any) => {
+          if (['success', 'error'].includes(b?.status)) return false;
+          const lastRecoveryAt = b?.recovery_dispatched_at ? new Date(b.recovery_dispatched_at).getTime() : 0;
+          return !lastRecoveryAt || nowMs - lastRecoveryAt > 60_000;
+        });
+        if (retryCandidates.length > 0) {
+          const patched = bs.map((b: any) => retryCandidates.some((r: any) => r.idx === b.idx)
+            ? { ...b, status: 'retrying', recovery_dispatched_at: new Date().toISOString() }
+            : b);
+          await supabaseAdmin.from('meli_print_queue_v2').update({ batches: patched as any } as any).eq('id', job_id);
+          for (const batch of retryCandidates) {
+            // @ts-ignore - EdgeRuntime global
+            EdgeRuntime.waitUntil(triggerBatchRetry(supabaseUrl, serviceKey, job_id, batch.idx));
+          }
+        }
+      }
+
+      const errs = Array.isArray(st.errors) ? st.errors : [];
+      return new Response(
+        JSON.stringify({
+          job_id: st.job_id,
+          status: mapStatus(st.status),
+          raw_status: st.status,
+          format: st.format,
+          layout: st.layout,
+          total_labels: st.total_labels,
+          processed_labels: st.processed_labels,
+          total_batches: st.total_batches || 1,
+          completed_batches: st.completed_batches,
+          error_batches: st.error_batches,
+          processing_batches: st.processing_batches,
+          started_at: st.job_started_at,
+          completed_at: st.job_completed_at,
+          success_count: st.success_count > 0 ? st.success_count : st.processed_labels,
+          error_count: errs.length,
+          errors: errs,
+          download_filename: st.download_filename,
+          page_width_mm: st.page_width_mm,
+          page_height_mm: st.page_height_mm,
+          total_pages: st.total_pages,
+          error_log: st.error_log,
+          has_file: !!st.has_file,
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ─── LEGADO (LABELS_LEGACY_PAYLOAD=1) ───────────────────────────────
     const { data: job, error: jobError } = await supabaseAdmin
       .from('meli_print_queue_v2')
       .select('id, user_id, status, format, layout, total_labels, processed_labels, batches, job_started_at, job_completed_at, file_url, zpl_content, pdf_base64, download_filename, page_width_mm, page_height_mm, total_pages, error_log, per_shipment_log')
