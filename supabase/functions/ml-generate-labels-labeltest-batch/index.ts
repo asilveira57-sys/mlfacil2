@@ -116,7 +116,7 @@ serve(async (req) => {
     console.log(`[labeltest-batch] start job=${jobId} batch=${batchIdx}`);
 
     // Carrega job
-    const { data: job, error: jobErr } = await supabaseAdmin.from('meli_print_queue_v2').select('*').eq('id', jobId).maybeSingle();
+    const { data: job, error: jobErr } = await supabaseAdmin.from('meli_print_queue_v2').select('id, user_id, seller_id, layout, batches').eq('id', jobId).maybeSingle();
     if (jobErr || !job) {
       console.error(`[labeltest-batch] job not found ${jobId}:`, jobErr);
       return new Response(JSON.stringify({ error: 'Job not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
