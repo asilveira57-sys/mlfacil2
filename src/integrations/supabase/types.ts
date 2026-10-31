@@ -22046,6 +22046,31 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      labels_v2_job_status: {
+        Args: { p_job_id: string; p_user_id: string }
+        Returns: {
+          completed_batches: number
+          download_filename: string
+          error_batches: number
+          error_log: string
+          errors: Json
+          format: string
+          has_file: boolean
+          job_completed_at: string
+          job_id: string
+          job_started_at: string
+          layout: string
+          page_height_mm: number
+          page_width_mm: number
+          processed_labels: number
+          processing_batches: number
+          status: string
+          success_count: number
+          total_batches: number
+          total_labels: number
+          total_pages: number
+        }[]
+      }
       labeltest_complete_batch: {
         Args: {
           p_batch_index: number
@@ -22056,10 +22081,9 @@ export type Database = {
         }
         Returns: {
           all_done: boolean
-          batches: Json
           job_started_at: string
           layout: string
-          processed_labels: number
+          processed: number
           total_labels: number
         }[]
       }
