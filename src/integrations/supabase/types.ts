@@ -22087,6 +22087,10 @@ export type Database = {
           total_labels: number
         }[]
       }
+      labeltest_mark_stale_batches: {
+        Args: { p_job_id: string; p_stale_seconds?: number }
+        Returns: number[]
+      }
       log_admin_action: {
         Args: {
           p_action_type: string

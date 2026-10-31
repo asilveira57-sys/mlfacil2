@@ -8,6 +8,13 @@
       "when": 1793459815809,
       "tag": "0000_labels_v2_storage_and_light_status",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793460860755,
+      "tag": "0001_labeltest_mark_stale_batches",
+      "breakpoints": true
     }
   ]
 }
