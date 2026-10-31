@@ -2,7 +2,11 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CheckCircle, XCircle, Clock, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle, XCircle, Clock, Loader2, Download } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import { PrintJobV2 } from '@/hooks/useShippingLabelsV2';
 
 interface PrintHistoryV2Props {
@@ -19,6 +23,30 @@ const STATUS_MAP: Record<string, { label: string; icon: typeof CheckCircle; colo
 };
 
 export function PrintHistoryV2({ jobs, isLoading }: PrintHistoryV2Props) {
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleRedownload = async (job: PrintJobV2) => {
+    if (!job.file_url) return;
+    setDownloadingId(job.id);
+    try {
+      const { data, error } = await supabase.storage.from('print-labels').download(job.file_url);
+      if (error || !data) throw error || new Error('empty');
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = job.download_filename || `etiquetas.${job.format === 'zpl' ? 'zpl' : 'pdf'}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      console.error('[PrintHistoryV2] redownload error:', e);
+      toast.error('Não foi possível baixar o arquivo. Ele pode ter sido substituído por uma geração mais recente.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -47,6 +75,7 @@ export function PrintHistoryV2({ jobs, isLoading }: PrintHistoryV2Props) {
             <TableHead>Tamanho</TableHead>
             <TableHead>Duração</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Arquivo</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -87,6 +116,24 @@ export function PrintHistoryV2({ jobs, isLoading }: PrintHistoryV2Props) {
                     <p className="text-xs text-red-500 mt-1 max-w-[200px] truncate" title={job.error_log}>
                       {job.error_log}
                     </p>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {job.file_url ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={downloadingId === job.id}
+                      onClick={() => handleRedownload(job)}
+                    >
+                      {downloadingId === job.id
+                        ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        : <Download className="h-3.5 w-3.5 mr-1" />}
+                      Baixar novamente
+                    </Button>
+                  ) : (
+                    <span className="text-muted-foreground">–</span>
                   )}
                 </TableCell>
               </TableRow>

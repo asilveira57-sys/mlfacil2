@@ -1,0 +1,1 @@
+- Label V2 file content (PDF/ZPL) lives in the private `print-labels` Storage bucket; `meli_print_queue_v2` keeps only paths/metadata and one file per seller — keeps rows tiny and stops polling from moving MBs. `LABELS_LEGACY_PAYLOAD=1` restores the old in-DB behavior.

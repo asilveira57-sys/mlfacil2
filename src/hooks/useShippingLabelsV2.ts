@@ -114,6 +114,8 @@ export interface PrintJobV2 {
   total_pages: number | null;
   error_log: string | null;
   download_filename: string | null;
+  /** Caminho no bucket print-labels — só o job mais recente do vendedor tem arquivo. */
+  file_url: string | null;
   duration_ms: number | null;
   created_at: string;
 }
@@ -305,14 +307,20 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
 
           if (isTerminalStatus(status)) {
             logRecovery('terminal', { status, seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
-            // V2 grava pdf_base64 (não file_url). Se houver QUALQUER artefato baixável,
-            // dispara o download — mesmo que o usuário tenha navegado durante a geração.
-            const hasArtifact =
+            // Status agora é leve: o arquivo vem de ml-generate-labels-file-v2 (uma vez só).
+            // Modo legado (LABELS_LEGACY_PAYLOAD=1) ainda pode trazer o conteúdo inline.
+            const inlineArtifact =
               (typeof data.pdf_base64 === 'string' && data.pdf_base64.length > 100) ||
-              (typeof data.zpl_content === 'string' && data.zpl_content.length > 10) ||
-              !!data.file_url;
-            if (hasArtifact) {
+              (typeof data.zpl_content === 'string' && data.zpl_content.length > 10);
+            if (inlineArtifact) {
               handleGenerationComplete(data, format);
+            } else if (data.has_file) {
+              const { data: file, error: fileErr } = await supabase.functions.invoke('ml-generate-labels-file-v2', {
+                headers,
+                body: { job_id: jobId },
+              });
+              if (fileErr || !file) console.error('[V2] file fetch error:', fileErr);
+              handleGenerationComplete({ ...data, ...(file || {}) }, format);
             } else {
               finalizeJob(status as any);
             }

@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793459815809,
+      "tag": "0000_labels_v2_storage_and_light_status",
+      "breakpoints": true
+    }
+  ]
+}

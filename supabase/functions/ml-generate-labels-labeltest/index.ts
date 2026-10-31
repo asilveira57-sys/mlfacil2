@@ -13,6 +13,7 @@ import {
   LAYOUTS, hashCode, validateZpl, splitZplBlocks, distributeZplBlocks, distributeZplBlocksSafe,
   fetchZplBatchFromMl, sleep,
 } from "../_shared/labeltest-render.ts";
+import { isLegacyPayload, finalPath, uploadFile, enforceLatestOnly } from "../_shared/print-labels-storage.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -274,19 +275,32 @@ serve(async (req) => {
       }
       const finalZplContent = zplParts.join('\n');
 
-      // Persiste job já concluído (para histórico)
+      // Persiste job já concluído (para histórico).
+      // Padrão: conteúdo no Storage (file_url). LABELS_LEGACY_PAYLOAD=1 → zpl_content no banco.
+      const legacy = isLegacyPayload();
       const { data: job } = await supabaseAdmin.from('meli_print_queue_v2').insert({
         user_id: user.id, seller_id, format, layout, shipment_ids: validIds,
         total_labels: validIds.length, processed_labels: totalSuccess,
         status: totalSuccess === validIds.length ? 'concluido' : totalSuccess > 0 ? 'parcial' : 'erro',
         page_width_mm: layoutInfo.widthMm, page_height_mm: layoutInfo.heightMm,
         download_filename: downloadFilename, total_pages: totalPages,
-        zpl_content: finalZplContent,
+        zpl_content: legacy ? finalZplContent : null,
         per_shipment_log: perShipmentLog as any,
         job_started_at: new Date(t0).toISOString(),
         job_completed_at: new Date().toISOString(),
         module: 'labeltest', batches: [] as any,
       } as any).select('id').single();
+
+      if (!legacy && job?.id && totalSuccess > 0 && finalZplContent) {
+        try {
+          const path = finalPath(user.id, seller_id, job.id, 'zpl');
+          await uploadFile(supabaseAdmin, path, finalZplContent, 'text/plain');
+          await supabaseAdmin.from('meli_print_queue_v2').update({ file_url: path } as any).eq('id', job.id);
+          await enforceLatestOnly(supabaseAdmin, seller_id, job.id);
+        } catch (e: any) {
+          console.error(`[labeltest-dispatcher] ZPL storage upload failed job=${job.id}:`, e?.message || e);
+        }
+      }
 
       return respond(true, {
         data: {
