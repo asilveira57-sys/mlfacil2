@@ -114,6 +114,8 @@ export interface PrintJobV2 {
   total_pages: number | null;
   error_log: string | null;
   download_filename: string | null;
+  /** Caminho no bucket print-labels — só o job mais recente do vendedor tem arquivo. */
+  file_url: string | null;
   duration_ms: number | null;
   created_at: string;
 }
