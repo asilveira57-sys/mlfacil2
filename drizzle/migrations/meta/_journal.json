@@ -15,6 +15,13 @@
       "when": 1793460860755,
       "tag": "0001_labeltest_mark_stale_batches",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793631676273,
+      "tag": "0002_webhook_events_pending_partial_index",
+      "breakpoints": true
     }
   ]
 }
