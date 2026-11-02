@@ -313,6 +313,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
 
           if (isTerminalStatus(status)) {
             logRecovery('terminal', { status, seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
+            // Captura antes de handleGenerationComplete/finalizeJob (ambos limpam o localStorage).
+            const printedIds = loadActiveJob()?.shipmentIds ?? [];
             // Status agora é leve: o arquivo vem de ml-generate-labels-file-v2 (uma vez só).
             // Modo legado (LABELS_LEGACY_PAYLOAD=1) ainda pode trazer o conteúdo inline.
             const inlineArtifact =
@@ -353,6 +355,9 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
                 finalizeJob(status as any);
               }
             }
+            if (status !== 'error' && status !== 'failed' && status !== 'cancelled') {
+              resyncPrintedShipments(printedIds);
+            }
             return;
           }
 
@@ -367,6 +372,26 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       // Libera o slot de polling — permite resume futuro sem race.
       if (activePollJobIdRef.current === jobId) activePollJobIdRef.current = null;
     }
+  }
+
+  function resyncPrintedShipments(shipmentIds: string[]) {
+    if (!sellerId || shipmentIds.length === 0) return;
+    void (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return;
+        for (let i = 0; i < shipmentIds.length; i += SHIPMENT_SYNC_BATCH) {
+          const batch = shipmentIds.slice(i, i + SHIPMENT_SYNC_BATCH);
+          const r = await supabase.functions.invoke('ml-sync-shipments', {
+            headers, body: { seller_id: sellerId, shipment_ids: batch },
+          });
+          if (r.data?.job_id) await waitForJob(r.data.job_id, true);
+        }
+        queryClient.invalidateQueries({ queryKey: ['shipping-orders-v2'] });
+      } catch (e) {
+        console.warn('[V2] resync pós-impressão falhou:', e);
+      }
+    })();
   }
 
   function handleGenerationComplete(data: any, format: string) {
@@ -657,7 +682,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       const orderIds = allOrders.map(o => o.order_id);
       const allShipmentIds = [...new Set(allOrders.map(o => o.shipment_id).filter(Boolean))] as string[];
       const existingSet = new Set<string>();
-      for (let i = 0; i < allShipmentIds.length; i += 200) { const batch = allShipmentIds.slice(i, i + 200); const { data: ex } = await supabase.from('meli_shipments_cache').select('shipment_id').eq('seller_id', sellerId).in('shipment_id', batch); (ex || []).forEach((s: any) => existingSet.add(s.shipment_id)); }
+      for (let i = 0; i < allShipmentIds.length; i += 200) { const batch = allShipmentIds.slice(i, i + 200); const { data: ex, error: exErr } = await supabase.from('meli_shipments_cache').select('shipment_id').eq('seller_id', sellerId).in('shipment_id', batch); if (exErr) console.warn('[V2 sync] shipment lookup batch failed:', exErr.message); (ex || []).forEach((s: any) => existingSet.add(s.shipment_id)); }
       const missing = allShipmentIds.filter(id => !existingSet.has(id));
       if (missing.length > 0) { for (let i = 0; i < missing.length; i += SHIPMENT_SYNC_BATCH) { const batch = missing.slice(i, i + SHIPMENT_SYNC_BATCH); if (!silent) setSyncProgress(`Envios ${Math.floor(i / SHIPMENT_SYNC_BATCH) + 1}/${Math.ceil(missing.length / SHIPMENT_SYNC_BATCH)}`); const r = await supabase.functions.invoke('ml-sync-shipments', { headers, body: { seller_id: sellerId, shipment_ids: batch } }); if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED'); if (r.data?.job_id) await waitForJob(r.data.job_id, silent); if (i + SHIPMENT_SYNC_BATCH < missing.length) await sleep(500); } }
       if (!silent) setSyncProgress('Atualizando status...');
@@ -665,7 +690,41 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       const activeIds = (active || []).map((s: any) => s.shipment_id);
       if (activeIds.length > 0) { for (let i = 0; i < activeIds.length; i += SHIPMENT_SYNC_BATCH) { const batch = activeIds.slice(i, i + SHIPMENT_SYNC_BATCH); const r = await supabase.functions.invoke('ml-sync-shipments', { headers, body: { seller_id: sellerId, shipment_ids: batch } }); if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED'); if (r.data?.job_id) await waitForJob(r.data.job_id, silent); } }
       if (!silent) { setSyncPhase('invoices'); setSyncProgress('Sincronizando NFs...'); }
-      if (orderIds.length > 0) { const { data: exInv } = await supabase.from('meli_invoices_cache').select('order_id').eq('seller_id', sellerId).in('order_id', orderIds); const invoiced = new Set((exInv || []).map((i: any) => i.order_id)); const pending = orderIds.filter(id => !invoiced.has(id)); if (pending.length > 0) { for (let i = 0; i < pending.length; i += INVOICE_SYNC_BATCH) { const batch = pending.slice(i, i + INVOICE_SYNC_BATCH); const r = await supabase.functions.invoke('ml-sync-invoices', { headers, body: { seller_id: sellerId, order_ids: batch } }); if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED'); if (r.data?.job_id) await waitForJob(r.data.job_id, silent); } } }
+      if (orderIds.length > 0) {
+        const invoiced = new Set<string>();
+        let lookupFailed = false;
+        for (let i = 0; i < orderIds.length; i += 500) {
+          const batch = orderIds.slice(i, i + 500);
+          const { data: exInv, error: invErr } = await supabase
+            .from('meli_invoices_cache')
+            .select('order_id')
+            .eq('seller_id', sellerId)
+            .in('order_id', batch);
+          if (invErr) {
+            console.warn('[V2 sync] invoice lookup batch failed:', invErr.message);
+            lookupFailed = true;
+            // Não assume que faltam NFs: marca como já conhecidos para não
+            // disparar milhares de buscas desnecessárias no Mercado Livre.
+            batch.forEach(id => invoiced.add(id));
+            continue;
+          }
+          (exInv || []).forEach((r: any) => invoiced.add(r.order_id));
+        }
+        if (lookupFailed && !silent) {
+          console.warn('[V2 sync] verificação de NF incompleta — algumas notas podem demorar a aparecer');
+        }
+        const pending = orderIds.filter(id => !invoiced.has(id));
+        if (pending.length > 0) {
+          const totalBatches = Math.ceil(pending.length / INVOICE_SYNC_BATCH);
+          for (let i = 0; i < pending.length; i += INVOICE_SYNC_BATCH) {
+            const batch = pending.slice(i, i + INVOICE_SYNC_BATCH);
+            if (!silent) setSyncProgress(`NFs ${Math.floor(i / INVOICE_SYNC_BATCH) + 1}/${totalBatches}`);
+            const r = await supabase.functions.invoke('ml-sync-invoices', { headers, body: { seller_id: sellerId, order_ids: batch } });
+            if (isTrialExpiredResponse(r)) throw new Error('TRIAL_EXPIRED');
+            if (r.data?.job_id) await waitForJob(r.data.job_id, silent);
+          }
+        }
+      }
       {
         const nowIso = new Date().toISOString();
         setLastSyncAt(nowIso);
