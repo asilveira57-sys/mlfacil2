@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_webhook_events_pending_user_received ON public.webhook_events (ml_user_id, received_at) WHERE status = 'pending';

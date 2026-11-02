@@ -22,6 +22,13 @@
       "when": 1793631676273,
       "tag": "0002_webhook_events_pending_partial_index",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793631827737,
+      "tag": "0003_webhook_events_pending_user_index",
+      "breakpoints": true
     }
   ]
 }
