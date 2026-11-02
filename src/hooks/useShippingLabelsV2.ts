@@ -197,9 +197,15 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     }
 
     // If we already had completed data cached, use it directly
-    if (persisted.completedData) {
-      logRecovery('cached-data', { seller_id: sellerId, job_id: persisted.jobId, msg: 'Using cached completed data' });
-      handleGenerationComplete(persisted.completedData, persisted.format);
+    const cached: any = persisted.completedData;
+    const cachedUsable = !!cached && (
+      (typeof cached.pdf_base64 === 'string' && cached.pdf_base64.length > 100) ||
+      (typeof cached.zpl_content === 'string' && cached.zpl_content.length > 10) ||
+      typeof cached.signed_url === 'string'
+    );
+    if (cachedUsable) {
+      logRecovery('cached-data', { seller_id: sellerId, job_id: persisted.jobId });
+      handleGenerationComplete(cached, persisted.format);
       return;
     }
 
@@ -216,7 +222,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     activePollJobIdRef.current = persisted.jobId;
     pollJobUntilDone(persisted.jobId, persisted.format, abort.signal);
 
-    return () => { abort.abort(); activePollJobIdRef.current = null; };
+    return () => { activePollJobIdRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerId]);
 
@@ -319,7 +325,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
                 headers,
                 body: { job_id: jobId },
               });
-              if (fileErr || !file) {
+              if (fileErr || !(file?.signed_url || file?.pdf_base64 || file?.zpl_content)) {
                 console.error('[V2] file fetch error:', fileErr);
                 toast({
                   title: 'Arquivo não baixado',
@@ -332,7 +338,20 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
                 handleGenerationComplete({ ...data, ...file }, format);
               }
             } else {
-              finalizeJob(status as any);
+              // Terminal sem has_file: tenta o endpoint de arquivo uma vez
+              // (cobre a janela entre o UPDATE do job e a leitura do status).
+              const { data: file } = await supabase.functions.invoke('ml-generate-labels-file-v2', {
+                headers, body: { job_id: jobId },
+              });
+              if (file && (file.signed_url || file.pdf_base64 || file.zpl_content)) {
+                handleGenerationComplete({ ...data, ...file }, format);
+              } else {
+                sonnerToast.error(
+                  'As etiquetas foram geradas mas o arquivo não ficou disponível. Abra o Histórico e use "Baixar novamente".',
+                  { duration: 10000 },
+                );
+                finalizeJob(status as any);
+              }
             }
             return;
           }
@@ -388,7 +407,10 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     const hasPdf = format === 'pdf' && typeof data.pdf_base64 === 'string' && data.pdf_base64.length > 100;
     const hasZpl = format === 'zpl' && typeof data.zpl_content === 'string' && data.zpl_content.length > 10;
 
-    if (hasPdf) {
+    if (typeof data.signed_url === 'string' && data.signed_url.length > 0) {
+      triggerUrlDownload(data.signed_url, data.download_filename);
+      toast({ title: 'Etiquetas prontas', description: `${labelCount} etiqueta(s)` });
+    } else if (hasPdf) {
       downloadPdf(data.pdf_base64, data.download_filename);
       toast({ title: 'PDF gerado (V2)', description: `${labelCount} etiqueta(s) — ${data.page_width_mm || 100}x${data.page_height_mm || 150}mm` });
     } else if (hasZpl) {
@@ -414,6 +436,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     }
 
     queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
+    queryClient.invalidateQueries({ queryKey: ['shipping-orders-v2'] });
     setTimeout(() => setGenerationProgress(INITIAL_PROGRESS), 3000);
   }
 
@@ -427,7 +450,18 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       toast({ title: 'Erro na geração', description: 'Job não concluiu com sucesso.', variant: 'destructive' });
     }
     queryClient.invalidateQueries({ queryKey: ['print-history-v2'] });
+    queryClient.invalidateQueries({ queryKey: ['shipping-orders-v2'] });
     setTimeout(() => setGenerationProgress(INITIAL_PROGRESS), 3000);
+  }
+
+  function triggerUrlDownload(url: string, filename?: string) {
+    const a = document.createElement('a');
+    a.href = url;
+    if (filename) a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { try { document.body.removeChild(a); } catch { /* noop */ } }, 0);
   }
 
   function downloadPdf(base64: string, filename?: string) {
@@ -439,8 +473,12 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     const a = document.createElement('a');
     a.href = url;
     a.download = filename || `etiquetas_v2_${Date.now()}.pdf`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      try { document.body.removeChild(a); } catch { /* noop */ }
+      URL.revokeObjectURL(url);
+    }, 10_000);
   }
 
   function downloadZpl(content: string, filename?: string) {
@@ -449,8 +487,12 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
     const a = document.createElement('a');
     a.href = url;
     a.download = filename || `etiquetas_v2_${Date.now()}.zpl`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      try { document.body.removeChild(a); } catch { /* noop */ }
+      URL.revokeObjectURL(url);
+    }, 10_000);
   }
 
   // ─── Date range ────────────────────────────────────────────────────
@@ -517,8 +559,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       };
     },
     enabled: !!sellerId,
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: !hasActiveJob,
     refetchOnMount: !hasActiveJob,
     refetchOnReconnect: !hasActiveJob,
     placeholderData: (prev: any) => prev,
@@ -731,7 +773,11 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         jobEntry.jobId = resultData.job_id;
         dbg('[generate] real jobId=', resultData.job_id);
       }
-      jobEntry.completedData = resultData;
+      const hasInlineArtifact =
+        (typeof resultData?.pdf_base64 === 'string' && resultData.pdf_base64.length > 100) ||
+        (typeof resultData?.zpl_content === 'string' && resultData.zpl_content.length > 10);
+      if (hasInlineArtifact) jobEntry.completedData = resultData;
+      else delete jobEntry.completedData;
       saveActiveJob(jobEntry);
 
       return resultData;
@@ -746,6 +792,7 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
         const job = loadActiveJob();
         if (job) {
           job.jobId = data.job_id;
+          delete job.completedData;
           saveActiveJob(job);
           setActiveJobState({ ...job });
         }
