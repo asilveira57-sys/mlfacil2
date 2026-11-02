@@ -2,8 +2,7 @@
 // Chamado UMA vez, quando o status vira terminal com has_file=true.
 // Lê do Storage (file_url); para jobs antigos/legados, cai em pdf_base64/zpl_content.
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { downloadFile } from "../_shared/print-labels-storage.ts";
-import { uint8ToBase64 } from "../_shared/labeltest-render.ts";
+import { PRINT_LABELS_BUCKET } from "../_shared/print-labels-storage.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,9 +38,16 @@ Deno.serve(async (req) => {
     const base = { job_id: job.id, format: job.format, download_filename: job.download_filename };
 
     if (job.file_url) {
-      const bytes = await downloadFile(supabaseAdmin, job.file_url);
-      if (job.format === 'zpl') return json({ ...base, zpl_content: new TextDecoder().decode(bytes) });
-      return json({ ...base, pdf_base64: uint8ToBase64(bytes) });
+      const filename = job.download_filename
+        || `etiquetas_${job.id}.${job.format === 'zpl' ? 'zpl' : 'pdf'}`;
+      const { data: signed, error: signErr } = await supabaseAdmin
+        .storage.from(PRINT_LABELS_BUCKET)
+        .createSignedUrl(job.file_url, 600, { download: filename });
+      if (signErr || !signed?.signedUrl) {
+        console.error('[file-v2] sign failed:', signErr);
+        return json({ error: 'Não foi possível gerar o link do arquivo', detail: signErr?.message }, 500);
+      }
+      return json({ ...base, signed_url: signed.signedUrl, download_filename: filename });
     }
 
     // Fallback: jobs gravados no modo legado
