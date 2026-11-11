@@ -145,7 +145,6 @@ const Lgpd = lazyRetry(() => import("./pages/Lgpd"));
 const SocialCalendar = lazyRetry(() => import("./pages/SocialCalendar"));
 const ConsultantLibrary = lazyRetry(() => import("./pages/ConsultantLibrary"));
 const PublicTipPage = lazyRetry(() => import("./pages/PublicTipPage"));
-const ClonarAnuncio = lazyRetry(() => import("./pages/ClonarAnuncio"));
 const AjustePreco = lazyRetry(() => import("./pages/AjustePreco"));
 const Atacado = lazyRetry(() => import("./pages/Atacado"));
 const SystemStatus = lazyRetry(() => import("./pages/SystemStatus"));
@@ -311,7 +310,7 @@ const App = () => {
                   <Route path="/anuncios/linha-do-tempo" element={<AdTimelineRadar />} />
                   <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
                   <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
-                  <Route path="/anuncios/clonar" element={<ClonarAnuncio />} />
+                  <Route path="/anuncios/clonar" element={<Navigate to="/inicio" replace />} />
                   <Route path="/ajuste-preco" element={<AjustePreco />} />
                   <Route path="/atacado" element={<Atacado />} />
                   <Route path="/seed" element={<Seed />} />
