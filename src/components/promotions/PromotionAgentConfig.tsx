@@ -264,7 +264,7 @@ export function PromotionAgentConfig({ open, onOpenChange, workspaceId, sellerId
                       <div>
                         <Label className="text-sm font-medium">Ativar Agente</Label>
                         <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Adere automaticamente a campanhas elegíveis
+                          Sugere adesões para você confirmar
                         </p>
                       </div>
                       <Switch checked={isEnabled} onCheckedChange={v => updateField('is_enabled', v)} />

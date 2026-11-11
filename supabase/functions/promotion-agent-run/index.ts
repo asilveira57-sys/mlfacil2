@@ -244,6 +244,58 @@ Deno.serve(async (req) => {
 
     log('Evaluation complete', { approved: approved.length, skipped: skipped.length });
 
+    // Non-manual runs: suggest only, never adhere automatically
+    if (triggeredBy !== 'manual') {
+      const suggested = approved.map(({ candidate, promo }) => ({
+        item_id: candidate.item_id,
+        promotion_id: promo.promotion_id,
+        promotion_name: promo.promotion_name,
+        promotion_type: promo.promotion_type,
+        promo_price: candidate.promo_price,
+        original_price: candidate.original_price,
+      }));
+
+      const suggestedPromotions = new Set(approved.map(a => a.promo.promotion_id)).size;
+      await insertLog(supabase, workspaceId, sellerId, runId, triggeredBy, suggestedPromotions, 0, 0, skipped.length, {
+        reason: 'suggested_pending_confirmation',
+        suggested,
+        skipped,
+        duration_ms: Date.now() - startTime,
+      });
+
+      if (approved.length > 0) {
+        // target_seller_id MUST be set — this is a per-seller notification, never global
+        const targetSellerId = sellerId;
+        if (!targetSellerId) {
+          log('ERROR: sellerId is empty, skipping announcement to prevent global leak');
+        } else {
+          try {
+            const { error: annErr } = await supabase.from('mktpfacil_announcements').insert({
+              title: `🤖 Agente encontrou ${approved.length} produto(s) elegíveis para promoção`,
+              content: 'Revise e confirme em Promoções',
+              priority: 1,
+              is_active: true,
+              plan_target: 'all',
+              target_seller_id: targetSellerId,
+              published_at: new Date().toISOString(),
+            });
+            if (annErr) {
+              log('Failed to create notification: ' + JSON.stringify(annErr));
+            } else {
+              log(`Suggestion notification created for seller ${targetSellerId}`);
+            }
+          } catch (err) {
+            log('Failed to create notification', String(err));
+          }
+        }
+      }
+
+      return new Response(JSON.stringify({
+        ok: true,
+        data: { items_adhered: 0, items_suggested: approved.length, items_skipped: skipped.length, reason: 'suggested_pending_confirmation' },
+      }), { headers: corsHeaders });
+    }
+
     // Execute adhesion for approved items
     let adhered = 0;
     let failed = 0;
