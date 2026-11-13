@@ -44,8 +44,13 @@ interface PersistedConfig {
   selectedLabelType: string;
   selectedFullProdutoSubType: string;
   outputFormat: 'pdf_png' | 'pdf_vector';
-  previewImage: string | null;
 }
+
+// URLs de blob só valem enquanto a página está aberta. Guardamos em memória de módulo
+// (sobrevive a remount na navegação interna) e nunca no sessionStorage (morre no reload).
+let lastPreviewUrl: string | null = null;
+
+const PDF_LIB_URL = 'https://esm.sh/pdf-lib@1.17.1';
 
 function loadPersistedConfig(): Partial<PersistedConfig> {
   try {
@@ -65,7 +70,7 @@ export default function ZPLConverter() {
   const [width, setWidth] = useState(persisted.width ?? "105");
   const [height, setHeight] = useState(persisted.height ?? "150");
   const [dpi, setDpi] = useState(persisted.dpi ?? "203");
-  const [previewImage, setPreviewImage] = useState<string | null>(persisted.previewImage ?? null);
+  const [previewImage, setPreviewImage] = useState<string | null>(lastPreviewUrl);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(persisted.uploadedFileName ?? null);
   const [selectedLabelType, setSelectedLabelType] = useState(persisted.selectedLabelType ?? "");
   const [selectedFullProdutoSubType, setSelectedFullProdutoSubType] = useState(
@@ -119,10 +124,11 @@ export default function ZPLConverter() {
       sessionStorage.setItem(CONFIG_STATE_KEY, JSON.stringify({
         zplCode, width, height, dpi, uploadedFileName,
         selectedLabelType, selectedFullProdutoSubType, outputFormat,
-        previewImage,
       } as PersistedConfig));
     } catch { /* quota — silencia */ }
-  }, [zplCode, width, height, dpi, uploadedFileName, selectedLabelType, selectedFullProdutoSubType, outputFormat, previewImage]);
+  }, [zplCode, width, height, dpi, uploadedFileName, selectedLabelType, selectedFullProdutoSubType, outputFormat]);
+
+  useEffect(() => { lastPreviewUrl = previewImage; }, [previewImage]);
 
   // Subscribe ao job singleton (sobrevive a remount: retoma progresso/PDF ao voltar).
   // IMPORTANTE: NÃO disparar auto-download incondicional no mount — isso causava
@@ -215,6 +221,8 @@ export default function ZPLConverter() {
     let currentDelay = 200;
     // Higher scales = larger images = fewer concurrent requests
     const concurrentRequests = scale >= 3 ? 2 : 3;
+    const maxBatchRetries = 5;
+    let batchRetries = 0;
 
     for (let i = 0; i < labels.length; i += concurrentRequests) {
       const batch = labels.slice(i, Math.min(i + concurrentRequests, labels.length));
@@ -233,12 +241,18 @@ export default function ZPLConverter() {
 
         await Promise.all(batchPromises);
 
+        batchRetries = 0;
+
         if (i + concurrentRequests < labels.length) {
           await new Promise((resolve) => setTimeout(resolve, currentDelay));
         }
 
       } catch (error) {
         if (error instanceof Error && error.message.includes('429')) {
+          batchRetries++;
+          if (batchRetries > maxBatchRetries) {
+            throw new Error("O serviço de conversão está recusando as requisições no momento. Tente novamente em alguns minutos.");
+          }
           currentDelay = Math.min(currentDelay * 2, 5000);
           i -= concurrentRequests;
           await new Promise((resolve) => setTimeout(resolve, currentDelay));
@@ -347,36 +361,23 @@ export default function ZPLConverter() {
             const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 1, 'pdf', onProgress);
 
             const previewBlob = await convertSingleLabel(labels[0], widthInches, heightInches, 1, 'png');
-            try { setPreviewImage(URL.createObjectURL(previewBlob)); } catch { /* unmounted */ }
+            lastPreviewUrl = URL.createObjectURL(previewBlob);
+            try { setPreviewImage(lastPreviewUrl); } catch { /* unmounted */ }
 
             if (convertedBlobs.length === 1) {
               outputBlob = convertedBlobs[0];
             } else {
-              const pngBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 3, 'png', onProgress);
-
-              const pdf = new jsPDF({
-                orientation: widthInches > heightInches ? "landscape" : "portrait",
-                unit: "mm",
-                format: [parseFloat(snapWidth), parseFloat(snapHeight)],
-              });
-
-              for (let i = 0; i < pngBlobs.length; i++) {
-                const blob = pngBlobs[i];
-                const reader = new FileReader();
-                await new Promise<void>((resolve, reject) => {
-                  reader.onload = () => {
-                    try {
-                      if (i > 0) pdf.addPage();
-                      pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(snapWidth), parseFloat(snapHeight));
-                      resolve();
-                    } catch (error) { reject(error); }
-                  };
-                  reader.onerror = reject;
-                  reader.readAsDataURL(blob);
-                });
+              // Junta os PDFs vetoriais já gerados em um arquivo só (antes eram descartados
+              // e tudo era convertido de novo em PNG, dobrando chamadas e perdendo o vetor).
+              const { PDFDocument } = await import(/* @vite-ignore */ PDF_LIB_URL);
+              const merged = await PDFDocument.create();
+              for (const blob of convertedBlobs) {
+                const src = await PDFDocument.load(await blob.arrayBuffer());
+                const pages = await merged.copyPages(src, src.getPageIndices());
+                pages.forEach((page: unknown) => merged.addPage(page as never));
               }
-
-              outputBlob = pdf.output('blob');
+              const bytes = await merged.save();
+              outputBlob = new Blob([bytes], { type: 'application/pdf' });
             }
           } else {
             const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, scale, 'png', onProgress);
@@ -403,7 +404,8 @@ export default function ZPLConverter() {
               });
 
               if (i === 0) {
-                try { setPreviewImage(URL.createObjectURL(blob)); } catch { /* unmounted */ }
+                lastPreviewUrl = URL.createObjectURL(blob);
+                try { setPreviewImage(lastPreviewUrl); } catch { /* unmounted */ }
               }
             }
 

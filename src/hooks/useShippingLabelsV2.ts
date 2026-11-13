@@ -302,14 +302,16 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
           const status = data.status as string;
           dbg(`[poll] status=${status}, processed=${data.processed_labels}/${data.total_labels}`);
 
-          setGenerationProgress({
+          // O total de lotes nunca encolhe: no primeiro poll a RPC pode devolver 0
+          // (batches ainda não montado) e o contador piscava "de 1".
+          setGenerationProgress((prev) => ({
             status: isTerminalStatus(status) ? (status === 'completed' ? 'completed' : status === 'partial' ? 'partial' : 'error') : 'processing',
             total_labels: data.total_labels || 0,
             processed_labels: data.processed_labels || 0,
-            total_batches: data.total_batches || 1,
+            total_batches: Math.max(data.total_batches || 0, prev?.total_batches || 0, 1),
             completed_batches: data.completed_batches || 0,
             error_batches: data.error_batches || 0,
-          });
+          }));
 
           if (isTerminalStatus(status)) {
             logRecovery('terminal', { status, seller_id: sellerId, job_id: jobId, elapsed_ms: elapsed });
@@ -603,9 +605,12 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       if (!sellerId || orders.length === 0) return new Map<string, OrderItemSummary[]>();
       const packShipmentIds = orders.filter((o: ShippingOrder) => o.pack_id && o.shipment_id).map((o: ShippingOrder) => o.shipment_id!);
       let allOrderIds = orders.map((o: ShippingOrder) => o.order_id);
+      // Uma consulta só para os pedidos irmãos de pacote; reaproveitada no mapa s2o abaixo.
+      let packSiblings: { order_id: string; shipment_id: string | null }[] = [];
       if (packShipmentIds.length > 0) {
         const { data: siblings } = await supabase.from('meli_orders_cache').select('order_id, shipment_id').eq('seller_id', sellerId).in('shipment_id', packShipmentIds);
-        if (siblings) allOrderIds = [...new Set([...allOrderIds, ...siblings.map((s: any) => s.order_id)])];
+        packSiblings = (siblings || []) as typeof packSiblings;
+        allOrderIds = [...new Set([...allOrderIds, ...packSiblings.map((s) => s.order_id)])];
       }
       const { data: items } = await supabase.from('meli_order_items_cache').select('order_id, item_id, variation_id, variation_attributes, sku, title_short, title, quantity, unit_price, permalink, catalog_product_id, thumbnail').eq('seller_id', sellerId).in('order_id', allOrderIds);
       const rawByOrder = new Map<string, OrderItemSummary[]>();
@@ -616,9 +621,8 @@ export function useShippingLabelsV2({ sellerId }: UseShippingLabelsV2Options) {
       });
       const s2o = new Map<string, string[]>();
       for (const o of orders) { if (o.shipment_id) { const e = s2o.get(o.shipment_id) || []; if (!e.includes(o.order_id)) e.push(o.order_id); s2o.set(o.shipment_id, e); } }
-      if (packShipmentIds.length > 0) {
-        const { data: siblings } = await supabase.from('meli_orders_cache').select('order_id, shipment_id').eq('seller_id', sellerId).in('shipment_id', packShipmentIds);
-        for (const s of (siblings || [])) { if (!s.shipment_id) continue; const e = s2o.get(s.shipment_id) || []; if (!e.includes(s.order_id)) e.push(s.order_id); s2o.set(s.shipment_id, e); }
+      {
+        for (const s of packSiblings) { if (!s.shipment_id) continue; const e = s2o.get(s.shipment_id) || []; if (!e.includes(s.order_id)) e.push(s.order_id); s2o.set(s.shipment_id, e); }
       }
       const result = new Map<string, OrderItemSummary[]>();
       for (const o of orders) {

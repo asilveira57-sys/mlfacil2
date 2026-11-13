@@ -47,6 +47,9 @@ export function LabelGenerationProgress({ progress }: LabelGenerationProgressPro
   const getStatusText = () => {
     switch (progress.status) {
       case 'processing':
+        if (progress.total_batches > 0 && progress.completed_batches >= progress.total_batches) {
+          return 'Montando o arquivo final...';
+        }
         return `Processando lote ${progress.completed_batches + 1} de ${progress.total_batches}...`;
       case 'completed':
         return `${progress.processed_labels} etiqueta(s) gerada(s) com sucesso!`;
