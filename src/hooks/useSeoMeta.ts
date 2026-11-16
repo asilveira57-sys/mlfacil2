@@ -16,8 +16,8 @@ interface SeoMetaData {
 }
 
 const DEFAULT_SEO: SeoMetaData = {
-  meta_title: 'Mktpfacil - Gestão Completa para Vendedores de Marketplace',
-  meta_description: 'Plataforma completa para vendedores de Mercado Livre. Gerencie vendas, etiquetas, anúncios e muito mais.',
+  meta_title: 'MKTP Fácil — Gestão para vendedores do Mercado Livre e Shopee',
+  meta_description: 'Etiquetas, conversor ZPL, precificação, curva ABC, tendências e gestão de anúncios para quem vende no Mercado Livre e na Shopee.',
   meta_keywords: null,
   canonical_url: null,
   og_title: null,
@@ -69,8 +69,11 @@ export function useSeoMeta() {
 
   useEffect(() => {
     if (!seoData) return;
+    // Posts e categorias do blog cuidam do próprio SEO (Blog.tsx)
+    if (pathname.startsWith('/blog/')) return;
 
-    const baseUrl = window.location.origin;
+    // Domínio oficial fixo: evita canonical apontando para *.lovable.app
+    const baseUrl = 'https://www.mktpfacil.com';
 
     // Update title
     document.title = seoData.meta_title || DEFAULT_SEO.meta_title!;
@@ -119,6 +122,7 @@ export function useSeoMeta() {
     if (seoData.og_image) {
       setMeta('og:image', seoData.og_image, true);
     }
+    setMeta('og:image', seoData.og_image || `${baseUrl}/og-image.png`, true);
     setMeta('og:type', 'website', true);
 
     // Twitter cards

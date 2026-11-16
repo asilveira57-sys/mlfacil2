@@ -154,6 +154,7 @@ const CentralDeAjuda = lazyRetry(() => import("./pages/CentralDeAjuda"));
 const CentralDeAjudaArtigo = lazyRetry(() => import("./pages/CentralDeAjudaArtigo"));
 
 // Tools - lazy loaded
+const FerramentasIndex = lazyRetry(() => import("./pages/tools/FerramentasIndex"));
 const ZplViewerTool = lazyRetry(() => import("./pages/tools/ZplViewerTool"));
 const TrendsLiteTool = lazyRetry(() => import("./pages/tools/TrendsLiteTool"));
 const PricingSimulatorTool = lazyRetry(() => import("./pages/tools/PricingSimulatorTool"));
@@ -267,6 +268,7 @@ const App = () => {
                 <Route path="/modulo/:slug" element={<ModuloDetalhe />} />
                 <Route path="/dica/:slug" element={<PublicTipPage />} />
                 {/* Public Tools */}
+                <Route path="/ferramentas" element={<FerramentasIndex />} />
                 <Route path="/ferramentas/zpl" element={<ZplViewerTool />} />
                 <Route path="/ferramentas/tendencias" element={<TrendsLiteTool />} />
                 <Route path="/ferramentas/precificacao" element={<PricingSimulatorTool />} />

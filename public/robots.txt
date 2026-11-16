@@ -12,3 +12,11 @@ Allow: /
 
 User-agent: *
 Allow: /
+
+Disallow: /auth
+Disallow: /reset-password
+Disallow: /criar-acesso
+Disallow: /verificar
+Disallow: /reconnecting
+
+Sitemap: https://www.mktpfacil.com/sitemap.xml

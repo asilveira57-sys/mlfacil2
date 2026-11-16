@@ -6,6 +6,8 @@ import { BlogPostContent } from '@/components/blog/public/BlogPostContent';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { BlogPost, BlogCategory } from '@/types/blog';
+import { ToolsLayout } from '@/pages/tools/ToolsLayout';
+import { supabase } from '@/integrations/supabase/client';
 
 // SEO Head component — injeta title, meta, OG e JSON-LD Article
 const SITE_URL = 'https://www.mktpfacil.com';
@@ -55,7 +57,14 @@ function BlogSEO({ post, category }: { post?: BlogPost | null; category?: BlogCa
       setMeta('meta[property="og:description"]', 'property', 'og:description', desc);
       setMeta('meta[property="og:type"]', 'property', 'og:type', 'article');
       setMeta('meta[property="og:url"]', 'property', 'og:url', url);
-      if (post.imagem_capa) setMeta('meta[property="og:image"]', 'property', 'og:image', post.imagem_capa);
+      setMeta('meta[name="robots"]', 'name', 'robots', 'index, follow');
+      setMeta('meta[name="twitter:title"]', 'name', 'twitter:title', title);
+      setMeta('meta[name="twitter:description"]', 'name', 'twitter:description', desc);
+      if (post.imagem_capa) {
+        setMeta('meta[property="og:image"]', 'property', 'og:image', post.imagem_capa);
+        setMeta('meta[name="twitter:image"]', 'name', 'twitter:image', post.imagem_capa);
+      }
+      if (post.data_publicacao) setMeta('meta[property="article:published_time"]', 'property', 'article:published_time', post.data_publicacao);
       setLink('canonical', url);
       setJsonLd('jsonld-article', {
         '@context': 'https://schema.org',
@@ -66,21 +75,45 @@ function BlogSEO({ post, category }: { post?: BlogPost | null; category?: BlogCa
         datePublished: post.data_publicacao || post.created_at,
         dateModified: post.updated_at,
         author: post.autor ? { '@type': 'Person', name: post.autor } : undefined,
-        publisher: { '@type': 'Organization', name: 'MKTP Fácil' },
+        publisher: {
+          '@type': 'Organization',
+          name: 'MKTP Fácil',
+          logo: { '@type': 'ImageObject', url: `${SITE_URL}/favicon-512.png` },
+        },
         mainEntityOfPage: url,
+        inLanguage: 'pt-BR',
+      });
+      setJsonLd('jsonld-breadcrumb', {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'Início', item: `${SITE_URL}/` },
+          { '@type': 'ListItem', position: 2, name: 'Blog', item: `${SITE_URL}/blog` },
+          ...(post.categoria ? [{ '@type': 'ListItem', position: 3, name: post.categoria.nome, item: `${SITE_URL}/blog/categoria/${post.categoria.slug}` }] : []),
+          { '@type': 'ListItem', position: post.categoria ? 4 : 3, name: post.titulo, item: url },
+        ],
       });
     } else if (category) {
       document.title = `${category.nome} — Blog MKTP Fácil`;
       setMeta('meta[name="description"]', 'name', 'description', category.descricao || `Posts da categoria ${category.nome}`);
+      setMeta('meta[property="og:title"]', 'property', 'og:title', `${category.nome} — Blog MKTP Fácil`);
+      setMeta('meta[property="og:url"]', 'property', 'og:url', `${SITE_URL}/blog/categoria/${category.slug}`);
+      setMeta('meta[name="robots"]', 'name', 'robots', 'index, follow');
       setLink('canonical', `${SITE_URL}/blog/categoria/${category.slug}`);
       setJsonLd('jsonld-article', null);
+      setJsonLd('jsonld-breadcrumb', null);
     } else {
-      document.title = 'Blog — MKTP Fácil';
-      setMeta('meta[name="description"]', 'name', 'description', 'Dicas, estratégias e novidades sobre vendas no Mercado Livre.');
+      document.title = 'Blog MKTP Fácil | Mercado Livre, Shopee, frete e precificação';
+      setMeta('meta[name="description"]', 'name', 'description', 'Dicas práticas para vender mais no Mercado Livre e na Shopee: precificação, taxas, frete, campanhas, reputação e gestão do seu negócio.');
       setLink('canonical', `${SITE_URL}/blog`);
       setJsonLd('jsonld-article', null);
+      setJsonLd('jsonld-breadcrumb', null);
     }
-    return () => { document.title = 'MKTP Fácil'; };
+    return () => {
+      document.title = 'MKTP Fácil';
+      setJsonLd('jsonld-article', null);
+      setJsonLd('jsonld-breadcrumb', null);
+    };
   }, [post, category]);
   return null;
 }
@@ -105,6 +138,9 @@ function BlogListPage() {
     setCategories(categoriesData);
   };
 
+  const usedCategoryIds = new Set(posts.map(p => p.categoria_id));
+  const visibleCategories = categories.filter(c => usedCategoryIds.has(c.id));
+
   if (loading && posts.length === 0) {
     return (
       <div className="container mx-auto py-12 px-4 max-w-6xl">
@@ -125,19 +161,19 @@ function BlogListPage() {
         <header className="text-center mb-12">
           <h1 className="text-4xl font-bold mb-4">Blog</h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            Dicas, estratégias e novidades sobre vendas no Mercado Livre
+            Dicas práticas para vender mais no Mercado Livre e na Shopee: precificação, frete, campanhas e gestão
           </p>
         </header>
 
         {/* Categories */}
-        {categories.length > 0 && (
+        {visibleCategories.length > 0 && (
           <div className="flex flex-wrap justify-center gap-2 mb-12">
             <Link to="/blog">
               <Badge variant="secondary" className="text-sm px-4 py-1">
                 Todos
               </Badge>
             </Link>
-            {categories.map(cat => (
+            {visibleCategories.map(cat => (
               <Link key={cat.id} to={`/blog/categoria/${cat.slug}`}>
                 <Badge variant="outline" className="text-sm px-4 py-1 hover:bg-secondary">
                   {cat.nome}
@@ -252,6 +288,7 @@ function BlogPostPage() {
   const { slug } = useParams();
   const { fetchPostBySlug } = useBlog();
   const [post, setPost] = useState<BlogPost | null>(null);
+  const [related, setRelated] = useState<BlogPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -263,13 +300,44 @@ function BlogPostPage() {
 
   const loadPost = async (postSlug: string) => {
     setLoading(true);
+    setNotFound(false);
     const data = await fetchPostBySlug(postSlug);
-    if (data && data.status === 'publicado') {
+    const isLive = data && data.status === 'publicado' &&
+      (!data.data_publicacao || new Date(data.data_publicacao) <= new Date());
+    if (data && isLive) {
       setPost(data);
+      loadRelated(data);
     } else {
       setNotFound(true);
     }
     setLoading(false);
+  };
+
+  const loadRelated = async (current: BlogPost) => {
+    let query = supabase
+      .from('blog_posts')
+      .select('id, titulo, slug, resumo, categoria_id')
+      .eq('status', 'publicado')
+      .lte('data_publicacao', new Date().toISOString())
+      .neq('id', current.id)
+      .order('data_publicacao', { ascending: false })
+      .limit(4);
+    if (current.categoria_id) query = query.eq('categoria_id', current.categoria_id);
+    const { data } = await query;
+    let list = (data || []) as BlogPost[];
+    if (list.length < 3) {
+      const { data: recent } = await supabase
+        .from('blog_posts')
+        .select('id, titulo, slug, resumo, categoria_id')
+        .eq('status', 'publicado')
+        .lte('data_publicacao', new Date().toISOString())
+        .neq('id', current.id)
+        .order('data_publicacao', { ascending: false })
+        .limit(4);
+      const seen = new Set(list.map(p => p.id));
+      list = [...list, ...((recent || []) as BlogPost[]).filter(p => !seen.has(p.id))];
+    }
+    setRelated(list.slice(0, 4));
   };
 
   if (loading) {
@@ -303,7 +371,7 @@ function BlogPostPage() {
     <>
       <BlogSEO post={post} />
       <div className="container mx-auto py-12 px-4">
-        <BlogPostContent post={post} />
+        <BlogPostContent post={post} relatedPosts={related} />
       </div>
     </>
   );
@@ -318,15 +386,12 @@ const Blog = () => {
   const isCategory = loc.pathname.includes('/blog/categoria/');
   const isPost = slug && !isCategory;
 
-  if (isCategory) {
-    return <BlogCategoryPage />;
-  }
-  
-  if (isPost) {
-    return <BlogPostPage />;
-  }
-  
-  return <BlogListPage />;
+  let content = <BlogListPage />;
+  if (isCategory) content = <BlogCategoryPage />;
+  else if (isPost) content = <BlogPostPage />;
+
+  // Cabeçalho e rodapé do site: navegação, CTA e links internos para quem chega pelo Google
+  return <ToolsLayout>{content}</ToolsLayout>;
 };
 
 export default Blog;

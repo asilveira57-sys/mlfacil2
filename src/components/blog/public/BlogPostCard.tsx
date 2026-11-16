@@ -15,10 +15,13 @@ export function BlogPostCard({ post }: BlogPostCardProps) {
     <Card className="overflow-hidden hover:shadow-lg transition-shadow group">
       {post.imagem_capa && (
         <Link to={`/blog/${post.slug}`}>
-          <div className="aspect-video overflow-hidden">
+          <div className="aspect-[1200/630] overflow-hidden">
             <img
               src={post.imagem_capa}
-              alt={post.titulo}
+              alt={post.imagem_capa_alt || post.titulo}
+              loading="lazy"
+              width={1200}
+              height={630}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             />
           </div>
