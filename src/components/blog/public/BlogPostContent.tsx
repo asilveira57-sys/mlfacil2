@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import type { BlogPost } from '@/types/blog';
 import { readingTimeMin } from '@/types/blog';
+import { OlistPartnerBox } from '@/components/partners/OlistPartnerBox';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -115,6 +116,9 @@ export function BlogPostContent({ post, relatedPosts = [] }: BlogPostContentProp
           </Link>
         </div>
       </aside>
+
+      {/* Parceria Olist — some com a tag "sem-olist" no post */}
+      {!(post.tags || []).includes('sem-olist') && <OlistPartnerBox />}
 
       {/* Ferramentas grátis */}
       <section className="mt-10">

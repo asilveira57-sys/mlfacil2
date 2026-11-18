@@ -15,6 +15,7 @@ add("/ferramentas", prio="0.8")
 for t in ["precificacao", "comissoes", "zpl", "tendencias"]:
     add(f"/ferramentas/{t}", prio="0.8")
 add("/consultoria", prio="0.7")
+add("/olist", prio="0.8")
 for m in ["gestao-anuncios", "dashboard-analises", "precificacao-custos", "radiografia-seed",
           "tendencias-concorrencia", "automacoes-alertas"]:
     add(f"/modulo/{m}", freq="monthly", prio="0.7")

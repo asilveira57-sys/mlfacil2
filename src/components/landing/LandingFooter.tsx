@@ -18,7 +18,9 @@ export function LandingFooter() {
       { labelKey: "home.footer.col1.link2", label: t('footer.col1.link2'), href: "#planos" },
       { labelKey: "home.footer.col1.link3", label: t('footer.col1.link3'), href: "#integracoes" },
       { labelKey: "home.footer.col1.link5", label: t('footer.col1.link5', 'Consultoria'), href: "/consultoria" },
-      { labelKey: "home.footer.col1.link4", label: t('footer.col1.link4'), href: "/blog" }
+      { labelKey: "home.footer.col1.link4", label: t('footer.col1.link4'), href: "/blog" },
+      { labelKey: "home.footer.col1.link6", label: "Ferramentas grátis", href: "/ferramentas" },
+      { labelKey: "home.footer.col1.link7", label: "Parceiro Olist", href: "/olist" }
     ],
     suporte: [
       { labelKey: "home.footer.col2.link1", label: t('footer.col2.link1'), href: "#faq" },
