@@ -99,9 +99,19 @@ async function processShipmentsInBackground(
 
           const shipment: MLShipment = await response.json();
           
-          // Label is available ONLY if:
-          // 1. Substatus is ready_to_print or printed
-          // 2. AND it's NOT a FULL logistic (fulfillment, cross_docking)
+          // A etiqueta é considerada disponível para o vendedor quando:
+          // 1. O substatus está em SELLER_PRINTABLE_SUBSTATUSES — ou seja
+          //    ready_to_print, printed, ready_for_pickup ou in_packing_list.
+          //    ATENÇÃO: ready_for_pickup e in_packing_list contam. São estados
+          //    normais de Mercado Envios Coleta (cross_docking) e o vendedor
+          //    precisa imprimir neles.
+          // 2. E a logística NÃO é fulfillment (no Full quem envia é o ML).
+          //    cross_docking NÃO é excluído aqui — ele imprime normalmente.
+          //
+          // Se este cálculo gravar false onde deveria gravar true, o pedido some
+          // de todas as abas da tela de etiquetas: a RPC get_shipping_orders exige
+          // label_available = true tanto em para_imprimir quanto em pronta_enviar,
+          // e sem isso o pedido cai em 'outros', que a tela não lista.
           const isFullLogistic = FULL_LOGISTIC_TYPES.includes(shipment.logistic_type);
           const isPrintableSubstatus = SELLER_PRINTABLE_SUBSTATUSES.includes(shipment.substatus || '');
           const labelAvailable = isPrintableSubstatus && !isFullLogistic;
