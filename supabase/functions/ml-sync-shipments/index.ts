@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { resolveAccessibleMlAccount } from "../_shared/ml-account-access.ts";
 import { ensureFreshToken } from "../_shared/ml-token.ts";
+import { isLabelAvailable, FULL_LOGISTIC_TYPES } from "../_shared/label-availability.ts";
 
 // Declare EdgeRuntime for Supabase Edge Functions
 declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
@@ -13,11 +14,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-// Substatus that indicate seller can/should print the label
-const SELLER_PRINTABLE_SUBSTATUSES = ['ready_to_print', 'printed', 'ready_for_pickup', 'in_packing_list'];
-
-// Logistic types that are FULL (Mercado Livre handles shipping - seller doesn't print)
-const FULL_LOGISTIC_TYPES = ['fulfillment'];
+// Regra de etiqueta: ver ../_shared/label-availability.ts (fonte única).
 
 // State name to UF mapping
 const STATE_TO_UF: Record<string, string> = {
@@ -112,9 +109,9 @@ async function processShipmentsInBackground(
           // de todas as abas da tela de etiquetas: a RPC get_shipping_orders exige
           // label_available = true tanto em para_imprimir quanto em pronta_enviar,
           // e sem isso o pedido cai em 'outros', que a tela não lista.
-          const isFullLogistic = FULL_LOGISTIC_TYPES.includes(shipment.logistic_type);
-          const isPrintableSubstatus = SELLER_PRINTABLE_SUBSTATUSES.includes(shipment.substatus || '');
-          const labelAvailable = isPrintableSubstatus && !isFullLogistic;
+          // isFullLogistic continua sendo usada abaixo (prazo de despacho).
+          const isFullLogistic = FULL_LOGISTIC_TYPES.includes((shipment.logistic_type ?? '') as any);
+          const labelAvailable = isLabelAvailable(shipment.substatus, shipment.logistic_type);
 
           // Extract address data
           const addr = shipment.receiver_address;

@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { logSyncEvent, syncStartTimer, syncDuration } from "../_shared/sync-audit.ts";
 import { resolveAccessibleMlAccount } from "../_shared/ml-account-access.ts";
 import { ensureFreshToken } from "../_shared/ml-token.ts";
+import { isLabelAvailable } from "../_shared/label-availability.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,8 +15,6 @@ const CRON_SECRET = Deno.env.get("CRON_JOB_SECRET") || "default-cron-secret";
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // Substatus that indicate seller can/should print the label
-const SELLER_PRINTABLE_SUBSTATUSES = ["ready_to_print", "printed"];
-const FULL_LOGISTIC_TYPES = ["fulfillment"];
 const ACTIVE_SHIPMENT_STATUSES = ["ready_to_ship", "handling", "pending"];
 
 const STATE_TO_UF: Record<string, string> = {
@@ -95,9 +94,7 @@ async function syncShipmentBatch(
         if (!resp.ok) { stats.errors++; return; }
 
         const shipment = await resp.json();
-        const isFullLogistic = FULL_LOGISTIC_TYPES.includes(shipment.logistic_type);
-        const isPrintable = SELLER_PRINTABLE_SUBSTATUSES.includes(shipment.substatus || "");
-        const labelAvailable = isPrintable && !isFullLogistic;
+        const labelAvailable = isLabelAvailable(shipment.substatus, shipment.logistic_type);
 
         const addr = shipment.receiver_address || {};
         const addressParts = [addr.address_line, addr.city?.name, addr.state?.name, addr.zip_code].filter(Boolean);
@@ -534,9 +531,7 @@ async function processAccount(
 
         const data = await resp.json();
 
-        const isFullLogistic = FULL_LOGISTIC_TYPES.includes(data.logistic_type);
-        const isPrintable = SELLER_PRINTABLE_SUBSTATUSES.includes(data.substatus || "");
-        const labelAvailable = isPrintable && !isFullLogistic;
+        const labelAvailable = isLabelAvailable(data.substatus, data.logistic_type);
 
         const mudou =
           cur.shipment_status !== data.status ||

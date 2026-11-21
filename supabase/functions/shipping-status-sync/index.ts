@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { ensureFreshToken } from "../_shared/ml-token.ts";
+import { isLabelAvailable } from "../_shared/label-availability.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -129,7 +130,7 @@ async function checkAndUpdateShipment(
     const statusChanged = data.status !== shipment.shipment_status ||
       data.substatus !== shipment.shipment_substatus;
 
-    const labelAvailable = data.substatus === "ready_to_print" || data.substatus === "printed";
+    const labelAvailable = isLabelAvailable(data.substatus, data.logistic_type);
     const novoHandling = estimatedHandlingLimit ?? shipment.estimated_handling_limit ?? null;
     const novoSchedule = estimatedScheduleLimit ?? shipment.estimated_schedule_limit ?? null;
 
@@ -248,7 +249,7 @@ async function seedMissingShipments(
       }
       const data = await response.json();
       const receiverAddress = data.receiver_address || {};
-      const labelAvailable = data.substatus === "ready_to_print" || data.substatus === "printed";
+      const labelAvailable = isLabelAvailable(data.substatus, data.logistic_type);
 
       let estimatedHandlingLimit: string | null = null;
       if (data.shipping_option?.estimated_handling_limit?.date) estimatedHandlingLimit = data.shipping_option.estimated_handling_limit.date;
