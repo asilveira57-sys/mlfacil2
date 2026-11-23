@@ -6,6 +6,8 @@ import { EditableImage } from "@/components/admin/EditableImage";
 import { EditableSocialLinks } from "@/components/admin/EditableSocialLinks";
 import { EditableText } from "@/components/admin/EditableText";
 
+import { SeloMLFacil } from "@/components/SeloMLFacil";
+
 export function LandingFooter() {
   const { t } = useTranslation('landing');
   const { getText } = useSiteContentContext();
@@ -162,6 +164,9 @@ export function LandingFooter() {
               {t('footer.copyright')}
             </EditableText>
           </p>
+          <div className="mt-4 flex justify-center">
+            <SeloMLFacil tema="claro" projeto="mktp-facil" origem="mktpfacil.com" />
+          </div>
         </div>
       </div>
     </footer>
