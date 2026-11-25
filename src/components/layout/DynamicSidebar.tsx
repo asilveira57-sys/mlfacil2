@@ -88,6 +88,13 @@ export function DynamicSidebar() {
         </Badge>
       );
     }
+    if (status === 'new') {
+      return (
+        <Badge className="text-[9px] px-1 py-0 h-4 bg-primary text-primary-foreground">
+          Novo
+        </Badge>
+      );
+    }
     if (status === 'coming_soon') {
       return (
         <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4 bg-muted text-muted-foreground">
