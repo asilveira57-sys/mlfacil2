@@ -14,7 +14,7 @@ serve(async (req) => {
 
   // Diagnóstico sem dados: confirma qual versão está publicada.
   if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
-    return new Response(JSON.stringify({ fn: 'ml-price-adjustment', version: 'availability-time-v2' }),
+    return new Response(JSON.stringify({ fn: 'ml-price-adjustment', version: 'availability-time-v3' }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
@@ -465,6 +465,72 @@ serve(async (req) => {
         success: true, itemId, title: item.title,
         prazoAntes, prazoDepois: novoPrazo.value_name,
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ── ACTION: revert_manufacturing_time ──
+    // Desfaz o último apply bem-sucedido do anúncio, voltando ao valor anterior
+    // (ou removendo o prazo, se antes não havia). Confere lendo o anúncio depois.
+    if (action === 'revert_manufacturing_time') {
+      const { itemId } = body;
+      const json = (o: unknown) => new Response(JSON.stringify(o),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      if (!itemId) return json({ success: false, error: 'itemId obrigatório' });
+
+      const { data: ultimo } = await supabaseAdmin.from('sale_term_adjustment_logs')
+        .select('id, valor_antes, acao, response_status')
+        .eq('seller_id', sellerId).eq('item_id', itemId).eq('term_id', 'MANUFACTURING_TIME')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (!ultimo || ultimo.acao !== 'apply' || ultimo.response_status !== 200) {
+        return json({ success: false, skipped: true, itemId, reason: 'nada_a_desfazer' });
+      }
+
+      const lerItem = async () => {
+        const r = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,title,sale_terms`,
+          { headers: { Authorization: `Bearer ${accessToken}` } });
+        return r.ok ? await r.json() : null;
+      };
+      const item = await lerItem();
+      if (!item) return json({ success: false, itemId, error: 'Falha ao ler o anúncio' });
+
+      const preserve = (t: any) =>
+        t.value_id ? { id: t.id, value_id: t.value_id } : { id: t.id, value_name: t.value_name };
+      const termos = Array.isArray(item.sale_terms) ? item.sale_terms : [];
+      const outros = termos.filter((t: any) => t.id !== 'MANUFACTURING_TIME').map(preserve);
+      const alvo: string | null = ultimo.valor_antes ?? null;
+
+      const tentativas: any[] = alvo
+        ? [{ sale_terms: [...outros, { id: 'MANUFACTURING_TIME', value_name: alvo }] }]
+        : [
+            { sale_terms: [...outros, { id: 'MANUFACTURING_TIME', value_id: null, value_name: null }] },
+            { sale_terms: outros },
+          ];
+
+      let putStatus = 0; let putBody: any = null; let payloadUsado: any = null; let depois: string | null = null;
+      for (const payload of tentativas) {
+        const putRes = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        putStatus = putRes.status; putBody = await putRes.json().catch(() => null); payloadUsado = payload;
+        const conf = await lerItem();
+        depois = (conf?.sale_terms || []).find((t: any) => t.id === 'MANUFACTURING_TIME')?.value_name ?? null;
+        if (depois === alvo) break;
+      }
+      const ok = depois === alvo;
+
+      const { error: logError } = await supabaseAdmin.from('sale_term_adjustment_logs').insert({
+        seller_id: sellerId, user_id: userId, item_id: itemId, titulo: item.title || null,
+        term_id: 'MANUFACTURING_TIME', acao: 'revert',
+        valor_antes: termos.find((t: any) => t.id === 'MANUFACTURING_TIME')?.value_name ?? null,
+        valor_depois: depois, sale_terms_antes: termos, request_payload: payloadUsado,
+        response_status: ok ? 200 : (putStatus || 500), response_body: putBody,
+      });
+      if (logError) console.error('[manufacturing-time] log revert falhou:', logError.message);
+
+      return json(ok
+        ? { success: true, itemId, title: item.title, prazoDepois: depois }
+        : { success: false, itemId, error: putBody?.message || `prazo continua ${depois}`, responseBody: putBody });
     }
 
     return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

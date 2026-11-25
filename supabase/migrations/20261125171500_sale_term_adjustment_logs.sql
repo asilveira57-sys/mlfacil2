@@ -25,3 +25,6 @@ CREATE POLICY "Users can view their own sale term logs"
 
 CREATE INDEX IF NOT EXISTS idx_sale_term_logs_item ON public.sale_term_adjustment_logs(item_id);
 CREATE INDEX IF NOT EXISTS idx_sale_term_logs_created ON public.sale_term_adjustment_logs(created_at DESC);
+
+-- 'apply' = prazo aplicado; 'revert' = desfeito pela tela
+ALTER TABLE public.sale_term_adjustment_logs ADD COLUMN IF NOT EXISTS acao TEXT NOT NULL DEFAULT 'apply';
