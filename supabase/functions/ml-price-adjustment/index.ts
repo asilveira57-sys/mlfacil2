@@ -270,6 +270,191 @@ serve(async (req) => {
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // ── Disponibilidade de estoque (MANUFACTURING_TIME) ──
+    // sale_terms é array: sempre lemos os termos atuais e trocamos só o prazo,
+    // para não apagar a garantia (WARRANTY_TIME). Unidade = dias corridos.
+
+    // ── ACTION: scan_manufacturing_candidates ──────────────────────────────────
+    // Lista, AO VIVO no Mercado Livre, os anúncios que seriam afetados.
+    // Não escreve nada. Use para conferir antes de aplicar.
+    if (action === 'scan_manufacturing_candidates') {
+      const {
+        titleContains = 'couch',
+        excludeLogistic = ['fulfillment'],
+        onlyActive = true,
+      } = body;
+
+      const alvo = String(titleContains).toLowerCase();
+      const candidatos: any[] = [];
+      const ignorados = { full: 0, sem_titulo: 0, inativo: 0 };
+
+      let offset = 0;
+      const PAGE = 50;
+
+      while (true) {
+        const searchUrl =
+          `https://api.mercadolibre.com/users/${sellerId}/items/search` +
+          `?offset=${offset}&limit=${PAGE}` + (onlyActive ? '&status=active' : '');
+
+        const searchRes = await fetch(searchUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!searchRes.ok) break;
+
+        const searchData = await searchRes.json();
+        const ids: string[] = searchData.results || [];
+        if (ids.length === 0) break;
+
+        for (let i = 0; i < ids.length; i += 20) {
+          const lote = ids.slice(i, i + 20);
+          const multiRes = await fetch(
+            `https://api.mercadolibre.com/items?ids=${lote.join(',')}` +
+            `&attributes=id,title,status,sale_terms,shipping`,
+            { headers: { Authorization: `Bearer ${accessToken}` } },
+          );
+          if (!multiRes.ok) continue;
+
+          for (const entry of await multiRes.json()) {
+            if (entry.code !== 200 || !entry.body) continue;
+            const it = entry.body;
+
+            if (onlyActive && it.status !== 'active') { ignorados.inativo++; continue; }
+            if (excludeLogistic.includes(it.shipping?.logistic_type)) { ignorados.full++; continue; }
+            if (!it.title) { ignorados.sem_titulo++; continue; }
+            if (!String(it.title).toLowerCase().includes(alvo)) continue;
+
+            const atual = (it.sale_terms || [])
+              .find((t: any) => t.id === 'MANUFACTURING_TIME');
+
+            candidatos.push({
+              itemId: it.id,
+              title: it.title,
+              logisticType: it.shipping?.logistic_type ?? null,
+              prazoAtual: atual?.value_name ?? null,
+              outrosTermos: (it.sale_terms || [])
+                .filter((t: any) => t.id !== 'MANUFACTURING_TIME')
+                .map((t: any) => `${t.id}=${t.value_name}`),
+            });
+          }
+        }
+
+        offset += PAGE;
+        if (offset >= (searchData.paging?.total || 0)) break;
+      }
+
+      return new Response(JSON.stringify({
+        sellerId, total: candidatos.length, ignorados, candidatos,
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ── ACTION: apply_manufacturing_time ───────────────────────────────────────
+    // Aplica o prazo em UM anúncio. A tela chama em laço, igual ao apply_price.
+    // Com dryRun = true, devolve o payload que SERIA enviado, sem escrever.
+    if (action === 'apply_manufacturing_time') {
+      const { itemId, days = 6, dryRun = false } = body;
+
+      if (!itemId) {
+        return new Response(JSON.stringify({ error: 'itemId obrigatório' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // 1. Lê o estado atual. Nunca montamos o array do zero.
+      const getRes = await fetch(
+        `https://api.mercadolibre.com/items/${itemId}?attributes=id,title,status,sale_terms,shipping`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!getRes.ok) {
+        return new Response(JSON.stringify({
+          success: false, itemId, error: 'Falha ao ler o anúncio', status: getRes.status,
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      const item = await getRes.json();
+
+      // 2. Trava de segurança: nunca mexe em Full nem em anúncio inativo.
+      if (item.shipping?.logistic_type === 'fulfillment') {
+        return new Response(JSON.stringify({
+          success: false, skipped: true, itemId, reason: 'fulfillment',
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      if (item.status !== 'active') {
+        return new Response(JSON.stringify({
+          success: false, skipped: true, itemId, reason: `status=${item.status}`,
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // 3. Preserva cada termo existente no formato que o ML espera de volta.
+      //    Lista fechada volta por value_id; o resto volta por value_name.
+      const preserveSaleTerm = (t: any) =>
+        t.value_id ? { id: t.id, value_id: t.value_id } : { id: t.id, value_name: t.value_name };
+
+      const termosAtuais = Array.isArray(item.sale_terms) ? item.sale_terms : [];
+      const novoPrazo = { id: 'MANUFACTURING_TIME', value_name: `${days} dias` };
+
+      const saleTermsNovos = [
+        ...termosAtuais
+          .filter((t: any) => t.id !== 'MANUFACTURING_TIME')
+          .map(preserveSaleTerm),
+        novoPrazo,
+      ];
+
+      const payload = { sale_terms: saleTermsNovos };
+      const prazoAntes =
+        termosAtuais.find((t: any) => t.id === 'MANUFACTURING_TIME')?.value_name ?? null;
+
+      // Já está no valor desejado? Não gasta chamada de escrita.
+      if (prazoAntes === novoPrazo.value_name) {
+        return new Response(JSON.stringify({
+          success: true, skipped: true, itemId, reason: 'ja_estava', prazoAntes,
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      if (dryRun) {
+        return new Response(JSON.stringify({
+          success: true, dryRun: true, itemId, title: item.title,
+          prazoAntes, prazoDepois: novoPrazo.value_name,
+          termosPreservados: termosAtuais.filter((t: any) => t.id !== 'MANUFACTURING_TIME').length,
+          payload,
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // 4. Escreve.
+      const putRes = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const respBody = await putRes.json();
+
+      // 5. Log com os sale_terms ANTES — é o que permite desfazer depois.
+      const { error: logError } = await supabaseAdmin.from('sale_term_adjustment_logs').insert({
+        seller_id: sellerId,
+        user_id: userId,
+        item_id: itemId,
+        titulo: item.title || null,
+        term_id: 'MANUFACTURING_TIME',
+        valor_antes: prazoAntes,
+        valor_depois: novoPrazo.value_name,
+        sale_terms_antes: termosAtuais,
+        request_payload: payload,
+        response_status: putRes.status,
+        response_body: respBody,
+      });
+      if (logError) console.error('[manufacturing-time] log falhou:', logError.message);
+
+      if (!putRes.ok) {
+        console.error(`[manufacturing-time] ${itemId} falhou:`, respBody);
+        return new Response(JSON.stringify({
+          success: false, itemId, error: respBody?.message || 'PUT falhou',
+          status: putRes.status, responseBody: respBody,
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      return new Response(JSON.stringify({
+        success: true, itemId, title: item.title,
+        prazoAntes, prazoDepois: novoPrazo.value_name,
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error) {
