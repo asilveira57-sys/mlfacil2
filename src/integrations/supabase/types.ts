@@ -15162,6 +15162,54 @@ export type Database = {
           },
         ]
       }
+      sale_term_adjustment_logs: {
+        Row: {
+          created_at: string
+          id: string
+          item_id: string
+          request_payload: Json | null
+          response_body: Json | null
+          response_status: number | null
+          sale_terms_antes: Json | null
+          seller_id: string
+          term_id: string
+          titulo: string | null
+          user_id: string
+          valor_antes: string | null
+          valor_depois: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_id: string
+          request_payload?: Json | null
+          response_body?: Json | null
+          response_status?: number | null
+          sale_terms_antes?: Json | null
+          seller_id: string
+          term_id: string
+          titulo?: string | null
+          user_id: string
+          valor_antes?: string | null
+          valor_depois?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_id?: string
+          request_payload?: Json | null
+          response_body?: Json | null
+          response_status?: number | null
+          sale_terms_antes?: Json | null
+          seller_id?: string
+          term_id?: string
+          titulo?: string | null
+          user_id?: string
+          valor_antes?: string | null
+          valor_depois?: string | null
+        }
+        Relationships: []
+      }
       sandbox_company_snapshot: {
         Row: {
           acos_medio: number | null
@@ -21682,6 +21730,10 @@ export type Database = {
       }
       can_manage_workspace: {
         Args: { _user_id: string; _workspace_id: string }
+        Returns: boolean
+      }
+      can_read_owner_data: {
+        Args: { p_owner_user_id: string }
         Returns: boolean
       }
       can_run_auto_sync: {
