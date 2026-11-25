@@ -12,6 +12,12 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Diagnóstico sem dados: confirma qual versão está publicada.
+  if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
+    return new Response(JSON.stringify({ fn: 'ml-price-adjustment', version: 'availability-time-v2' }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
