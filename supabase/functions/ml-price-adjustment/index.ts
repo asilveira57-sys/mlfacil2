@@ -279,12 +279,17 @@ serve(async (req) => {
     // Não escreve nada. Use para conferir antes de aplicar.
     if (action === 'scan_manufacturing_candidates') {
       const {
-        titleContains = 'couch',
+        terms,
+        titleContains,
         excludeLogistic = ['fulfillment'],
         onlyActive = true,
       } = body;
 
-      const alvo = String(titleContains).toLowerCase();
+      // terms: lista de termos (OU). Vazio = devolve todos os elegíveis,
+      // para a tela filtrar localmente sem nova consulta ao ML.
+      const norm = (s: string) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const alvos: string[] = (Array.isArray(terms) ? terms : (titleContains ? [titleContains] : []))
+        .map((t: string) => norm(t).trim()).filter(Boolean);
       const candidatos: any[] = [];
       const ignorados = { full: 0, sem_titulo: 0, inativo: 0 };
 
@@ -309,7 +314,7 @@ serve(async (req) => {
           const lote = ids.slice(i, i + 20);
           const multiRes = await fetch(
             `https://api.mercadolibre.com/items?ids=${lote.join(',')}` +
-            `&attributes=id,title,status,sale_terms,shipping`,
+            `&attributes=id,title,status,sale_terms,shipping,thumbnail`,
             { headers: { Authorization: `Bearer ${accessToken}` } },
           );
           if (!multiRes.ok) continue;
@@ -321,7 +326,7 @@ serve(async (req) => {
             if (onlyActive && it.status !== 'active') { ignorados.inativo++; continue; }
             if (excludeLogistic.includes(it.shipping?.logistic_type)) { ignorados.full++; continue; }
             if (!it.title) { ignorados.sem_titulo++; continue; }
-            if (!String(it.title).toLowerCase().includes(alvo)) continue;
+            if (alvos.length && !alvos.some((a) => norm(it.title).includes(a))) continue;
 
             const atual = (it.sale_terms || [])
               .find((t: any) => t.id === 'MANUFACTURING_TIME');
@@ -331,6 +336,7 @@ serve(async (req) => {
               title: it.title,
               logisticType: it.shipping?.logistic_type ?? null,
               prazoAtual: atual?.value_name ?? null,
+              thumbnail: it.thumbnail ?? null,
               outrosTermos: (it.sale_terms || [])
                 .filter((t: any) => t.id !== 'MANUFACTURING_TIME')
                 .map((t: any) => `${t.id}=${t.value_name}`),
