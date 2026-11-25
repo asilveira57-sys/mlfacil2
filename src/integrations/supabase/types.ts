@@ -15164,6 +15164,7 @@ export type Database = {
       }
       sale_term_adjustment_logs: {
         Row: {
+          acao: string
           created_at: string
           id: string
           item_id: string
@@ -15179,6 +15180,7 @@ export type Database = {
           valor_depois: string | null
         }
         Insert: {
+          acao?: string
           created_at?: string
           id?: string
           item_id: string
@@ -15194,6 +15196,7 @@ export type Database = {
           valor_depois?: string | null
         }
         Update: {
+          acao?: string
           created_at?: string
           id?: string
           item_id?: string
