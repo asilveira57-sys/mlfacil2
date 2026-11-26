@@ -493,6 +493,7 @@ export type Database = {
           id: string
           item_id: string
           last_sale_at: string | null
+          listing_first_seen_at: string | null
           max_gap_hours: number | null
           median_gap_hours: number | null
           ml_account_id: string
@@ -512,6 +513,7 @@ export type Database = {
           id?: string
           item_id: string
           last_sale_at?: string | null
+          listing_first_seen_at?: string | null
           max_gap_hours?: number | null
           median_gap_hours?: number | null
           ml_account_id: string
@@ -531,6 +533,7 @@ export type Database = {
           id?: string
           item_id?: string
           last_sale_at?: string | null
+          listing_first_seen_at?: string | null
           max_gap_hours?: number | null
           median_gap_hours?: number | null
           ml_account_id?: string
@@ -7016,6 +7019,69 @@ export type Database = {
         }
         Relationships: []
       }
+      listing_claims: {
+        Row: {
+          claim_id: string
+          date_created: string | null
+          item_id: string | null
+          order_id: string | null
+          reason_id: string | null
+          seller_id: string
+          stage: string | null
+          status: string | null
+          type: string | null
+          updated_at: string
+        }
+        Insert: {
+          claim_id: string
+          date_created?: string | null
+          item_id?: string | null
+          order_id?: string | null
+          reason_id?: string | null
+          seller_id: string
+          stage?: string | null
+          status?: string | null
+          type?: string | null
+          updated_at?: string
+        }
+        Update: {
+          claim_id?: string
+          date_created?: string | null
+          item_id?: string | null
+          order_id?: string | null
+          reason_id?: string | null
+          seller_id?: string
+          stage?: string | null
+          status?: string | null
+          type?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      listing_daily_metrics: {
+        Row: {
+          collected_at: string
+          day: string
+          item_id: string
+          seller_id: string
+          visits: number
+        }
+        Insert: {
+          collected_at?: string
+          day: string
+          item_id: string
+          seller_id: string
+          visits?: number
+        }
+        Update: {
+          collected_at?: string
+          day?: string
+          item_id?: string
+          seller_id?: string
+          visits?: number
+        }
+        Relationships: []
+      }
       listing_events: {
         Row: {
           blocks_affected: string[] | null
@@ -7089,6 +7155,102 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      listing_exam_items: {
+        Row: {
+          available_quantity: number | null
+          catalog_listing: boolean | null
+          date_created: string | null
+          free_shipping: boolean | null
+          health: number | null
+          item_id: string
+          listing_type_id: string | null
+          logistic_type: string | null
+          original_price: number | null
+          permalink: string | null
+          price: number | null
+          seller_id: string
+          sold_quantity: number | null
+          status: string | null
+          thumbnail: string | null
+          title: string | null
+          updated_at: string
+          user_product_id: string | null
+        }
+        Insert: {
+          available_quantity?: number | null
+          catalog_listing?: boolean | null
+          date_created?: string | null
+          free_shipping?: boolean | null
+          health?: number | null
+          item_id: string
+          listing_type_id?: string | null
+          logistic_type?: string | null
+          original_price?: number | null
+          permalink?: string | null
+          price?: number | null
+          seller_id: string
+          sold_quantity?: number | null
+          status?: string | null
+          thumbnail?: string | null
+          title?: string | null
+          updated_at?: string
+          user_product_id?: string | null
+        }
+        Update: {
+          available_quantity?: number | null
+          catalog_listing?: boolean | null
+          date_created?: string | null
+          free_shipping?: boolean | null
+          health?: number | null
+          item_id?: string
+          listing_type_id?: string | null
+          logistic_type?: string | null
+          original_price?: number | null
+          permalink?: string | null
+          price?: number | null
+          seller_id?: string
+          sold_quantity?: number | null
+          status?: string | null
+          thumbnail?: string | null
+          title?: string | null
+          updated_at?: string
+          user_product_id?: string | null
+        }
+        Relationships: []
+      }
+      listing_exam_runs: {
+        Row: {
+          claims_at: string | null
+          claims_error: string | null
+          finished_at: string | null
+          item_ids: Json
+          last_cursor: number
+          seller_id: string
+          started_at: string
+          total: number
+        }
+        Insert: {
+          claims_at?: string | null
+          claims_error?: string | null
+          finished_at?: string | null
+          item_ids?: Json
+          last_cursor?: number
+          seller_id: string
+          started_at?: string
+          total?: number
+        }
+        Update: {
+          claims_at?: string | null
+          claims_error?: string | null
+          finished_at?: string | null
+          item_ids?: Json
+          last_cursor?: number
+          seller_id?: string
+          started_at?: string
+          total?: number
+        }
+        Relationships: []
       }
       listing_health_alerts: {
         Row: {
@@ -7963,6 +8125,42 @@ export type Database = {
           title?: string | null
           title_length?: number | null
           visits_7d?: number | null
+        }
+        Relationships: []
+      }
+      listing_treatments: {
+        Row: {
+          applied_at: string
+          created_at: string
+          disease: string | null
+          id: string
+          item_id: string
+          note: string | null
+          remedy: string
+          seller_id: string
+          user_id: string
+        }
+        Insert: {
+          applied_at?: string
+          created_at?: string
+          disease?: string | null
+          id?: string
+          item_id: string
+          note?: string | null
+          remedy: string
+          seller_id: string
+          user_id?: string
+        }
+        Update: {
+          applied_at?: string
+          created_at?: string
+          disease?: string | null
+          id?: string
+          item_id?: string
+          note?: string | null
+          remedy?: string
+          seller_id?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -9773,6 +9971,54 @@ export type Database = {
           normalized_keyword?: string
           source?: string
           weight?: number
+        }
+        Relationships: []
+      }
+      ml_clone_logs: {
+        Row: {
+          created_at: string
+          description_ok: boolean | null
+          dest_seller_id: string
+          id: string
+          modo: string | null
+          new_item_id: string | null
+          origin_seller_id: string
+          request_payload: Json | null
+          response_body: Json | null
+          response_status: number | null
+          source_item_id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description_ok?: boolean | null
+          dest_seller_id: string
+          id?: string
+          modo?: string | null
+          new_item_id?: string | null
+          origin_seller_id: string
+          request_payload?: Json | null
+          response_body?: Json | null
+          response_status?: number | null
+          source_item_id: string
+          status: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description_ok?: boolean | null
+          dest_seller_id?: string
+          id?: string
+          modo?: string | null
+          new_item_id?: string | null
+          origin_seller_id?: string
+          request_payload?: Json | null
+          response_body?: Json | null
+          response_status?: number | null
+          source_item_id?: string
+          status?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -19986,6 +20232,27 @@ export type Database = {
           },
         ]
       }
+      user_feature_announcements_seen: {
+        Row: {
+          action: string | null
+          announcement_key: string
+          seen_at: string
+          user_id: string
+        }
+        Insert: {
+          action?: string | null
+          announcement_key: string
+          seen_at?: string
+          user_id?: string
+        }
+        Update: {
+          action?: string | null
+          announcement_key?: string
+          seen_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_feature_flags: {
         Row: {
           created_at: string
@@ -21605,6 +21872,10 @@ export type Database = {
         Returns: Json
       }
       activate_own_collaborator_invites: { Args: never; Returns: number }
+      ad_timeline_recalc: {
+        Args: { p_account?: string; p_workspace_id: string }
+        Returns: Json
+      }
       add_admin_by_email: { Args: { p_email: string }; Returns: undefined }
       admin_adjust_trial: {
         Args: {
@@ -22146,6 +22417,13 @@ export type Database = {
         Args: { p_job_id: string; p_stale_seconds?: number }
         Returns: number[]
       }
+      listing_last_visit_day: {
+        Args: { p_items: string[]; p_seller: string }
+        Returns: {
+          item_id: string
+          last_day: string
+        }[]
+      }
       log_admin_action: {
         Args: {
           p_action_type: string
@@ -22197,6 +22475,74 @@ export type Database = {
       on_account_connected_check_limit: {
         Args: { p_account_id: string; p_company_id: string }
         Returns: Json
+      }
+      owns_seller: { Args: { p_seller: string }; Returns: boolean }
+      radiografia_diagnostico: {
+        Args: { p_seller: string }
+        Returns: {
+          available_quantity: number
+          catalog_listing: boolean
+          conversao_30d: number
+          dias_com_visita_30d: number
+          dias_sem_venda: number
+          doenca: string
+          em_promocao: boolean
+          exame_em: string
+          faturamento_30d: number
+          health: number
+          idade_dias: number
+          item_id: string
+          logistic_type: string
+          motivo: string
+          original_price: number
+          permalink: string
+          price: number
+          reclamacoes_90d: number
+          status: string
+          thumbnail: string
+          title: string
+          tratamentos: number
+          ultima_venda: string
+          unidades_30d: number
+          vendas_30d: number
+          vendas_7d: number
+          vendas_90d: number
+          visitas_30d: number
+          visitas_30d_anterior: number
+          visitas_7d: number
+        }[]
+      }
+      radiografia_serie: {
+        Args: { p_dias?: number; p_item: string; p_seller: string }
+        Returns: {
+          dia: string
+          vendas: number
+          visitas: number
+        }[]
+      }
+      radiografia_tratamentos: {
+        Args: { p_item?: string; p_seller: string }
+        Returns: {
+          antes_conversao: number
+          antes_vendas_dia: number
+          antes_visitas_dia: number
+          aplicado_em: string
+          depois14_conversao: number
+          depois14_vendas_dia: number
+          depois14_visitas_dia: number
+          depois30_conversao: number
+          depois30_vendas_dia: number
+          depois30_visitas_dia: number
+          dias_desde: number
+          doenca: string
+          id: string
+          item_id: string
+          nota: string
+          remedio: string
+          resultado: string
+          titulo: string
+          variacao_pct: number
+        }[]
       }
       raise_cost_alert: {
         Args: { p_kind: string; p_payload?: Json; p_severity?: string }
