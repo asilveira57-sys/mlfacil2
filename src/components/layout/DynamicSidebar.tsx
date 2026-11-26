@@ -5,7 +5,7 @@ import {
   Settings, Activity, Target, Store, Package, Printer, ListChecks,
   LogOut, TrendingUp, ChevronDown, MessageSquareText, Shield, Tags,
   History, Sprout, BookOpen, Calculator, Percent, Truck, Bell, Star,
-  Wrench, CalendarDays, Sparkles, Info, Clock, LucideIcon,
+  Wrench, CalendarDays, Sparkles, Info, Clock, Copy, LucideIcon,
 } from "lucide-react";
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
@@ -31,7 +31,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   LayoutDashboard, Megaphone, DollarSign, BarChart3, FileText, Tag,
   Settings, Activity, Target, Store, Package, Printer, ListChecks,
   TrendingUp, MessageSquareText, Shield, Tags, History, Sprout,
-  BookOpen, Calculator, Percent, Truck, Bell, Star, Wrench, CalendarDays, Sparkles, Clock,
+  BookOpen, Calculator, Percent, Truck, Bell, Star, Wrench, CalendarDays, Sparkles, Clock, Copy,
 };
 
 function getIcon(key: string): LucideIcon {

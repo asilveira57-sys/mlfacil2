@@ -1,0 +1,301 @@
+// ml-item-clone — clona UM anúncio de uma conta do usuário para outra.
+//
+// Por que existe (substitui a mktpfacil-clone, que nunca funcionou):
+// 1. PolicyAgent 403: o ML não deixa mais ler /items sem token, nem com o token
+//    de outra conta. Aqui o anúncio de origem é SEMPRE lido com o token da
+//    conta dona dele (a "conta de origem" escolhida na tela).
+// 2. "The fields [title] are invalid": contas no modelo User Products
+//    (tag user_product_seller) não aceitam `title` no POST — exigem
+//    `family_name` e montam o título sozinhas a partir dos ATRIBUTOS.
+//    Por isso copiamos todos os atributos da origem.
+//
+// Ações: load (só leitura) · clone (cria o anúncio). GET ?version para diagnóstico.
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const VERSION = 'item-clone-v1';
+const ML = 'https://api.mercadolibre.com';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
+const json = (o: unknown, status = 200) =>
+  new Response(JSON.stringify(o), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+// Atributos que o ML calcula sozinho ou que não podem ser enviados na criação
+// (validado em /items/validate em 26/nov: o ML ignora os PACKAGE_* etc. com aviso)
+const ATRIBUTOS_IGNORADOS = new Set([
+  'ITEM_CONDITION', // vai em `condition`
+  'PACKAGE_HEIGHT', 'PACKAGE_LENGTH', 'PACKAGE_WEIGHT', 'PACKAGE_WIDTH',
+  'PRODUCT_FEATURES', 'SHIPMENT_PACKING', 'UNITS_PER_PACKAGE',
+]);
+
+// Manda value_id E value_name: valores personalizados da conta (marca, modelo,
+// cor) têm value_id que não resolve em outro anúncio — sem o nome, o ML recusa.
+const termo = (a: any) => {
+  const o: Record<string, unknown> = { id: a.id };
+  if (a.value_id) o.value_id = a.value_id;
+  if (a.value_name) o.value_name = a.value_name;
+  return o;
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
+  if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
+    return json({ fn: 'ml-item-clone', version: VERSION });
+  }
+
+  try {
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Unauthorized' }, 401);
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(authHeader.replace('Bearer ', ''));
+    if (claimsError || !claimsData?.claims) return json({ error: 'Unauthorized' }, 401);
+    const userId = claimsData.claims.sub as string;
+
+    const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabaseAdmin, userId);
+    if (!gate.allowed) return gate.response!;
+
+    const body = await req.json();
+    const { action } = body;
+
+    // ── Token de uma conta do usuário (renova se vencido) ──
+    const tokenDa = async (sellerId: string): Promise<string> => {
+      const { data: acc } = await supabase.from('ml_accounts').select('*')
+        .eq('user_id', userId).eq('is_active', true).eq('ml_user_id', String(sellerId)).limit(1).maybeSingle();
+      if (!acc) throw new Error(`Conta ${sellerId} não está conectada ao seu usuário`);
+      if (new Date(acc.token_expires_at) > new Date(Date.now() + 60_000)) return acc.access_token;
+      const r = await fetch(`${ML}/oauth/token`, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token', client_id: Deno.env.get('ML_APP_ID') || '',
+          client_secret: Deno.env.get('ML_SECRET_KEY') || '', refresh_token: acc.refresh_token,
+        }),
+      });
+      if (!r.ok) throw new Error(`Não consegui renovar o acesso da conta ${acc.nickname || sellerId}. Reconecte a conta.`);
+      const d = await r.json();
+      const exp = new Date(); exp.setSeconds(exp.getSeconds() + d.expires_in);
+      await supabase.from('ml_accounts').update({
+        access_token: d.access_token, refresh_token: d.refresh_token, token_expires_at: exp.toISOString(),
+      }).eq('id', acc.id);
+      return d.access_token;
+    };
+
+    const getML = async (path: string, token: string) => {
+      const r = await fetch(`${ML}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json().catch(() => null);
+      return { ok: r.ok, status: r.status, data: d };
+    };
+
+    // ── Lê o anúncio de origem (MLB… ou MLBU…) com o token da conta dona ──
+    const lerOrigem = async (originSellerId: string, codigo: string) => {
+      const token = await tokenDa(originSellerId);
+      let id = String(codigo || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!/^MLBU?\d+$/.test(id)) throw new Error('Código inválido. Use MLB123… ou MLBU123…');
+
+      if (id.startsWith('MLBU')) {
+        const s = await getML(`/users/${originSellerId}/items/search?user_product_id=${id}`, token);
+        const ids: string[] = s.data?.results || [];
+        if (!s.ok || ids.length === 0) throw new Error(`Nenhum anúncio do ${id} nesta conta de origem`);
+        id = ids[0];
+      }
+
+      const it = await getML(`/items/${id}?include_attributes=all`, token);
+      if (it.status === 403 || it.status === 404) {
+        throw new Error(`O anúncio ${id} não pertence à conta de origem escolhida (ou não existe). Confira a conta de origem.`);
+      }
+      if (!it.ok) throw new Error(`Falha ao ler ${id}: ${it.data?.message || it.status}`);
+      if (String(it.data.seller_id) !== String(originSellerId)) {
+        throw new Error(`O anúncio ${id} é de outra conta. Escolha a conta dona dele como origem.`);
+      }
+      const desc = await getML(`/items/${id}/description`, token);
+      return { item: it.data, descricao: desc.ok ? (desc.data?.plain_text || '') : '' };
+    };
+
+    const ehUserProductSeller = async (sellerId: string, token: string) => {
+      const u = await getML(`/users/${sellerId}`, token);
+      return Array.isArray(u.data?.tags) && u.data.tags.includes('user_product_seller');
+    };
+
+    // ════════════════════════ ACTION: load ════════════════════════
+    if (action === 'load') {
+      const { originSellerId, destSellerId, codigo } = body;
+      try {
+        const { item, descricao } = await lerOrigem(originSellerId, codigo);
+        let destinoUP: boolean | null = null;
+        if (destSellerId) {
+          try { destinoUP = await ehUserProductSeller(destSellerId, await tokenDa(destSellerId)); } catch { destinoUP = null; }
+        }
+        const avisos: string[] = [];
+        if (Array.isArray(item.variations) && item.variations.length > 0) {
+          avisos.push(`Tem ${item.variations.length} variações. Nesta versão o clonador copia anúncios sem variação.`);
+        }
+        if (item.shipping?.logistic_type === 'fulfillment') {
+          avisos.push('A origem está no Full. O clone nasce como Mercado Envios normal (o Full é por conta).');
+        }
+        if (item.catalog_listing) avisos.push('A origem é de catálogo. O clone nasce como anúncio comum.');
+        return json({
+          ok: true,
+          preview: {
+            id: item.id, titulo: item.title, familyName: item.family_name ?? null,
+            userProductId: item.user_product_id ?? null, preco: item.price, moeda: item.currency_id,
+            estoque: item.available_quantity, categoria: item.category_id, tipo: item.listing_type_id,
+            condicao: item.condition, status: item.status, permalink: item.permalink,
+            fotos: (item.pictures || []).map((p: any) => p.secure_url || p.url),
+            atributos: (item.attributes || []).filter((a: any) => a.value_name).length,
+            temVariacoes: Array.isArray(item.variations) && item.variations.length > 0,
+            freteGratis: !!item.shipping?.free_shipping, garantia: (item.sale_terms || [])
+              .find((t: any) => t.id === 'WARRANTY_TIME')?.value_name ?? null,
+            temDescricao: descricao.length > 0,
+          },
+          destinoUP, avisos,
+        });
+      } catch (e) {
+        return json({ ok: false, error: (e as Error).message });
+      }
+    }
+
+    // ════════════════════════ ACTION: clone ════════════════════════
+    if (action === 'clone') {
+      const { originSellerId, destSellerId, codigo, overrides = {}, validar = false } = body;
+      if (!originSellerId || !destSellerId) return json({ ok: false, error: 'Escolha a conta de origem e a de destino' });
+      if (String(originSellerId) === String(destSellerId)) {
+        return json({ ok: false, error: 'Origem e destino são a mesma conta. O ML trata como anúncio duplicado.' });
+      }
+
+      let item: any; let descricao = '';
+      try { ({ item, descricao } = await lerOrigem(originSellerId, codigo)); }
+      catch (e) { return json({ ok: false, error: (e as Error).message }); }
+      if (Array.isArray(item.variations) && item.variations.length > 0) {
+        return json({ ok: false, error: 'Anúncio com variações ainda não é suportado nesta versão.' });
+      }
+
+      let destToken: string;
+      try { destToken = await tokenDa(destSellerId); }
+      catch (e) { return json({ ok: false, error: (e as Error).message }); }
+      const destinoUP = await ehUserProductSeller(destSellerId, destToken);
+
+      // ── Monta o anúncio novo a partir da origem ──
+      const atributos = (item.attributes || [])
+        .filter((a: any) => !ATRIBUTOS_IGNORADOS.has(a.id) && (a.value_id || a.value_name))
+        .map(termo);
+
+      const saleTerms = (item.sale_terms || []).map(termo);
+
+      const nome = String(overrides.titulo || '').trim();
+      const payload: Record<string, unknown> = {
+        category_id: item.category_id,
+        price: Number(overrides.preco) > 0 ? Number(overrides.preco) : item.price,
+        currency_id: item.currency_id || 'BRL',
+        available_quantity: Number.isInteger(Number(overrides.estoque)) && Number(overrides.estoque) > 0
+          ? Number(overrides.estoque) : Math.max(1, item.available_quantity || 1),
+        buying_mode: item.buying_mode || 'buy_it_now',
+        listing_type_id: overrides.tipo || item.listing_type_id,
+        condition: item.condition || 'new',
+        pictures: (item.pictures || []).map((p: any) => ({ source: p.secure_url || p.url })),
+        attributes: atributos,
+        sale_terms: saleTerms,
+        shipping: {
+          mode: 'me2',
+          local_pick_up: !!item.shipping?.local_pick_up,
+          free_shipping: !!item.shipping?.free_shipping,
+        },
+      };
+      if (item.video_id) payload.video_id = item.video_id;
+      if (Array.isArray(item.channels) && item.channels.length) payload.channels = item.channels;
+
+      // Modelo User Products: family_name, sem title. Modelo antigo: title.
+      if (destinoUP) payload.family_name = nome || item.family_name || item.title;
+      else payload.title = nome || item.title;
+
+      // validar = true → /items/validate: confere tudo sem publicar
+      const postar = async (p: Record<string, unknown>) => {
+        const r = await fetch(`${ML}/items${validar ? '/validate' : ''}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${destToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(p),
+        });
+        const data = await r.json().catch(() => null);
+        // O validate responde 400 mesmo quando só há AVISOS; sem erro real = ok
+        const soAvisos = validar && r.status === 400 &&
+          causas(data).length > 0 && causas(data).every((c: any) => c.type === 'warning');
+        return { status: r.status, ok: r.ok || soAvisos, data };
+      };
+
+      let modo = destinoUP ? 'family_name' : 'title';
+      let res = await postar(payload);
+
+      // O ML às vezes discorda da tag: troca de modelo e tenta uma vez.
+      const txt = (d: any) => JSON.stringify(d || {});
+      if (!res.ok && !destinoUP && /\[title\] are invalid|family_name/i.test(txt(res.data))) {
+        delete payload.title; payload.family_name = nome || item.family_name || item.title; modo = 'family_name (retry)';
+        res = await postar(payload);
+      } else if (!res.ok && destinoUP && /\[family_name\] are invalid/i.test(txt(res.data))) {
+        delete payload.family_name; payload.title = nome || item.title; modo = 'title (retry)';
+        res = await postar(payload);
+      }
+
+      if (validar) {
+        const c = causas(res.data);
+        return json({
+          ok: res.ok, validacao: true, modo,
+          erros: c.filter((x: any) => x.type !== 'warning').map((x: any) => x.message),
+          avisos: c.filter((x: any) => x.type === 'warning').map((x: any) => x.message),
+          error: res.ok ? undefined : (c.filter((x: any) => x.type !== 'warning').map((x: any) => x.message).join(' · ')
+            || res.data?.message || `HTTP ${res.status}`),
+        });
+      }
+
+      let descricaoOk: boolean | null = null;
+      const novoId: string | null = res.ok ? res.data?.id : null;
+      if (novoId && descricao) {
+        const d = await fetch(`${ML}/items/${novoId}/description`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${destToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plain_text: descricao }),
+        });
+        descricaoOk = d.ok;
+      }
+
+      await supabaseAdmin.from('ml_clone_logs').insert({
+        user_id: userId, origin_seller_id: String(originSellerId), dest_seller_id: String(destSellerId),
+        source_item_id: item.id, new_item_id: novoId, status: res.ok ? 'ok' : 'erro', modo,
+        request_payload: payload, response_status: res.status, response_body: res.data, description_ok: descricaoOk,
+      });
+
+      if (!res.ok) {
+        const causas: any[] = Array.isArray(res.data?.cause) ? res.data.cause : [];
+        const erros = causas.filter((c) => c.type !== 'warning').map((c) => c.message).filter(Boolean);
+        return json({
+          ok: false,
+          error: erros.length ? erros.join(' · ') : (res.data?.message || `HTTP ${res.status}`),
+          status: res.status, detalhe: res.data,
+        });
+      }
+      const avisos = causas(res.data).filter((c: any) => c.type === 'warning').map((c: any) => c.message);
+      return json({
+        ok: true, novoId, permalink: res.data?.permalink, status: res.data?.status,
+        titulo: res.data?.title, descricaoOk, modo, avisos,
+      });
+    }
+
+    return json({ error: 'Invalid action' }, 400);
+  } catch (error) {
+    console.error('[ml-item-clone] Error:', error);
+    return json({ error: String(error) }, 500);
+  }
+});
+
+function causas(d: any): any[] {
+  return Array.isArray(d?.cause) ? d.cause : [];
+}
