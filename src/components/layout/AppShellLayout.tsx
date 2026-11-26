@@ -20,6 +20,7 @@ import { ModuleNotesOverlay, FloatingPostItButton } from "@/components/notes";
 import { useUtilitiesPreferences } from "@/hooks/useUtilitiesPreferences";
 import { GlobalExplanatoryCardGate } from "@/components/explanatory-cards/GlobalExplanatoryCardGate";
 import { ModuleIntroProvider } from "@/contexts/ModuleIntroContext";
+import { FeatureAnnouncementModal } from "@/components/announcements/FeatureAnnouncementModal";
 
 // Context for page-level header customization
 interface PageHeaderContextType {
@@ -167,6 +168,7 @@ export function AppShellLayout() {
               </Suspense>
               <ModuleNotesOverlay companyId={sellerId} />
               <GlobalExplanatoryCardGate />
+              <FeatureAnnouncementModal />
             </main>
           </SidebarInset>
           <FloatingPostItButton visible={utilitiesPrefs.showPostItButton !== false} companyId={sellerId} />
