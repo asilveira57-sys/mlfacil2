@@ -14,7 +14,7 @@ serve(async (req) => {
 
   // Diagnóstico sem dados: confirma qual versão está publicada.
   if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
-    return new Response(JSON.stringify({ fn: 'ml-price-adjustment', version: 'availability-time-v3' }),
+    return new Response(JSON.stringify({ fn: 'ml-price-adjustment', version: 'availability-time-v4' }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
@@ -279,10 +279,11 @@ serve(async (req) => {
     // ── Disponibilidade de estoque (MANUFACTURING_TIME) ──
     // sale_terms é array: sempre lemos os termos atuais e trocamos só o prazo,
     // para não apagar a garantia (WARRANTY_TIME). Unidade = dias corridos.
+    // "Sem prazo" = deixar vazio (não existe 0 no ML).
 
     // ── ACTION: scan_manufacturing_candidates ──────────────────────────────────
-    // Lista, AO VIVO no Mercado Livre, os anúncios que seriam afetados.
-    // Não escreve nada. Use para conferir antes de aplicar.
+    // Lista, AO VIVO no Mercado Livre, os anúncios elegíveis. Não escreve nada.
+    // Usa search_type=scan (scroll_id) para não parar em 1.000 anúncios.
     if (action === 'scan_manufacturing_candidates') {
       const {
         terms,
@@ -291,36 +292,30 @@ serve(async (req) => {
         onlyActive = true,
       } = body;
 
-      // terms: lista de termos (OU). Vazio = devolve todos os elegíveis,
-      // para a tela filtrar localmente sem nova consulta ao ML.
-      const norm = (s: string) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const norm = (s: string) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
       const alvos: string[] = (Array.isArray(terms) ? terms : (titleContains ? [titleContains] : []))
         .map((t: string) => norm(t).trim()).filter(Boolean);
       const candidatos: any[] = [];
-      const ignorados = { full: 0, sem_titulo: 0, inativo: 0 };
+      const ignorados = { full: 0, usado: 0, sem_titulo: 0, inativo: 0 };
 
-      let offset = 0;
-      const PAGE = 50;
-
-      while (true) {
+      let scrollId: string | null = null;
+      let paginas = 0;
+      while (paginas++ < 200) {
         const searchUrl =
-          `https://api.mercadolibre.com/users/${sellerId}/items/search` +
-          `?offset=${offset}&limit=${PAGE}` + (onlyActive ? '&status=active' : '');
-
-        const searchRes = await fetch(searchUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
+          `https://api.mercadolibre.com/users/${sellerId}/items/search?search_type=scan&limit=100` +
+          (onlyActive ? '&status=active' : '') + (scrollId ? `&scroll_id=${encodeURIComponent(scrollId)}` : '');
+        const searchRes = await fetch(searchUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
         if (!searchRes.ok) break;
-
         const searchData = await searchRes.json();
         const ids: string[] = searchData.results || [];
+        scrollId = searchData.scroll_id || null;
         if (ids.length === 0) break;
 
         for (let i = 0; i < ids.length; i += 20) {
           const lote = ids.slice(i, i + 20);
           const multiRes = await fetch(
             `https://api.mercadolibre.com/items?ids=${lote.join(',')}` +
-            `&attributes=id,title,status,sale_terms,shipping,thumbnail`,
+            `&attributes=id,title,status,sale_terms,shipping,thumbnail,condition,catalog_listing,inventory_id,item_relations`,
             { headers: { Authorization: `Bearer ${accessToken}` } },
           );
           if (!multiRes.ok) continue;
@@ -330,28 +325,29 @@ serve(async (req) => {
             const it = entry.body;
 
             if (onlyActive && it.status !== 'active') { ignorados.inativo++; continue; }
-            if (excludeLogistic.includes(it.shipping?.logistic_type)) { ignorados.full++; continue; }
+            // Full: pelo tipo logístico OU por ter estoque no Full (inventory_id)
+            if (excludeLogistic.includes(it.shipping?.logistic_type) || it.inventory_id) { ignorados.full++; continue; }
+            // ML não aceita prazo em anúncio "Usado"
+            if (it.condition === 'used') { ignorados.usado++; continue; }
             if (!it.title) { ignorados.sem_titulo++; continue; }
             if (alvos.length && !alvos.some((a) => norm(it.title).includes(a))) continue;
 
-            const atual = (it.sale_terms || [])
-              .find((t: any) => t.id === 'MANUFACTURING_TIME');
-
+            const atual = (it.sale_terms || []).find((t: any) => t.id === 'MANUFACTURING_TIME');
             candidatos.push({
               itemId: it.id,
               title: it.title,
               logisticType: it.shipping?.logistic_type ?? null,
               prazoAtual: atual?.value_name ?? null,
               thumbnail: it.thumbnail ?? null,
+              catalogo: it.catalog_listing === true,
+              vinculado: Array.isArray(it.item_relations) && it.item_relations.length > 0,
               outrosTermos: (it.sale_terms || [])
                 .filter((t: any) => t.id !== 'MANUFACTURING_TIME')
                 .map((t: any) => `${t.id}=${t.value_name}`),
             });
           }
         }
-
-        offset += PAGE;
-        if (offset >= (searchData.paging?.total || 0)) break;
+        if (!scrollId) break;
       }
 
       return new Response(JSON.stringify({
@@ -360,111 +356,105 @@ serve(async (req) => {
     }
 
     // ── ACTION: apply_manufacturing_time ───────────────────────────────────────
-    // Aplica o prazo em UM anúncio. A tela chama em laço, igual ao apply_price.
-    // Com dryRun = true, devolve o payload que SERIA enviado, sem escrever.
+    // Aplica o prazo em UM anúncio (a tela chama em laço).
+    // days vazio/null/0 → REMOVE o prazo (deixa vazio). dryRun → só mostra o payload.
     if (action === 'apply_manufacturing_time') {
-      const { itemId, days = 6, dryRun = false } = body;
+      const { itemId, dryRun = false } = body;
+      const json = (o: unknown) => new Response(JSON.stringify(o),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-      if (!itemId) {
-        return new Response(JSON.stringify({ error: 'itemId obrigatório' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const diasNum = Number(body.days);
+      const remover = body.days === null || body.days === undefined || body.days === '' || !(diasNum > 0);
+      if (!itemId) return json({ success: false, error: 'itemId obrigatório' });
+      if (!remover && (diasNum > 45 || !Number.isInteger(diasNum))) {
+        return json({ success: false, itemId, error: 'Dias deve ser um número inteiro entre 1 e 45' });
       }
+      const alvo: string | null = remover ? null : `${diasNum} dias`;
+
+      const lerItem = async () => {
+        const r = await fetch(
+          `https://api.mercadolibre.com/items/${itemId}?attributes=id,title,status,sale_terms,shipping,condition,inventory_id`,
+          { headers: { Authorization: `Bearer ${accessToken}` } });
+        return r.ok ? await r.json() : null;
+      };
+      const prazoDe = (it: any) =>
+        (it?.sale_terms || []).find((t: any) => t.id === 'MANUFACTURING_TIME')?.value_name ?? null;
 
       // 1. Lê o estado atual. Nunca montamos o array do zero.
-      const getRes = await fetch(
-        `https://api.mercadolibre.com/items/${itemId}?attributes=id,title,status,sale_terms,shipping`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-      );
-      if (!getRes.ok) {
-        return new Response(JSON.stringify({
-          success: false, itemId, error: 'Falha ao ler o anúncio', status: getRes.status,
-        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      const item = await getRes.json();
+      const item = await lerItem();
+      if (!item) return json({ success: false, itemId, error: 'Falha ao ler o anúncio' });
 
-      // 2. Trava de segurança: nunca mexe em Full nem em anúncio inativo.
-      if (item.shipping?.logistic_type === 'fulfillment') {
-        return new Response(JSON.stringify({
-          success: false, skipped: true, itemId, reason: 'fulfillment',
-        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      // 2. Travas: nunca mexe em Full, Usado nem inativo.
+      if (item.shipping?.logistic_type === 'fulfillment' || item.inventory_id) {
+        return json({ success: false, skipped: true, itemId, reason: 'fulfillment' });
       }
-      if (item.status !== 'active') {
-        return new Response(JSON.stringify({
-          success: false, skipped: true, itemId, reason: `status=${item.status}`,
-        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
+      if (item.condition === 'used') return json({ success: false, skipped: true, itemId, reason: 'usado' });
+      if (item.status !== 'active') return json({ success: false, skipped: true, itemId, reason: `status=${item.status}` });
 
-      // 3. Preserva cada termo existente no formato que o ML espera de volta.
-      //    Lista fechada volta por value_id; o resto volta por value_name.
-      const preserveSaleTerm = (t: any) =>
+      const preserve = (t: any) =>
         t.value_id ? { id: t.id, value_id: t.value_id } : { id: t.id, value_name: t.value_name };
-
       const termosAtuais = Array.isArray(item.sale_terms) ? item.sale_terms : [];
-      const novoPrazo = { id: 'MANUFACTURING_TIME', value_name: `${days} dias` };
+      const outros = termosAtuais.filter((t: any) => t.id !== 'MANUFACTURING_TIME').map(preserve);
+      const prazoAntes = prazoDe(item);
 
-      const saleTermsNovos = [
-        ...termosAtuais
-          .filter((t: any) => t.id !== 'MANUFACTURING_TIME')
-          .map(preserveSaleTerm),
-        novoPrazo,
-      ];
+      // Já está como queremos? Não gasta chamada de escrita.
+      if (prazoAntes === alvo) return json({ success: true, skipped: true, itemId, reason: 'ja_estava', prazoAntes });
 
-      const payload = { sale_terms: saleTermsNovos };
-      const prazoAntes =
-        termosAtuais.find((t: any) => t.id === 'MANUFACTURING_TIME')?.value_name ?? null;
-
-      // Já está no valor desejado? Não gasta chamada de escrita.
-      if (prazoAntes === novoPrazo.value_name) {
-        return new Response(JSON.stringify({
-          success: true, skipped: true, itemId, reason: 'ja_estava', prazoAntes,
-        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
+      // Remover: 1ª tentativa manda o termo vazio; 2ª omite o termo (validado no Desfazer em 25/nov).
+      const tentativas: any[] = remover
+        ? [
+            { sale_terms: [...outros, { id: 'MANUFACTURING_TIME', value_id: null, value_name: null }] },
+            { sale_terms: outros },
+          ]
+        : [{ sale_terms: [...outros, { id: 'MANUFACTURING_TIME', value_name: alvo }] }];
 
       if (dryRun) {
-        return new Response(JSON.stringify({
+        return json({
           success: true, dryRun: true, itemId, title: item.title,
-          prazoAntes, prazoDepois: novoPrazo.value_name,
-          termosPreservados: termosAtuais.filter((t: any) => t.id !== 'MANUFACTURING_TIME').length,
-          payload,
-        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+          prazoAntes, prazoDepois: alvo, termosPreservados: outros.length, payload: tentativas[0],
+        });
       }
 
-      // 4. Escreve.
-      const putRes = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const respBody = await putRes.json();
+      // 3. Escreve e confere lendo de novo.
+      let putStatus = 0; let respBody: any = null; let payloadUsado: any = null; let depois: string | null = prazoAntes;
+      for (const payload of tentativas) {
+        const putRes = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        putStatus = putRes.status; respBody = await putRes.json().catch(() => null); payloadUsado = payload;
+        // 409 = conflito (ex.: catálogo espelhado gravando junto). Espera e confere.
+        if (putStatus === 409) await new Promise((r) => setTimeout(r, 1500));
+        const conf = await lerItem();
+        depois = prazoDe(conf);
+        if (depois === alvo) break;
+      }
+      const ok = depois === alvo;
 
-      // 5. Log com os sale_terms ANTES — é o que permite desfazer depois.
+      // 4. Log com os sale_terms ANTES — é o que permite desfazer depois.
       const { error: logError } = await supabaseAdmin.from('sale_term_adjustment_logs').insert({
-        seller_id: sellerId,
-        user_id: userId,
-        item_id: itemId,
-        titulo: item.title || null,
-        term_id: 'MANUFACTURING_TIME',
-        valor_antes: prazoAntes,
-        valor_depois: novoPrazo.value_name,
-        sale_terms_antes: termosAtuais,
-        request_payload: payload,
-        response_status: putRes.status,
-        response_body: respBody,
+        seller_id: sellerId, user_id: userId, item_id: itemId, titulo: item.title || null,
+        term_id: 'MANUFACTURING_TIME', acao: 'apply',
+        valor_antes: prazoAntes, valor_depois: alvo, sale_terms_antes: termosAtuais,
+        request_payload: payloadUsado, response_status: ok ? 200 : (putStatus || 500), response_body: respBody,
       });
       if (logError) console.error('[manufacturing-time] log falhou:', logError.message);
 
-      if (!putRes.ok) {
+      if (!ok) {
+        const causas: any[] = Array.isArray(respBody?.cause) ? respBody.cause : [];
+        const txt = JSON.stringify(causas);
+        const motivo = /used/i.test(txt) ? 'anúncio cadastrado como Usado'
+          : /fulfillment/i.test(txt) ? 'anúncio no Full'
+          : respBody?.message || `prazo ficou ${depois ?? 'vazio'}`;
         console.error(`[manufacturing-time] ${itemId} falhou:`, respBody);
-        return new Response(JSON.stringify({
-          success: false, itemId, error: respBody?.message || 'PUT falhou',
-          status: putRes.status, responseBody: respBody,
-        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return json({ success: false, itemId, error: motivo, status: putStatus, responseBody: respBody });
       }
 
-      return new Response(JSON.stringify({
-        success: true, itemId, title: item.title,
-        prazoAntes, prazoDepois: novoPrazo.value_name,
-      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      return json({
+        success: true, itemId, title: item.title, prazoAntes, prazoDepois: alvo,
+        conferido409: putStatus === 409,
+      });
     }
 
     // ── ACTION: revert_manufacturing_time ──

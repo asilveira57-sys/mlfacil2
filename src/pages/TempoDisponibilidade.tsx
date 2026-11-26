@@ -1,4 +1,4 @@
-import { useMemo, useState, KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, KeyboardEvent } from "react";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -8,14 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
-  Clock, Search, X, Plus, Loader2, ArrowRight, CheckCircle2, XCircle, MinusCircle, Eye, RefreshCw,
-  Undo2, History,
+  Clock, Search, X, Plus, Loader2, ArrowRight, ArrowLeft, ChevronsRight, ChevronsLeft,
+  CheckCircle2, XCircle, MinusCircle, Eye, RefreshCw, Undo2, History, Eraser,
 } from "lucide-react";
 
 interface Candidato {
@@ -24,6 +24,8 @@ interface Candidato {
   logisticType: string | null;
   prazoAtual: string | null;
   thumbnail?: string | null;
+  catalogo?: boolean;
+  vinculado?: boolean;
   outrosTermos: string[];
 }
 
@@ -34,11 +36,23 @@ interface Resultado {
   message: string;
 }
 
+interface Aplicado {
+  itemId: string;
+  titulo: string;
+  valorAntes: string | null;
+  valorDepois: string | null;
+  quando: string;
+}
+
+type FiltroPrazo = "todos" | "com" | "sem";
+type Modo = "definir" | "remover";
+
 const TERMOS_SUGERIDOS = ["couché", "lacre", "frágil"];
 const EXCLUIR_SUGERIDOS = ["tag", "gôndola", "não adesiv", "sem adesiv", "sem cola"];
+const VERSAO_MINIMA = 4; // availability-time-v4: remover prazo, catálogo, Usado/Full
 
 const norm = (s: string) =>
-  s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+  s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/\s+/g, " ").trim();
 
 /** O termo precisa começar uma palavra do título: "tag" acha "Tag"/"Tags",
  *  mas não "montagem"; "não adesiv" acha "Não Adesiva". */
@@ -59,37 +73,39 @@ const salvarLista = (chave: string, v: string[]) => {
   try { localStorage.setItem(chave, JSON.stringify(v)); } catch { /* ignora */ }
 };
 
-interface Aplicado {
-  itemId: string;
-  titulo: string;
-  valorAntes: string | null;
-  valorDepois: string | null;
-  quando: string;
-}
+const prazoTxt = (v: string | null | undefined) => v || "sem prazo";
 
 export default function TempoDisponibilidade() {
   const { sellerId } = useActiveAccount();
 
+  // Versão publicada da função (remover prazo exige v4)
+  const [versaoFuncao, setVersaoFuncao] = useState<number | null>(null);
+  useEffect(() => {
+    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ml-price-adjustment?version`;
+    fetch(url).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      const m = String(d?.version || "").match(/v(\d+)$/);
+      setVersaoFuncao(m ? Number(m[1]) : 0);
+    }).catch(() => setVersaoFuncao(0));
+  }, []);
+  const funcaoAtualizada = (versaoFuncao ?? 0) >= VERSAO_MINIMA;
+
   const [carregando, setCarregando] = useState(false);
   const [anuncios, setAnuncios] = useState<Candidato[] | null>(null);
-  const [ignorados, setIgnorados] = useState<{ full: number; inativo: number; sem_titulo: number } | null>(null);
+  const [ignorados, setIgnorados] = useState<{ full: number; usado?: number; inativo: number; sem_titulo: number } | null>(null);
 
   const [termos, setTermosState] = useState<string[]>(() => lerLista("tempoDisp.termos", TERMOS_SUGERIDOS));
   const [novoTermo, setNovoTermo] = useState("");
   const [excluir, setExcluirState] = useState<string[]>(() => lerLista("tempoDisp.excluir", EXCLUIR_SUGERIDOS));
+  const [novoExcluir, setNovoExcluir] = useState("");
   const setTermos = (v: string[]) => { setTermosState(v); salvarLista("tempoDisp.termos", v); };
   const setExcluir = (v: string[]) => { setExcluirState(v); salvarLista("tempoDisp.excluir", v); };
   const [verRemovidos, setVerRemovidos] = useState(false);
+  const [filtroPrazo, setFiltroPrazo] = useState<FiltroPrazo>("todos");
 
-  // Desfazer
-  const [aplicados, setAplicados] = useState<Aplicado[] | null>(null);
-  const [carregandoAplicados, setCarregandoAplicados] = useState(false);
-  const [marcadosDesfazer, setMarcadosDesfazer] = useState<Set<string>>(new Set());
-  const [desfazendo, setDesfazendo] = useState(false);
-  const [resultadoDesfazer, setResultadoDesfazer] = useState<Resultado[]>([]);
-  const [novoExcluir, setNovoExcluir] = useState("");
+  // Coluna da direita — ordem de inclusão
+  const [selecionadosIds, setSelecionadosIds] = useState<string[]>([]);
 
-  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [modo, setModo] = useState<Modo>("definir");
   const [dias, setDias] = useState(6);
 
   const [confirmarAberto, setConfirmarAberto] = useState(false);
@@ -97,7 +113,14 @@ export default function TempoDisponibilidade() {
   const [progresso, setProgresso] = useState(0);
   const [resultados, setResultados] = useState<Resultado[]>([]);
 
-  // ── Carregar todos os anúncios elegíveis (ativos e fora do Full) ──
+  // Desfazer
+  const [aplicados, setAplicados] = useState<Aplicado[] | null>(null);
+  const [carregandoAplicados, setCarregandoAplicados] = useState(false);
+  const [marcadosDesfazer, setMarcadosDesfazer] = useState<Set<string>>(new Set());
+  const [desfazendo, setDesfazendo] = useState(false);
+  const [resultadoDesfazer, setResultadoDesfazer] = useState<Resultado[]>([]);
+
+  // ── Carregar todos os anúncios elegíveis ──
   const carregar = async () => {
     if (!sellerId) {
       toast.error("Selecione uma conta do Mercado Livre no topo da página.");
@@ -114,9 +137,8 @@ export default function TempoDisponibilidade() {
       const lista: Candidato[] = data?.candidatos || [];
       setAnuncios(lista);
       setIgnorados(data?.ignorados || null);
-      // Pré-seleciona tudo que bate com os termos atuais
-      setSelecionados(new Set(filtrar(lista, termos, excluir).map((a) => a.itemId)));
-      toast.success(`${lista.length} anúncios ativos fora do Full carregados.`);
+      setSelecionadosIds([]);
+      toast.success(`${lista.length} anúncios elegíveis carregados.`);
     } catch (e: any) {
       toast.error(`Não consegui carregar os anúncios: ${e?.message || e}`);
     } finally {
@@ -124,17 +146,24 @@ export default function TempoDisponibilidade() {
     }
   };
 
-  const filtrar = (lista: Candidato[], inc: string[], exc: string[]) =>
+  const filtrar = (lista: Candidato[], inc: string[], exc: string[], fp: FiltroPrazo) =>
     lista.filter((a) => {
+      if (fp === "com" && !a.prazoAtual) return false;
+      if (fp === "sem" && a.prazoAtual) return false;
       if (inc.length && !inc.some((k) => contem(a.title, k))) return false;
       if (exc.some((k) => contem(a.title, k))) return false;
       return true;
     });
 
   const filtrados = useMemo(
-    () => (anuncios ? filtrar(anuncios, termos, excluir) : []),
-    [anuncios, termos, excluir],
+    () => (anuncios ? filtrar(anuncios, termos, excluir, filtroPrazo) : []),
+    [anuncios, termos, excluir, filtroPrazo],
   );
+
+  const porId = useMemo(() => new Map((anuncios || []).map((a) => [a.itemId, a])), [anuncios]);
+  const selSet = useMemo(() => new Set(selecionadosIds), [selecionadosIds]);
+  const disponiveis = filtrados.filter((a) => !selSet.has(a.itemId));
+  const selecionados = selecionadosIds.map((id) => porId.get(id)).filter(Boolean) as Candidato[];
 
   const contagemPorTermo = useMemo(() => {
     const m: Record<string, number> = {};
@@ -146,10 +175,96 @@ export default function TempoDisponibilidade() {
   // Bateram com um termo de entrada mas foram barrados pelo filtro negativo
   const removidos = useMemo(() => {
     if (!anuncios || excluir.length === 0) return [];
-    return filtrar(anuncios, termos, []).filter((a) => excluir.some((k) => contem(a.title, k)));
-  }, [anuncios, termos, excluir]);
+    return filtrar(anuncios, termos, [], filtroPrazo).filter((a) => excluir.some((k) => contem(a.title, k)));
+  }, [anuncios, termos, excluir, filtroPrazo]);
 
-  // ── Desfazer: anúncios cujo último registro é um prazo aplicado com sucesso ──
+  const valorAlvo: string | null = modo === "remover" ? null : `${dias} dias`;
+  const jaNoValor = selecionados.filter((a) => (a.prazoAtual ?? null) === valorAlvo).length;
+
+  // ── Mover entre colunas ──
+  const adicionar = (id: string) => setSelecionadosIds((s) => (s.includes(id) ? s : [...s, id]));
+  const tirar = (id: string) => setSelecionadosIds((s) => s.filter((x) => x !== id));
+  const enviarTodos = () => setSelecionadosIds((s) => [...s, ...disponiveis.map((a) => a.itemId)]);
+  const tirarTodos = () => setSelecionadosIds([]);
+
+  // ── Termos ──
+  const addTermo = (lista: string[], set: (v: string[]) => void, valor: string, limpar: () => void) => {
+    const v = valor.trim();
+    if (!v) return;
+    if (!lista.some((t) => norm(t) === norm(v))) set([...lista, v]);
+    limpar();
+  };
+  const onEnter = (fn: () => void) => (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") { e.preventDefault(); fn(); }
+  };
+
+  // ── Aplicar ──
+  const motivoPulo = (data: any, a: Candidato) => {
+    if (data.reason === "ja_estava") {
+      return (a.catalogo || a.vinculado) && valorAlvo
+        ? `recebeu pelo anúncio original (já está em ${data.prazoAntes})`
+        : `já estava em ${prazoTxt(data.prazoAntes)}`;
+    }
+    if (data.reason === "fulfillment") return "anúncio no Full";
+    if (data.reason === "usado") return "anúncio cadastrado como Usado";
+    return data.reason;
+  };
+
+  const executar = async (dryRun: boolean) => {
+    const alvo = selecionados;
+    if (!alvo.length) return;
+    if (modo === "remover" && !funcaoAtualizada) {
+      toast.error("Remover prazo ainda não está publicado no servidor.");
+      return;
+    }
+    setConfirmarAberto(false);
+    setAplicando(true);
+    setProgresso(0);
+    const out: Resultado[] = [];
+
+    for (let i = 0; i < alvo.length; i++) {
+      const a = alvo[i];
+      try {
+        const { data, error } = await supabase.functions.invoke("ml-price-adjustment", {
+          body: {
+            action: "apply_manufacturing_time", sellerId, itemId: a.itemId,
+            days: modo === "remover" ? null : dias, dryRun,
+          },
+        });
+        if (error) throw error;
+        if (data?.dryRun) {
+          out.push({ itemId: a.itemId, title: a.title, status: "simulado",
+            message: `${prazoTxt(data.prazoAntes)} → ${prazoTxt(data.prazoDepois)} (mantém ${data.termosPreservados} outro(s) termo(s))` });
+        } else if (data?.skipped) {
+          out.push({ itemId: a.itemId, title: a.title, status: "pulado", message: motivoPulo(data, a) });
+        } else if (data?.success) {
+          out.push({ itemId: a.itemId, title: a.title, status: "ok",
+            message: `${prazoTxt(data.prazoAntes)} → ${prazoTxt(data.prazoDepois)}${data.conferido409 ? " (conferido após conflito)" : ""}` });
+        } else {
+          out.push({ itemId: a.itemId, title: a.title, status: "erro", message: data?.error || "falhou" });
+        }
+      } catch (e: any) {
+        out.push({ itemId: a.itemId, title: a.title, status: "erro", message: e?.message || String(e) });
+      }
+      setResultados([...out]);
+      setProgresso(Math.round(((i + 1) / alvo.length) * 100));
+      if (!dryRun) await new Promise((r) => setTimeout(r, 250)); // respeita o limite do ML
+    }
+
+    setAplicando(false);
+    const ok = out.filter((r) => r.status === "ok").length;
+    const erro = out.filter((r) => r.status === "erro").length;
+    if (dryRun) toast.success(`Simulação pronta: ${out.length} anúncio(s). Nada foi alterado.`);
+    else toast[erro ? "warning" : "success"](`${ok} alterado(s), ${erro} com erro.`);
+
+    if (!dryRun && anuncios) {
+      const feitos = new Set(out.filter((r) => r.status === "ok").map((r) => r.itemId));
+      setAnuncios(anuncios.map((a) => (feitos.has(a.itemId) ? { ...a, prazoAtual: valorAlvo } : a)));
+      setSelecionadosIds((s) => s.filter((id) => !feitos.has(id)));
+    }
+  };
+
+  // ── Desfazer: anúncios cujo último registro é uma alteração bem-sucedida ──
   const carregarAplicados = async () => {
     if (!sellerId) { toast.error("Selecione uma conta do Mercado Livre no topo da página."); return; }
     setCarregandoAplicados(true);
@@ -160,7 +275,7 @@ export default function TempoDisponibilidade() {
         .eq("seller_id", String(sellerId))
         .eq("term_id", "MANUFACTURING_TIME")
         .order("created_at", { ascending: false })
-        .limit(2000);
+        .limit(3000);
       if (error) throw error;
       const visto = new Set<string>();
       const lista: Aplicado[] = [];
@@ -173,7 +288,6 @@ export default function TempoDisponibilidade() {
         }
       }
       setAplicados(lista);
-      // Já marca os que o filtro negativo atual barraria
       setMarcadosDesfazer(new Set(lista.filter((a) => excluir.some((k) => contem(a.titulo, k))).map((a) => a.itemId)));
     } catch (e: any) {
       toast.error(`Não consegui ler o histórico: ${e?.message || e}`);
@@ -195,7 +309,7 @@ export default function TempoDisponibilidade() {
         });
         if (error) throw error;
         if (data?.success) out.push({ itemId: a.itemId, title: a.titulo, status: "ok",
-          message: `voltou para ${data.prazoDepois ?? "sem prazo"}` });
+          message: `voltou para ${prazoTxt(data.prazoDepois)}` });
         else if (data?.skipped) out.push({ itemId: a.itemId, title: a.titulo, status: "pulado", message: "nada a desfazer" });
         else out.push({ itemId: a.itemId, title: a.titulo, status: "erro", message: data?.error || "falhou" });
       } catch (e: any) {
@@ -210,90 +324,38 @@ export default function TempoDisponibilidade() {
     await carregarAplicados();
   };
 
-  const selecionadosVisiveis = filtrados.filter((a) => selecionados.has(a.itemId));
-  const valorAlvo = `${dias} dias`;
-  const jaNoValor = selecionadosVisiveis.filter((a) => a.prazoAtual === valorAlvo).length;
-
-  // ── Termos ──
-  const addTermo = (lista: string[], set: (v: string[]) => void, valor: string, limpar: () => void) => {
-    const v = valor.trim();
-    if (!v) return;
-    if (!lista.some((t) => norm(t) === norm(v))) set([...lista, v]);
-    limpar();
-  };
-  const onEnter = (fn: () => void) => (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") { e.preventDefault(); fn(); }
-  };
-
-  // ── Seleção ──
-  const toggle = (id: string) => {
-    const n = new Set(selecionados);
-    n.has(id) ? n.delete(id) : n.add(id);
-    setSelecionados(n);
-  };
-  const todosMarcados = filtrados.length > 0 && filtrados.every((a) => selecionados.has(a.itemId));
-  const toggleTodos = () => {
-    const n = new Set(selecionados);
-    if (todosMarcados) filtrados.forEach((a) => n.delete(a.itemId));
-    else filtrados.forEach((a) => n.add(a.itemId));
-    setSelecionados(n);
-  };
-
-  // ── Aplicar ──
-  const executar = async (dryRun: boolean) => {
-    const alvo = selecionadosVisiveis;
-    if (!alvo.length) return;
-    setConfirmarAberto(false);
-    setAplicando(true);
-    setProgresso(0);
-    const out: Resultado[] = [];
-
-    for (let i = 0; i < alvo.length; i++) {
-      const a = alvo[i];
-      try {
-        const { data, error } = await supabase.functions.invoke("ml-price-adjustment", {
-          body: { action: "apply_manufacturing_time", sellerId, itemId: a.itemId, days: dias, dryRun },
-        });
-        if (error) throw error;
-        if (data?.dryRun) {
-          out.push({ itemId: a.itemId, title: a.title, status: "simulado",
-            message: `${data.prazoAntes ?? "sem prazo"} → ${data.prazoDepois} (mantém ${data.termosPreservados} outro(s) termo(s))` });
-        } else if (data?.skipped) {
-          const motivo = data.reason === "ja_estava" ? `já estava em ${data.prazoAntes}`
-            : data.reason === "fulfillment" ? "anúncio no Full" : data.reason;
-          out.push({ itemId: a.itemId, title: a.title, status: "pulado", message: motivo });
-        } else if (data?.success) {
-          out.push({ itemId: a.itemId, title: a.title, status: "ok",
-            message: `${data.prazoAntes ?? "sem prazo"} → ${data.prazoDepois}` });
-        } else {
-          out.push({ itemId: a.itemId, title: a.title, status: "erro", message: data?.error || "falhou" });
-        }
-      } catch (e: any) {
-        out.push({ itemId: a.itemId, title: a.title, status: "erro", message: e?.message || String(e) });
-      }
-      setResultados([...out]);
-      setProgresso(Math.round(((i + 1) / alvo.length) * 100));
-      if (!dryRun) await new Promise((r) => setTimeout(r, 250)); // respeita o limite do ML
-    }
-
-    setAplicando(false);
-    const ok = out.filter((r) => r.status === "ok").length;
-    const erro = out.filter((r) => r.status === "erro").length;
-    if (dryRun) toast.success(`Simulação pronta: ${out.length} anúncio(s). Nada foi alterado.`);
-    else toast[erro ? "warning" : "success"](`${ok} aplicado(s), ${erro} com erro.`);
-
-    // Atualiza o prazo exibido na tabela sem recarregar do ML
-    if (!dryRun && anuncios) {
-      const aplicados = new Set(out.filter((r) => r.status === "ok").map((r) => r.itemId));
-      setAnuncios(anuncios.map((a) => (aplicados.has(a.itemId) ? { ...a, prazoAtual: valorAlvo } : a)));
-    }
-  };
-
   const iconeStatus = (s: Resultado["status"]) =>
-    s === "ok" ? <CheckCircle2 className="h-4 w-4 text-green-600" />
-    : s === "erro" ? <XCircle className="h-4 w-4 text-destructive" />
-    : s === "simulado" ? <Eye className="h-4 w-4 text-primary" />
-    : <MinusCircle className="h-4 w-4 text-muted-foreground" />;
+    s === "ok" ? <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+    : s === "erro" ? <XCircle className="h-4 w-4 text-destructive shrink-0" />
+    : s === "simulado" ? <Eye className="h-4 w-4 text-primary shrink-0" />
+    : <MinusCircle className="h-4 w-4 text-muted-foreground shrink-0" />;
+
+  const linhaAnuncio = (a: Candidato, lado: "esq" | "dir", onClick: () => void) => (
+    <div
+      key={a.itemId}
+      className={cn(
+        "flex items-center gap-2 px-3 py-2 border-b text-xs cursor-pointer",
+        lado === "esq" ? "hover:bg-muted/50" : "hover:bg-destructive/10",
+      )}
+      onClick={onClick}
+      title={lado === "esq" ? "Clique para selecionar" : "Clique para tirar"}
+    >
+      {a.thumbnail && <img src={a.thumbnail} alt="" className="w-8 h-8 rounded object-cover shrink-0" loading="lazy" />}
+      <div className="flex-1 min-w-0">
+        <p className="truncate font-medium">{a.title}</p>
+        <p className="text-muted-foreground flex items-center gap-1.5 flex-wrap">
+          <span>{a.itemId}</span>
+          <span>·</span>
+          <span className={a.prazoAtual ? "text-foreground" : ""}>{prazoTxt(a.prazoAtual)}</span>
+        </p>
+      </div>
+      {(a.catalogo || a.vinculado) && (
+        <Badge variant="outline" className="text-[10px] shrink-0" title="Anúncio de catálogo: espelha o anúncio original">
+          Catálogo
+        </Badge>
+      )}
+    </div>
+  );
 
   return (
     <div className="container mx-auto px-4 py-6 max-w-6xl space-y-6">
@@ -302,8 +364,8 @@ export default function TempoDisponibilidade() {
           <Clock className="h-6 w-6 text-primary" /> Tempo de Disponibilidade
         </h1>
         <p className="text-muted-foreground mt-1">
-          Filtre anúncios pelo título e aplique o prazo de disponibilidade de estoque em lote.
-          Só entram anúncios ativos e fora do Full. A garantia e os demais termos do anúncio são mantidos.
+          Filtre anúncios pelo título e defina ou remova o prazo de disponibilidade de estoque em lote.
+          Só entram anúncios ativos, novos e fora do Full. A garantia e os demais termos do anúncio são mantidos.
         </p>
       </header>
 
@@ -312,7 +374,7 @@ export default function TempoDisponibilidade() {
         <CardHeader>
           <CardTitle className="text-lg">1. Carregar anúncios da conta</CardTitle>
           <CardDescription>
-            Busca no Mercado Livre todos os anúncios ativos fora do Full da conta selecionada no topo.
+            Busca no Mercado Livre todos os anúncios elegíveis da conta selecionada no topo.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
@@ -324,7 +386,8 @@ export default function TempoDisponibilidade() {
           {anuncios && (
             <span className="text-sm text-muted-foreground">
               {anuncios.length} anúncios elegíveis
-              {ignorados && ` · ${ignorados.full} no Full ignorados`}
+              {ignorados && ` · ignorados: ${ignorados.full} no Full`}
+              {ignorados?.usado ? `, ${ignorados.usado} cadastrados como Usado` : ""}
             </span>
           )}
         </CardContent>
@@ -333,14 +396,14 @@ export default function TempoDisponibilidade() {
       {/* 2. Filtrar */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">2. Filtrar pelo título</CardTitle>
+          <CardTitle className="text-lg">2. Filtrar</CardTitle>
           <CardDescription>
             Entra o anúncio que tiver <strong>qualquer um</strong> dos termos no título e{" "}
             <strong>nenhum</strong> dos termos que não entram. Não diferencia maiúsculas nem acentos, e o
             termo precisa começar uma palavra ("tag" pega "Tag", mas não "montagem"). Os termos ficam salvos.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-5">
           <div>
             <p className="text-sm font-medium mb-2">Termos que entram</p>
             <div className="flex flex-wrap gap-2 mb-2">
@@ -401,63 +464,68 @@ export default function TempoDisponibilidade() {
               </div>
             )}
           </div>
+
+          <div>
+            <p className="text-sm font-medium mb-2">Prazo atual</p>
+            <div className="flex flex-wrap gap-2">
+              {([
+                ["todos", "Todos"],
+                ["com", "Só com prazo"],
+                ["sem", "Só sem prazo"],
+              ] as [FiltroPrazo, string][]).map(([v, label]) => (
+                <Button key={v} size="sm" variant={filtroPrazo === v ? "default" : "outline"} onClick={() => setFiltroPrazo(v)}>
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
-      {/* 3. Revisar */}
+      {/* 3. Selecionar — duas colunas */}
       {anuncios && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <div>
-              <CardTitle className="text-lg">3. Revisar e marcar</CardTitle>
-              <CardDescription>
-                {filtrados.length} encontrado(s) · {selecionadosVisiveis.length} marcado(s)
-              </CardDescription>
-            </div>
+          <CardHeader>
+            <CardTitle className="text-lg">3. Selecionar</CardTitle>
+            <CardDescription>
+              Clique num anúncio para passar de um lado para o outro, ou use as setas. Só os da direita recebem a alteração.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            {filtrados.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-6 text-center">
-                Nenhum anúncio com esses termos. Ajuste os filtros acima.
-              </p>
-            ) : (
-              <div className="border rounded-md max-h-[480px] overflow-auto">
-                <Table>
-                  <TableHeader className="sticky top-0 bg-background">
-                    <TableRow>
-                      <TableHead className="w-10">
-                        <Checkbox checked={todosMarcados} onCheckedChange={toggleTodos} aria-label="Marcar todos" />
-                      </TableHead>
-                      <TableHead>Anúncio</TableHead>
-                      <TableHead className="w-36">Prazo atual</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtrados.map((a) => (
-                      <TableRow key={a.itemId} className="cursor-pointer" onClick={() => toggle(a.itemId)}>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <Checkbox checked={selecionados.has(a.itemId)} onCheckedChange={() => toggle(a.itemId)} />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            {a.thumbnail && <img src={a.thumbnail} alt="" className="h-10 w-10 rounded object-cover" loading="lazy" />}
-                            <div>
-                              <div className="font-medium leading-tight">{a.title}</div>
-                              <div className="text-xs text-muted-foreground">{a.itemId}</div>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {a.prazoAtual
-                            ? <Badge variant={a.prazoAtual === valorAlvo ? "default" : "secondary"}>{a.prazoAtual}</Badge>
-                            : <span className="text-xs text-muted-foreground">sem prazo</span>}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 items-start">
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-muted px-3 py-2 text-xs font-medium">Para selecionar ({disponiveis.length})</div>
+                <div className="max-h-[420px] overflow-auto">
+                  {disponiveis.length === 0 ? (
+                    <p className="p-4 text-sm text-muted-foreground text-center">
+                      {filtrados.length === 0 ? "Nenhum anúncio com esses filtros." : "Todos já estão selecionados."}
+                    </p>
+                  ) : disponiveis.map((a) => (
+                    linhaAnuncio(a, "esq", () => adicionar(a.itemId))
+                  ))}
+                </div>
               </div>
-            )}
+
+              <div className="flex md:flex-col gap-2 items-center justify-center py-4">
+                <Button variant="outline" size="icon" title="Selecionar o primeiro"
+                  onClick={() => disponiveis[0] && adicionar(disponiveis[0].itemId)}><ArrowRight className="h-4 w-4" /></Button>
+                <Button variant="outline" size="icon" title="Tirar o último"
+                  onClick={() => selecionadosIds.length && tirar(selecionadosIds[selecionadosIds.length - 1])}><ArrowLeft className="h-4 w-4" /></Button>
+                <Button variant="outline" size="icon" title="Enviar todos" onClick={enviarTodos}><ChevronsRight className="h-4 w-4" /></Button>
+                <Button variant="outline" size="icon" title="Tirar todos" onClick={tirarTodos}><ChevronsLeft className="h-4 w-4" /></Button>
+              </div>
+
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-muted px-3 py-2 text-xs font-medium">Selecionados ({selecionados.length})</div>
+                <div className="max-h-[420px] overflow-auto">
+                  {selecionados.length === 0 ? (
+                    <p className="p-4 text-sm text-muted-foreground text-center">Nenhum anúncio selecionado</p>
+                  ) : selecionados.map((a) => (
+                    linhaAnuncio(a, "dir", () => tirar(a.itemId))
+                  ))}
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -469,29 +537,46 @@ export default function TempoDisponibilidade() {
             <CardTitle className="text-lg">4. Tempo de disponibilidade</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Button variant={modo === "definir" ? "default" : "outline"} onClick={() => setModo("definir")}>
+                <Clock className="h-4 w-4 mr-2" /> Definir dias
+              </Button>
+              <Button variant={modo === "remover" ? "default" : "outline"} onClick={() => setModo("remover")}
+                disabled={!funcaoAtualizada}>
+                <Eraser className="h-4 w-4 mr-2" /> Deixar vazio (remover prazo)
+              </Button>
+            </div>
+            {!funcaoAtualizada && versaoFuncao !== null && (
+              <p className="text-xs text-muted-foreground">
+                "Deixar vazio" fica disponível assim que a atualização do servidor for publicada.
+              </p>
+            )}
+
             <div className="flex flex-wrap items-end gap-4">
-              <div>
-                <label htmlFor="dias" className="text-sm font-medium block mb-1">Dias</label>
-                <Input id="dias" type="number" min={1} max={45} value={dias} className="w-28"
-                  onChange={(e) => setDias(Math.max(1, Math.min(45, Number(e.target.value) || 1)))} />
-              </div>
-              <Button size="lg" disabled={aplicando || selecionadosVisiveis.length === 0}
-                onClick={() => setConfirmarAberto(true)}>
-                Avançar <ArrowRight className="h-4 w-4 ml-2" />
+              {modo === "definir" && (
+                <div>
+                  <label htmlFor="dias" className="text-sm font-medium block mb-1">Dias</label>
+                  <Input id="dias" type="number" min={1} max={45} value={dias} className="w-28"
+                    onChange={(e) => setDias(Math.max(1, Math.min(45, Number(e.target.value) || 1)))} />
+                </div>
+              )}
+              <Button size="lg" disabled={aplicando || selecionados.length === 0} onClick={() => setConfirmarAberto(true)}>
+                Avançar com {selecionados.length} anúncio(s) <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
             </div>
             <Alert>
               <AlertDescription>
-                O Mercado Livre conta em <strong>dias corridos</strong>, não úteis. 6 dias corridos cobrem
-                cerca de 4 dias úteis.
+                {modo === "definir"
+                  ? <>O Mercado Livre conta em <strong>dias corridos</strong>, não úteis. 6 dias corridos cobrem cerca de 4 dias úteis.</>
+                  : <>O prazo é apagado e o anúncio volta a <strong>pronta entrega</strong> (sem prazo). Não existe "0 dias" no Mercado Livre.</>}
               </AlertDescription>
             </Alert>
 
             {(aplicando || resultados.length > 0) && (
               <div className="space-y-3">
                 {aplicando && <Progress value={progresso} />}
-                <div className="flex gap-4 text-sm">
-                  <span>✅ {resultados.filter((r) => r.status === "ok").length} aplicados</span>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <span>✅ {resultados.filter((r) => r.status === "ok").length} alterados</span>
                   <span>👁 {resultados.filter((r) => r.status === "simulado").length} simulados</span>
                   <span>➖ {resultados.filter((r) => r.status === "pulado").length} pulados</span>
                   <span>❌ {resultados.filter((r) => r.status === "erro").length} com erro</span>
@@ -518,21 +603,22 @@ export default function TempoDisponibilidade() {
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2"><Undo2 className="h-5 w-5" /> Desfazer</CardTitle>
           <CardDescription>
-            Volta o prazo ao que era antes (ou tira o prazo, se não tinha). Os anúncios que o filtro negativo
-            atual barraria já vêm marcados.
+            Volta cada anúncio ao prazo que tinha antes da última alteração feita por esta tela. Os anúncios que o
+            filtro negativo atual barraria já vêm marcados.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Button variant="outline" onClick={carregarAplicados} disabled={carregandoAplicados || desfazendo}>
             {carregandoAplicados ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <History className="h-4 w-4 mr-2" />}
-            Ver anúncios com prazo aplicado por esta tela
+            Ver anúncios alterados por esta tela
           </Button>
           {aplicados && (aplicados.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nada aplicado nesta conta.</p>
+            <p className="text-sm text-muted-foreground">Nada alterado nesta conta.</p>
           ) : (
             <>
               <div className="flex items-center gap-3 text-sm">
-                <span>{aplicados.length} aplicado(s) · {marcadosDesfazer.size} marcado(s)</span>
+                <span>{aplicados.length} alterado(s) · {marcadosDesfazer.size} marcado(s)</span>
+                <button className="text-primary underline" onClick={() => setMarcadosDesfazer(new Set(aplicados.map((a) => a.itemId)))}>marcar todos</button>
                 <button className="text-primary underline" onClick={() => setMarcadosDesfazer(new Set())}>desmarcar todos</button>
               </div>
               <div className="border rounded-md max-h-72 overflow-auto divide-y">
@@ -546,7 +632,7 @@ export default function TempoDisponibilidade() {
                     <span>
                       <span className="font-medium">{a.titulo}</span>
                       <span className="block text-xs text-muted-foreground">
-                        {a.itemId} · {a.valorAntes ?? "sem prazo"} → {a.valorDepois}
+                        {a.itemId} · {prazoTxt(a.valorAntes)} → {prazoTxt(a.valorDepois)}
                       </span>
                     </span>
                   </label>
@@ -577,10 +663,12 @@ export default function TempoDisponibilidade() {
       <Dialog open={confirmarAberto} onOpenChange={setConfirmarAberto}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Aplicar {dias} dias de disponibilidade?</DialogTitle>
+            <DialogTitle>
+              {modo === "remover" ? "Remover o prazo (deixar vazio)?" : `Aplicar ${dias} dias de disponibilidade?`}
+            </DialogTitle>
             <DialogDescription>
-              {selecionadosVisiveis.length} anúncio(s) marcado(s)
-              {jaNoValor > 0 && ` — ${jaNoValor} já está(ão) em ${valorAlvo} e será(ão) pulado(s)`}.
+              {selecionados.length} anúncio(s) selecionado(s)
+              {jaNoValor > 0 && ` — ${jaNoValor} já está(ão) ${modo === "remover" ? "sem prazo" : `em ${valorAlvo}`} e será(ão) pulado(s)`}.
               A garantia e os outros termos de cada anúncio são mantidos, e o valor anterior fica
               registrado para poder desfazer.
             </DialogDescription>
@@ -589,8 +677,8 @@ export default function TempoDisponibilidade() {
             <Button variant="outline" onClick={() => executar(true)}>
               <Eye className="h-4 w-4 mr-2" /> Simular (não altera)
             </Button>
-            <Button onClick={() => executar(false)}>
-              <CheckCircle2 className="h-4 w-4 mr-2" /> Aplicar agora
+            <Button onClick={() => executar(false)} variant={modo === "remover" ? "destructive" : "default"}>
+              <CheckCircle2 className="h-4 w-4 mr-2" /> {modo === "remover" ? "Remover agora" : "Aplicar agora"}
             </Button>
           </DialogFooter>
         </DialogContent>
