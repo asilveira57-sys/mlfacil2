@@ -112,6 +112,7 @@ const Mercado = lazyRetry(() => import("./pages/Mercado"));
 const Custos = lazyRetry(() => import("./pages/Custos"));
 const Concorrencia = lazyRetry(() => import("./pages/Concorrencia"));
 const Radiografia = lazyRetry(() => import("./pages/Radiografia"));
+const RadiografiaV2 = lazyRetry(() => import("./pages/RadiografiaV2"));
 const Tarefas = lazyRetry(() => import("./pages/Tarefas"));
 const TarefaDetalhe = lazyRetry(() => import("./pages/TarefaDetalhe"));
 const Settings = lazyRetry(() => import("./pages/Settings"));
@@ -302,7 +303,8 @@ const App = () => {
                   <Route path="/mercado" element={<Mercado />} />
                   <Route path="/custos" element={<Custos />} />
                   <Route path="/concorrencia" element={<Concorrencia />} />
-                  <Route path="/radiografia" element={<Radiografia />} />
+                  <Route path="/radiografia" element={<RadiografiaV2 />} />
+                  <Route path="/radiografia/classica" element={<Radiografia />} />
                   <Route path="/tarefas" element={<Tarefas />} />
                   <Route path="/tarefas/quadro" element={<Tarefas />} />
                   <Route path="/tarefas/inbox" element={<Tarefas />} />

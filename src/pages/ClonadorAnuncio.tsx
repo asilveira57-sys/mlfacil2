@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,13 @@ export default function ClonadorAnuncio() {
   const [historico, setHistorico] = useState<LogClone[]>([]);
 
   useEffect(() => { if (!origem && sellerId) setOrigem(String(sellerId)); }, [sellerId, origem]);
+
+  // Vindo da Radiografia/Linha do Tempo (?mlb=): preenche o código; origem = conta ativa
+  const [params] = useSearchParams();
+  useEffect(() => {
+    const mlb = params.get("mlb");
+    if (mlb && !codigo) setCodigo(mlb);
+  }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const carregarHistorico = async () => {
     const { data } = await (supabase as any).from("ml_clone_logs")
