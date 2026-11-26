@@ -162,7 +162,8 @@ export default function AdTimelineRadar() {
   const mlAccountId = sellerId || undefined;
 
   const [statusFilter, setStatusFilter] = useState<StatusBucket | 'ALL' | 'HAS_SALES'>('ALL');
-  const [mlStatusFilter, setMlStatusFilter] = useState<string>('all');
+  // Padrão: só anúncios no ar — pausado/finalizado não vende porque não está à venda
+  const [mlStatusFilter, setMlStatusFilter] = useState<string>('active');
   const [stockFilter, setStockFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState("");
   const [actionDrawerOpen, setActionDrawerOpen] = useState(false);
@@ -188,11 +189,13 @@ export default function AdTimelineRadar() {
   const bucketCounts = useMemo(() => {
     const c = { OK: 0, '30D': 0, '60D': 0, '90D': 0, '120D': 0, NO_SALES: 0, total: 0 } as Record<string, number>;
     for (const s of stats || []) {
+      // Contadores seguem o filtro de Status ML, para baterem com a lista
+      if (mlStatusFilter !== 'all' && s.status !== mlStatusFilter) continue;
       if (c[s.status_bucket] !== undefined) c[s.status_bucket]++;
       c.total++;
     }
     return c as any;
-  }, [stats]);
+  }, [stats, mlStatusFilter]);
   const countsLoading = statsLoading;
 
   const recalculateMutation = useRecalculateTimeline();
@@ -221,10 +224,11 @@ export default function AdTimelineRadar() {
     const limite = Date.now() - 24 * 3600 * 1000;
     const velhos = stats
       .filter(s => !s.status || !s.listing_synced_at || new Date(s.listing_synced_at).getTime() < limite)
+      .sort((a, b) => Number(!!a.status) - Number(!!b.status))
       .map(s => s.item_id);
     if (velhos.length > 0) {
       enrichTriggeredRef.current = true;
-      enrichMutation.mutate({ itemIds: velhos.slice(0, 400), mlAccountId });
+      enrichMutation.mutate({ itemIds: velhos.slice(0, 1000), mlAccountId });
     }
   }, [stats, mlAccountId]);
 
