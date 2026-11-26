@@ -32,7 +32,7 @@ async function resolveMlAccountUuid(mlUserId: string | undefined): Promise<strin
 
 export function useAdTimelineStats(workspaceId: string | null, filters: TimelineFilters) {
   return useQuery({
-    queryKey: ['ad-timeline-stats', workspaceId, filters],
+    queryKey: ['ad-timeline-stats', workspaceId, filters.ml_account_id],
     queryFn: async () => {
       if (!workspaceId) return [];
 
@@ -77,7 +77,7 @@ export function useAdTimelineStats(workspaceId: string | null, filters: Timeline
           const batchIds = itemIds.slice(i, i + batchSize);
           const { data: listings } = await supabase
             .from('meli_listings_cache')
-            .select('item_id, title, thumbnail, price, status, available_quantity, sku, variation_id, sold_quantity')
+            .select('item_id, title, thumbnail, price, status, available_quantity, sku, variation_id, sold_quantity, listing_synced_at:last_sync_at')
             .in('item_id', batchIds);
           
           listings?.forEach(l => listingMap.set(l.item_id, l));
@@ -333,31 +333,25 @@ export function useRecalculateTimeline() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async ({ workspaceId, mlAccountId }: { workspaceId: string; mlAccountId?: string }) => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
-
-      const response = await supabase.functions.invoke('ad-timeline-recalculate', {
-        body: { workspace_id: workspaceId, ml_account_id: mlAccountId },
+    // Recálculo em SQL no banco (ad_timeline_recalc): ~1 s por conta, sem edge function.
+    mutationFn: async ({ workspaceId, mlAccountId }: { workspaceId: string; mlAccountId?: string; silent?: boolean }) => {
+      const { data, error } = await (supabase as any).rpc('ad_timeline_recalc', {
+        p_workspace_id: workspaceId,
+        p_account: mlAccountId ?? null,
       });
-
-      if (response.error) throw response.error;
-      return response.data;
+      if (error) throw error;
+      return data as { processed: number; removed: number };
     },
-    onSuccess: (data) => {
+    onSuccess: (data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['ad-timeline-stats'] });
       queryClient.invalidateQueries({ queryKey: ['ad-timeline-bucket-counts'] });
-      toast({
-        title: 'Recálculo concluído',
-        description: `${data.processed} anúncios processados`,
-      });
+      if (!vars.silent) {
+        toast({ title: 'Recálculo concluído', description: `${data?.processed ?? 0} anúncios processados` });
+      }
     },
-    onError: (error) => {
-      toast({
-        title: 'Erro no recálculo',
-        description: error.message,
-        variant: 'destructive',
-      });
+    onError: (error: any, vars) => {
+      if (vars.silent) { console.warn('[timeline] recálculo automático falhou:', error); return; }
+      toast({ title: 'Erro no recálculo', description: error?.message || String(error), variant: 'destructive' });
     },
   });
 }

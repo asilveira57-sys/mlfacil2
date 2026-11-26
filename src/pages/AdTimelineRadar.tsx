@@ -53,7 +53,6 @@ import { ptBR } from "date-fns/locale";
 import { StatusBucketBadge, ActionDrawer } from "@/components/ad-timeline";
 import {
   useAdTimelineStats,
-  useAdTimelineBucketCounts,
   useRecalculateTimeline,
   useCreateAction,
   useEnrichTimelineItems,
@@ -185,10 +184,16 @@ export default function AdTimelineRadar() {
     status_bucket: statusFilter,
   });
 
-  const { data: bucketCounts, isLoading: countsLoading } = useAdTimelineBucketCounts(
-    workspaceId,
-    mlAccountId
-  );
+  // Contadores saem das mesmas linhas já carregadas (antes era uma 2ª varredura inteira)
+  const bucketCounts = useMemo(() => {
+    const c = { OK: 0, '30D': 0, '60D': 0, '90D': 0, '120D': 0, NO_SALES: 0, total: 0 } as Record<string, number>;
+    for (const s of stats || []) {
+      if (c[s.status_bucket] !== undefined) c[s.status_bucket]++;
+      c.total++;
+    }
+    return c as any;
+  }, [stats]);
+  const countsLoading = statsLoading;
 
   const recalculateMutation = useRecalculateTimeline();
   const createActionMutation = useCreateAction();
@@ -196,16 +201,35 @@ export default function AdTimelineRadar() {
   const enrichTriggeredRef = useRef(false);
   const { createTask } = useTasks(workspaceId ?? null);
 
-  // Background enrichment: fetch status/stock for items missing listing cache data
+  // Ao abrir: se o cálculo tem mais de 6 h, recalcula sozinho (SQL, ~1 s, sem custo de IA).
+  const autoRecalcRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workspaceId || statsLoading || recalculateMutation.isPending) return;
+    const chave = `${workspaceId}:${mlAccountId ?? 'all'}`;
+    if (autoRecalcRef.current === chave) return;
+    const ultimo = (stats || []).reduce((m, s) => Math.max(m, new Date(s.updated_at).getTime() || 0), 0);
+    autoRecalcRef.current = chave;
+    if (!ultimo || Date.now() - ultimo > 6 * 3600 * 1000) {
+      recalculateMutation.mutate({ workspaceId, mlAccountId, silent: true });
+    }
+  }, [workspaceId, mlAccountId, stats, statsLoading]);
+
+  // Status/estoque/foto: busca no ML os anúncios sem cadastro OU com cadastro de mais de 24 h.
+  // Até 400 por abertura (20 por chamada ao ML), os mais parados primeiro.
   useEffect(() => {
     if (!stats?.length || enrichTriggeredRef.current || enrichMutation.isPending) return;
-    const missingIds = stats.filter(s => !s.status).map(s => s.item_id);
-    if (missingIds.length > 0) {
+    const limite = Date.now() - 24 * 3600 * 1000;
+    const velhos = stats
+      .filter(s => !s.status || !s.listing_synced_at || new Date(s.listing_synced_at).getTime() < limite)
+      .map(s => s.item_id);
+    if (velhos.length > 0) {
       enrichTriggeredRef.current = true;
-      const batch = missingIds.slice(0, 200);
-      enrichMutation.mutate({ itemIds: batch, mlAccountId });
+      enrichMutation.mutate({ itemIds: velhos.slice(0, 400), mlAccountId });
     }
   }, [stats, mlAccountId]);
+
+  // Trocou de conta: libera nova atualização do cadastro
+  useEffect(() => { enrichTriggeredRef.current = false; }, [mlAccountId]);
 
   const handleRecalculate = () => {
     if (workspaceId) {
@@ -757,6 +781,11 @@ export default function AdTimelineRadar() {
                         <span className={`text-sm font-medium ${(item.days_since_last_sale || 0) > 60 ? 'text-destructive' : (item.days_since_last_sale || 0) > 30 ? 'text-warning' : 'text-foreground'}`}>
                           {item.days_since_last_sale ?? "—"}
                         </span>
+                        {item.status_bucket === 'NO_SALES' && item.listing_first_seen_at && (
+                          <div className="text-[10px] text-muted-foreground leading-tight" title="Há quanto tempo o anúncio aparece no sistema">
+                            há {Math.max(0, Math.floor((Date.now() - new Date(item.listing_first_seen_at).getTime()) / 86400000))}d
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-center text-xs px-1">{formatGap(item.avg_gap_hours)}</TableCell>
                       <TableCell className="text-center text-xs px-1">{item.sales_count_30d}</TableCell>

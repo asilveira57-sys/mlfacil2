@@ -21,6 +21,8 @@ export interface AdTimelineStats {
   days_since_last_sale: number | null;
   status_bucket: StatusBucket;
   updated_at: string;
+  listing_first_seen_at?: string | null;
+  listing_synced_at?: string | null;
   created_at: string;
   // Joined from listings cache
   title?: string;
