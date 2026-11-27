@@ -66,6 +66,7 @@ import { useToast } from "@/hooks/use-toast";
 import { exportTimelineExcel, exportTimelinePdf } from "@/utils/exportTimeline";
 import type { StatusBucket, ActionType, CloneChecklist, AdTimelineStats } from "@/types/ad-timeline";
 import { EconomyModeBanner } from "@/components/shared/EconomyModeBanner";
+import { useUserRole } from "@/hooks/useUserRole";
 
 const bucketLabels: Record<StatusBucket | 'ALL' | 'HAS_SALES', string> = {
   ALL: 'Todos',
@@ -156,6 +157,8 @@ function SortableHeader({
 
 export default function AdTimelineRadar() {
   const navigate = useNavigate();
+  // Clonador/recadastro em teste: só administradores veem as ações
+  const { isAdmin } = useUserRole();
   const { sellerId } = useActiveAccount();
   const { data: workspaceId } = useCurrentWorkspaceId();
   const { toast } = useToast();
@@ -808,9 +811,16 @@ export default function AdTimelineRadar() {
                             <DropdownMenuItem onClick={() => handleCreateAction(item, 'END')}>
                               <XCircle className="h-4 w-4 mr-2" />Encerrar
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleCreateAction(item, 'CLONE')}>
-                              <Copy className="h-4 w-4 mr-2" />Clonar
-                            </DropdownMenuItem>
+                            {isAdmin && (
+                              <>
+                                <DropdownMenuItem onClick={() => navigate(`/anuncios/clonar?mlb=${item.item_id}&modo=recadastro`)}>
+                                  <RefreshCw className="h-4 w-4 mr-2" />Recadastrar (novo MLB)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => navigate(`/anuncios/clonar?mlb=${item.item_id}`)}>
+                                  <Copy className="h-4 w-4 mr-2" />Clonar para outra conta
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>

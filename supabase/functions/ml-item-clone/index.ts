@@ -10,11 +10,14 @@
 //    Por isso copiamos todos os atributos da origem.
 //
 // Ações: load (só leitura) · clone (cria o anúncio). GET ?version para diagnóstico.
+// clone com recadastrar = true: MESMA conta. Cria o novo (MLB/MLBU novos) e só então
+// finaliza o antigo. Se o ML recusar por duplicado, pausa o antigo e tenta de novo;
+// se ainda falhar, reativa o antigo — o vendedor nunca fica sem anúncio.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const VERSION = 'item-clone-v1';
+const VERSION = 'item-clone-v2';
 const ML = 'https://api.mercadolibre.com';
 
 const corsHeaders = {
@@ -167,10 +170,11 @@ serve(async (req) => {
 
     // ════════════════════════ ACTION: clone ════════════════════════
     if (action === 'clone') {
-      const { originSellerId, destSellerId, codigo, overrides = {}, validar = false } = body;
+      const { originSellerId, codigo, overrides = {}, validar = false, recadastrar = false } = body;
+      const destSellerId = recadastrar ? originSellerId : body.destSellerId;
       if (!originSellerId || !destSellerId) return json({ ok: false, error: 'Escolha a conta de origem e a de destino' });
-      if (String(originSellerId) === String(destSellerId)) {
-        return json({ ok: false, error: 'Origem e destino são a mesma conta. O ML trata como anúncio duplicado.' });
+      if (!recadastrar && String(originSellerId) === String(destSellerId)) {
+        return json({ ok: false, error: 'Origem e destino são a mesma conta. Para refazer o anúncio na mesma conta, use Recadastrar.' });
       }
 
       let item: any; let descricao = '';
@@ -178,6 +182,15 @@ serve(async (req) => {
       catch (e) { return json({ ok: false, error: (e as Error).message }); }
       if (Array.isArray(item.variations) && item.variations.length > 0) {
         return json({ ok: false, error: 'Anúncio com variações ainda não é suportado nesta versão.' });
+      }
+      if (recadastrar) {
+        if (item.shipping?.logistic_type === 'fulfillment' || item.inventory_id) {
+          return json({ ok: false, error: 'Anúncio no Full: o estoque está preso a este anúncio. Recadastro bloqueado.' });
+        }
+        if (item.catalog_listing) return json({ ok: false, error: 'Anúncio de catálogo: recadastro bloqueado.' });
+        if (!['active', 'paused'].includes(item.status)) {
+          return json({ ok: false, error: `O anúncio está "${item.status}". Só dá para recadastrar ativo ou pausado.` });
+        }
       }
 
       let destToken: string;
@@ -232,7 +245,7 @@ serve(async (req) => {
         return { status: r.status, ok: r.ok || soAvisos, data };
       };
 
-      let modo = destinoUP ? 'family_name' : 'title';
+      let modo = (recadastrar ? 'recadastro/' : '') + (destinoUP ? 'family_name' : 'title');
       let res = await postar(payload);
 
       // O ML às vezes discorda da tag: troca de modelo e tenta uma vez.
@@ -256,6 +269,26 @@ serve(async (req) => {
         });
       }
 
+      // ── Recadastro: se o ML recusar por duplicado, pausa o antigo e tenta de novo ──
+      const mudarStatus = async (id: string, status: string) => {
+        const r = await fetch(`${ML}/items/${id}`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${destToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+        return r.ok;
+      };
+      let antigoPausado = false;
+      if (recadastrar && !res.ok && /duplicat|already exist|ya existe|similar/i.test(txt(res.data)) && item.status === 'active') {
+        antigoPausado = await mudarStatus(item.id, 'paused');
+        if (antigoPausado) {
+          await new Promise((r) => setTimeout(r, 1500));
+          res = await postar(payload);
+          modo += ' (antigo pausado)';
+          if (!res.ok) { await mudarStatus(item.id, 'active'); antigoPausado = false; modo += ' → antigo reativado'; }
+        }
+      }
+
       let descricaoOk: boolean | null = null;
       const novoId: string | null = res.ok ? res.data?.id : null;
       if (novoId && descricao) {
@@ -267,10 +300,21 @@ serve(async (req) => {
         descricaoOk = d.ok;
       }
 
+      // Recadastro: só depois do novo existir, finaliza o antigo. Confere o MLBU do novo.
+      let antigoFinalizado: boolean | null = null;
+      let upNovo: string | null = null;
+      if (recadastrar && novoId) {
+        antigoFinalizado = await mudarStatus(item.id, 'closed');
+        const novo = await getML(`/items/${novoId}?attributes=id,user_product_id,status`, destToken);
+        upNovo = novo.data?.user_product_id ?? null;
+      }
+
       await supabaseAdmin.from('ml_clone_logs').insert({
         user_id: userId, origin_seller_id: String(originSellerId), dest_seller_id: String(destSellerId),
         source_item_id: item.id, new_item_id: novoId, status: res.ok ? 'ok' : 'erro', modo,
         request_payload: payload, response_status: res.status, response_body: res.data, description_ok: descricaoOk,
+        recadastro: !!recadastrar, old_closed: antigoFinalizado,
+        old_user_product_id: item.user_product_id ?? null, new_user_product_id: upNovo,
       });
 
       if (!res.ok) {
@@ -286,6 +330,9 @@ serve(async (req) => {
       return json({
         ok: true, novoId, permalink: res.data?.permalink, status: res.data?.status,
         titulo: res.data?.title, descricaoOk, modo, avisos,
+        recadastro: !!recadastrar, antigoId: item.id, antigoFinalizado,
+        upAntigo: item.user_product_id ?? null, upNovo,
+        mesmoMLBU: !!(upNovo && item.user_product_id && upNovo === item.user_product_id),
       });
     }
 

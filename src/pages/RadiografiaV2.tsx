@@ -47,7 +47,7 @@ const REMEDIOS: Record<string, { label: string; rota?: (itemId: string) => strin
   publicidade:           { label: "Colocar em publicidade",        rota: () => "/publicidade" },
   conteudo:              { label: "Melhorar título, fotos e ficha", rota: () => "/radiografia/classica" },
   tempo_disponibilidade: { label: "Ajustar disponibilidade",       rota: () => "/tempo-disponibilidade" },
-  recadastrar:           { label: "Recadastrar (novo MLB)",        rota: (id) => `/anuncios/clonar?mlb=${id}` },
+  recadastrar:           { label: "Recadastrar (novo MLB)",        rota: (id) => `/anuncios/clonar?mlb=${id}&modo=recadastro` },
   repor_estoque:         { label: "Repor estoque" },
   reativar:              { label: "Reativar anúncio" },
   revisar_produto:       { label: "Revisar produto, embalagem e descrição" },

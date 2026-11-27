@@ -6,6 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
@@ -34,7 +38,11 @@ export default function ClonadorAnuncio() {
   const nomeConta = (id: string) => contas.find((c) => String(c.sellerId) === String(id))?.nickname || id;
 
   const [origem, setOrigem] = useState<string>("");
-  const [destino, setDestino] = useState<string>("");
+  const [destinoEscolhido, setDestino] = useState<string>("");
+  // recadastro = mesma conta: cria o novo e finaliza o antigo
+  const [modoRecadastro, setModoRecadastro] = useState(false);
+  const destino = modoRecadastro ? origem : destinoEscolhido;
+  const [confirmarRecadastro, setConfirmarRecadastro] = useState(false);
   const [codigo, setCodigo] = useState("");
 
   const [carregando, setCarregando] = useState(false);
@@ -58,6 +66,7 @@ export default function ClonadorAnuncio() {
   useEffect(() => {
     const mlb = params.get("mlb");
     if (mlb && !codigo) setCodigo(mlb);
+    if (params.get("modo") === "recadastro") setModoRecadastro(true);
   }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const carregarHistorico = async () => {
@@ -91,18 +100,20 @@ export default function ClonadorAnuncio() {
   const enviar = async (validar: boolean) => {
     if (!preview) return;
     if (!destino) { toast.error("Escolha a conta de destino."); return; }
-    if (destino === origem) { toast.error("Origem e destino precisam ser contas diferentes."); return; }
+    if (!modoRecadastro && destino === origem) { toast.error("Origem e destino precisam ser contas diferentes."); return; }
     setEnviando(validar ? "validar" : "clonar"); setResultado(null);
     try {
       const { data, error } = await supabase.functions.invoke("ml-item-clone", {
         body: {
           action: "clone", originSellerId: origem, destSellerId: destino, codigo: preview.id, validar,
+          recadastrar: modoRecadastro,
           overrides: { titulo, preco: Number(preco.replace(",", ".")), estoque: Number(estoque), tipo },
         },
       });
       if (error) throw error;
       setResultado({ ...data, validar });
-      if (data?.ok) toast.success(validar ? "Validado: o Mercado Livre aceitaria este anúncio." : "Anúncio clonado!");
+      if (data?.ok) toast.success(validar ? "Validado: o Mercado Livre aceitaria este anúncio."
+        : modoRecadastro ? "Anúncio recadastrado!" : "Anúncio clonado!");
       else toast.error(data?.error || "O Mercado Livre recusou.");
       if (!validar) carregarHistorico();
     } catch (e: any) {
@@ -116,12 +127,21 @@ export default function ClonadorAnuncio() {
     <div className="container mx-auto px-4 py-6 max-w-5xl space-y-6">
       <header>
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Copy className="h-6 w-6 text-primary" /> Clonar anúncio entre contas
+          <Copy className="h-6 w-6 text-primary" /> {modoRecadastro ? "Recadastrar anúncio" : "Clonar anúncio entre contas"}
         </h1>
         <p className="text-muted-foreground mt-1">
-          Copia um anúncio seu (fotos, atributos, ficha técnica, descrição, garantia) de uma conta para outra.
-          Um por vez.
+          {modoRecadastro
+            ? "Cria o mesmo anúncio de novo na mesma conta, com MLB novo, e finaliza o antigo. Para anúncio parado que precisa recomeçar do zero."
+            : "Copia um anúncio seu (fotos, atributos, ficha técnica, descrição, garantia) de uma conta para outra. Um por vez."}
         </p>
+        <div className="flex gap-2 mt-3">
+          <Button size="sm" variant={!modoRecadastro ? "default" : "outline"} onClick={() => { setModoRecadastro(false); setResultado(null); }}>
+            Clonar para outra conta
+          </Button>
+          <Button size="sm" variant={modoRecadastro ? "default" : "outline"} onClick={() => { setModoRecadastro(true); setResultado(null); }}>
+            Recadastrar nesta conta
+          </Button>
+        </div>
       </header>
 
       <Card>
@@ -138,9 +158,9 @@ export default function ClonadorAnuncio() {
               </SelectContent>
             </Select>
           </div>
-          <div>
+          <div className={modoRecadastro ? "hidden" : ""}>
             <label className="text-sm font-medium block mb-1">Conta de destino</label>
-            <Select value={destino} onValueChange={(v) => { setDestino(v); setResultado(null); }}>
+            <Select value={destinoEscolhido} onValueChange={(v) => { setDestino(v); setResultado(null); }}>
               <SelectTrigger><SelectValue placeholder="Escolha" /></SelectTrigger>
               <SelectContent>
                 {contas.filter((c) => String(c.sellerId) !== origem).map((c) =>
@@ -235,18 +255,54 @@ export default function ClonadorAnuncio() {
                 {enviando === "validar" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
                 Validar (não publica)
               </Button>
-              <Button onClick={() => enviar(false)} disabled={!!enviando || preview.temVariacoes || !destino}>
+              <Button onClick={() => (modoRecadastro ? setConfirmarRecadastro(true) : enviar(false))}
+                disabled={!!enviando || preview.temVariacoes || !destino}
+                variant={modoRecadastro ? "destructive" : "default"}>
                 {enviando === "clonar" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ArrowRight className="h-4 w-4 mr-2" />}
-                Clonar para {destino ? nomeConta(destino) : "…"}
+                {modoRecadastro ? "Recadastrar (cria o novo e finaliza o antigo)" : <>Clonar para {destino ? nomeConta(destino) : "…"}</>}
               </Button>
             </div>
+
+            {modoRecadastro && (
+              <p className="text-xs text-muted-foreground">
+                O novo anúncio não herda vendas, avaliações, perguntas nem visitas do antigo. O antigo só é finalizado depois
+                que o novo existir. Se o Mercado Livre recusar por duplicado, o antigo é pausado, o novo é criado e, se mesmo
+                assim falhar, o antigo volta a ficar ativo.
+              </p>
+            )}
+
+            <AlertDialog open={confirmarRecadastro} onOpenChange={setConfirmarRecadastro}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Recadastrar {preview.id}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Vai criar um anúncio novo na conta {nomeConta(origem)} e <strong>finalizar o {preview.id}</strong>.
+                    O anúncio finalizado sai do ar e o novo começa do zero (sem vendas, avaliações e perguntas).
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => { setConfirmarRecadastro(false); enviar(false); }}>Recadastrar</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
 
             {resultado && (
               <Alert variant={resultado.ok ? "default" : "destructive"}>
                 {resultado.ok ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                 <AlertDescription className="space-y-1">
                   {resultado.ok && resultado.validar && <p><strong>Validado.</strong> O Mercado Livre aceitaria este anúncio. Nada foi publicado.</p>}
-                  {resultado.ok && !resultado.validar && (
+                  {resultado.ok && !resultado.validar && resultado.recadastro && (
+                    <div className="space-y-1">
+                      <p><strong>Novo anúncio: {resultado.novoId}</strong>
+                        {resultado.permalink && <> · <a className="underline" href={resultado.permalink} target="_blank" rel="noreferrer">abrir</a></>}</p>
+                      <p>Antigo {resultado.antigoId}: {resultado.antigoFinalizado ? "finalizado ✔" : <strong>NÃO foi finalizado — finalize manualmente no Mercado Livre para não ficar duplicado</strong>}</p>
+                      <p>MLBU: {resultado.upAntigo || "—"} → {resultado.upNovo || "—"}
+                        {resultado.mesmoMLBU ? <strong> · atenção: o Mercado Livre manteve o MESMO MLBU</strong> : resultado.upNovo ? " · MLBU novo ✔" : ""}</p>
+                      {resultado.descricaoOk === false && <p>A descrição não foi copiada.</p>}
+                    </div>
+                  )}
+                  {resultado.ok && !resultado.validar && !resultado.recadastro && (
                     <p>
                       <strong>Clonado: {resultado.novoId}</strong>
                       {resultado.permalink && <> · <a className="underline" href={resultado.permalink} target="_blank" rel="noreferrer">abrir anúncio</a></>}
