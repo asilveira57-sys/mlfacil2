@@ -9982,7 +9982,11 @@ export type Database = {
           id: string
           modo: string | null
           new_item_id: string | null
+          new_user_product_id: string | null
+          old_closed: boolean | null
+          old_user_product_id: string | null
           origin_seller_id: string
+          recadastro: boolean
           request_payload: Json | null
           response_body: Json | null
           response_status: number | null
@@ -9997,7 +10001,11 @@ export type Database = {
           id?: string
           modo?: string | null
           new_item_id?: string | null
+          new_user_product_id?: string | null
+          old_closed?: boolean | null
+          old_user_product_id?: string | null
           origin_seller_id: string
+          recadastro?: boolean
           request_payload?: Json | null
           response_body?: Json | null
           response_status?: number | null
@@ -10012,7 +10020,11 @@ export type Database = {
           id?: string
           modo?: string | null
           new_item_id?: string | null
+          new_user_product_id?: string | null
+          old_closed?: boolean | null
+          old_user_product_id?: string | null
           origin_seller_id?: string
+          recadastro?: boolean
           request_payload?: Json | null
           response_body?: Json | null
           response_status?: number | null
