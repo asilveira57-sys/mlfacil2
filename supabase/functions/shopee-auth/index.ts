@@ -15,7 +15,7 @@ const REDIRECT = Deno.env.get('SHOPEE_REDIRECT') || 'https://www.mktpfacil.com/s
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
   if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
-    return json({ fn: 'shopee-auth', version: 'shopee-auth-v1', configurada: shopeeConfigurada(), ambiente: SHOPEE_AMBIENTE });
+    return json({ fn: 'shopee-auth', version: 'shopee-auth-v2', configurada: shopeeConfigurada(), ambiente: SHOPEE_AMBIENTE });
   }
 
   try {
@@ -34,7 +34,11 @@ Deno.serve(async (req) => {
     switch (action) {
       // Link para o vendedor autorizar a loja dele
       case 'auth_url': {
-        const url = await urlAssinada('/api/v2/shop/auth_partner', { redirect: REDIRECT });
+        // Sandbox v2: a Shopee usa um link fixo de autorização (doc "Sandbox Testing V2", 27/nov/2026).
+        // Produção: link assinado em /api/v2/shop/auth_partner.
+        const url = SHOPEE_AMBIENTE === 'teste'
+          ? `https://open.sandbox.test-stable.shopee.com/auth?auth_type=seller&partner_id=${partnerId()}&redirect_uri=${encodeURIComponent(REDIRECT)}&response_type=code`
+          : await urlAssinada('/api/v2/shop/auth_partner', { redirect: REDIRECT });
         return json({ success: true, url, ambiente: SHOPEE_AMBIENTE });
       }
 

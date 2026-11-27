@@ -2,14 +2,15 @@
 // Segredos (Lovable Cloud → Secrets):
 //   SHOPEE_PARTNER_ID   Partner ID do app (teste: 1256118)
 //   SHOPEE_PARTNER_KEY  Partner Key do app (NUNCA no código nem no chat)
-//   SHOPEE_HOST         opcional. Padrão: sandbox https://partner.test-stable.shopeemobile.com
+//   SHOPEE_HOST         opcional. Padrão: Sandbox v2 https://openplatform.sandbox.test-stable.shopee.sg
+//                       (o host antigo partner.test-stable.shopeemobile.com devolve "Wrong sign" para apps novos)
 //                       Produção global: https://partner.shopeemobile.com (Brasil: conferir no Go-Live)
 //   SHOPEE_AMBIENTE     opcional: 'teste' (padrão) ou 'producao'
 // Assinatura: hex(HMAC-SHA256(partner_key, base)), base =
 //   público: partner_id + path + timestamp
 //   loja:    partner_id + path + timestamp + access_token + shop_id
 
-export const SHOPEE_HOST = (Deno.env.get('SHOPEE_HOST') || 'https://partner.test-stable.shopeemobile.com').replace(/\/$/, '');
+export const SHOPEE_HOST = (Deno.env.get('SHOPEE_HOST') || 'https://openplatform.sandbox.test-stable.shopee.sg').replace(/\/$/, '');
 export const SHOPEE_AMBIENTE = Deno.env.get('SHOPEE_AMBIENTE') || 'teste';
 const PARTNER_ID = Deno.env.get('SHOPEE_PARTNER_ID') || '';
 const PARTNER_KEY = Deno.env.get('SHOPEE_PARTNER_KEY') || '';
