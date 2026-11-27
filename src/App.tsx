@@ -148,6 +148,7 @@ const ConsultantLibrary = lazyRetry(() => import("./pages/ConsultantLibrary"));
 const PublicTipPage = lazyRetry(() => import("./pages/PublicTipPage"));
 const AjustePreco = lazyRetry(() => import("./pages/AjustePreco"));
 const TempoDisponibilidade = lazyRetry(() => import("./pages/TempoDisponibilidade"));
+const AcoesEmLote = lazyRetry(() => import("./pages/AcoesEmLote"));
 const ClonadorAnuncio = lazyRetry(() => import("./pages/ClonadorAnuncio"));
 const Atacado = lazyRetry(() => import("./pages/Atacado"));
 const SystemStatus = lazyRetry(() => import("./pages/SystemStatus"));
@@ -321,6 +322,7 @@ const App = () => {
                   <Route path="/anuncios/clonar" element={<ClonadorAnuncio />} />
                   <Route path="/ajuste-preco" element={<AjustePreco />} />
                   <Route path="/tempo-disponibilidade" element={<TempoDisponibilidade />} />
+                  <Route path="/acoes-em-lote" element={<AcoesEmLote />} />
                   <Route path="/atacado" element={<Atacado />} />
                   <Route path="/seed" element={<Seed />} />
                   <Route path="/postits" element={<PostIts />} />

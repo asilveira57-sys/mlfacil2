@@ -14,7 +14,7 @@ serve(async (req) => {
 
   // Diagnóstico sem dados: confirma qual versão está publicada.
   if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
-    return new Response(JSON.stringify({ fn: 'ml-price-adjustment', version: 'availability-time-v4' }),
+    return new Response(JSON.stringify({ fn: 'ml-price-adjustment', version: 'availability-time-v5' }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
@@ -290,7 +290,11 @@ serve(async (req) => {
         titleContains,
         excludeLogistic = ['fulfillment'],
         onlyActive = true,
+        statuses,              // ex.: ['active','paused'] (Ações em lote)
+        excludeUsed = true,    // prazo não vale para Usado; estoque/status vale
       } = body;
+      const listaStatus: (string | null)[] = Array.isArray(statuses) && statuses.length
+        ? statuses : (onlyActive ? ['active'] : [null]);
 
       const norm = (s: string) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
       const alvos: string[] = (Array.isArray(terms) ? terms : (titleContains ? [titleContains] : []))
@@ -298,12 +302,13 @@ serve(async (req) => {
       const candidatos: any[] = [];
       const ignorados = { full: 0, usado: 0, sem_titulo: 0, inativo: 0 };
 
+      for (const stBusca of listaStatus) {
       let scrollId: string | null = null;
       let paginas = 0;
       while (paginas++ < 200) {
         const searchUrl =
           `https://api.mercadolibre.com/users/${sellerId}/items/search?search_type=scan&limit=100` +
-          (onlyActive ? '&status=active' : '') + (scrollId ? `&scroll_id=${encodeURIComponent(scrollId)}` : '');
+          (stBusca ? `&status=${stBusca}` : '') + (scrollId ? `&scroll_id=${encodeURIComponent(scrollId)}` : '');
         const searchRes = await fetch(searchUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
         if (!searchRes.ok) break;
         const searchData = await searchRes.json();
@@ -315,7 +320,7 @@ serve(async (req) => {
           const lote = ids.slice(i, i + 20);
           const multiRes = await fetch(
             `https://api.mercadolibre.com/items?ids=${lote.join(',')}` +
-            `&attributes=id,title,status,sale_terms,shipping,thumbnail,condition,catalog_listing,inventory_id,item_relations`,
+            `&attributes=id,title,status,sub_status,available_quantity,sale_terms,shipping,thumbnail,condition,catalog_listing,inventory_id,item_relations,variations`,
             { headers: { Authorization: `Bearer ${accessToken}` } },
           );
           if (!multiRes.ok) continue;
@@ -324,11 +329,11 @@ serve(async (req) => {
             if (entry.code !== 200 || !entry.body) continue;
             const it = entry.body;
 
-            if (onlyActive && it.status !== 'active') { ignorados.inativo++; continue; }
+            if (!listaStatus.includes(null) && !listaStatus.includes(it.status)) { ignorados.inativo++; continue; }
             // Full: pelo tipo logístico OU por ter estoque no Full (inventory_id)
             if (excludeLogistic.includes(it.shipping?.logistic_type) || it.inventory_id) { ignorados.full++; continue; }
             // ML não aceita prazo em anúncio "Usado"
-            if (it.condition === 'used') { ignorados.usado++; continue; }
+            if (excludeUsed && it.condition === 'used') { ignorados.usado++; continue; }
             if (!it.title) { ignorados.sem_titulo++; continue; }
             if (alvos.length && !alvos.some((a) => norm(it.title).includes(a))) continue;
 
@@ -338,6 +343,9 @@ serve(async (req) => {
               title: it.title,
               logisticType: it.shipping?.logistic_type ?? null,
               prazoAtual: atual?.value_name ?? null,
+              status: it.status, subStatus: it.sub_status ?? [],
+              estoque: it.available_quantity ?? null,
+              variacoes: Array.isArray(it.variations) ? it.variations.length : 0,
               thumbnail: it.thumbnail ?? null,
               catalogo: it.catalog_listing === true,
               vinculado: Array.isArray(it.item_relations) && it.item_relations.length > 0,
@@ -348,6 +356,7 @@ serve(async (req) => {
           }
         }
         if (!scrollId) break;
+      }
       }
 
       return new Response(JSON.stringify({
@@ -521,6 +530,88 @@ serve(async (req) => {
       return json(ok
         ? { success: true, itemId, title: item.title, prazoDepois: depois }
         : { success: false, itemId, error: putBody?.message || `prazo continua ${depois}`, responseBody: putBody });
+    }
+
+
+    // ── ACTION: apply_stock_status (Ações em lote) ──
+    // quantity (opcional): novo estoque — em anúncio com variações aplica a todas as variações.
+    // status (opcional): 'paused' | 'active'. Zerar o estoque já pausa no ML; mandamos o status
+    // também para garantir. Grava o antes/depois em sale_term_adjustment_logs (term_id STOCK_STATUS).
+    if (action === 'apply_stock_status') {
+      const { itemId, quantity, status: novoStatus, dryRun = false } = body;
+      const json = (o: unknown) => new Response(JSON.stringify(o),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      if (!itemId) return json({ success: false, error: 'itemId obrigatório' });
+      const temQtd = quantity !== undefined && quantity !== null && quantity !== '';
+      const qtd = Number(quantity);
+      if (temQtd && (!Number.isInteger(qtd) || qtd < 0)) return json({ success: false, itemId, error: 'Estoque inválido' });
+      if (novoStatus && !['paused', 'active'].includes(novoStatus)) return json({ success: false, itemId, error: 'Status inválido' });
+      if (!temQtd && !novoStatus) return json({ success: false, itemId, error: 'Nada para alterar' });
+
+      const ler = async () => {
+        const r = await fetch(`https://api.mercadolibre.com/items/${itemId}?attributes=id,title,status,sub_status,available_quantity,variations,shipping,inventory_id`,
+          { headers: { Authorization: `Bearer ${accessToken}` } });
+        return r.ok ? await r.json() : null;
+      };
+      const item = await ler();
+      if (!item) return json({ success: false, itemId, error: 'Falha ao ler o anúncio' });
+      if (item.shipping?.logistic_type === 'fulfillment' || item.inventory_id) {
+        return json({ success: false, skipped: true, itemId, reason: 'fulfillment' });
+      }
+      if (!['active', 'paused'].includes(item.status)) {
+        return json({ success: false, skipped: true, itemId, reason: `status=${item.status}` });
+      }
+      const variacoes: any[] = Array.isArray(item.variations) ? item.variations : [];
+      const antes = { estoque: item.available_quantity, status: item.status };
+
+      const payloadQtd: any = !temQtd ? null : variacoes.length
+        ? { variations: variacoes.map((v: any) => ({ id: v.id, available_quantity: qtd })) }
+        : { available_quantity: qtd };
+      // Ativar com estoque 0 não funciona no ML
+      if (novoStatus === 'active' && ((temQtd && qtd === 0) || (!temQtd && item.available_quantity === 0))) {
+        return json({ success: false, itemId, error: 'Para ativar, o anúncio precisa ter estoque' });
+      }
+      const jaEsta = (!temQtd || item.available_quantity === qtd) && (!novoStatus || item.status === novoStatus);
+      if (jaEsta) return json({ success: true, skipped: true, itemId, reason: 'ja_estava', antes });
+
+      if (dryRun) {
+        return json({ success: true, dryRun: true, itemId, title: item.title, antes,
+          depois: { estoque: temQtd ? qtd : item.available_quantity, status: novoStatus || (temQtd && qtd === 0 ? 'paused' : item.status) },
+          variacoes: variacoes.length });
+      }
+
+      const put = async (payload: unknown) => {
+        const r = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        return { ok: r.ok, status: r.status, data: await r.json().catch(() => null) };
+      };
+      const respostas: any[] = [];
+      // Sempre estoque primeiro, depois status (para ativar, o estoque já precisa estar lá)
+      if (payloadQtd) respostas.push(await put(payloadQtd));
+      if (novoStatus) respostas.push(await put({ status: novoStatus }));
+      const conf = await ler();
+      const depois = { estoque: conf?.available_quantity ?? null, status: conf?.status ?? null };
+      const ok = (!temQtd || depois.estoque === qtd) && (!novoStatus || depois.status === novoStatus);
+      const erro = respostas.find((r) => !r.ok);
+
+      const { error: logError } = await supabaseAdmin.from('sale_term_adjustment_logs').insert({
+        seller_id: sellerId, user_id: userId, item_id: itemId, titulo: item.title || null,
+        term_id: 'STOCK_STATUS', acao: 'apply',
+        valor_antes: `estoque=${antes.estoque};status=${antes.status}`,
+        valor_depois: `estoque=${depois.estoque};status=${depois.status}`,
+        sale_terms_antes: { available_quantity: item.available_quantity, status: item.status,
+          variations: variacoes.map((v: any) => ({ id: v.id, available_quantity: v.available_quantity })) },
+        request_payload: { quantity: temQtd ? qtd : null, status: novoStatus ?? null },
+        response_status: ok ? 200 : (erro?.status || 500), response_body: erro?.data ?? respostas.at(-1)?.data ?? null,
+      });
+      if (logError) console.error('[stock-status] log falhou:', logError.message);
+
+      return json(ok
+        ? { success: true, itemId, title: item.title, antes, depois }
+        : { success: false, itemId, error: erro?.data?.message || `ficou estoque ${depois.estoque}, status ${depois.status}`, antes, depois });
     }
 
     return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
