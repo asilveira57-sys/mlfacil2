@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, Plug, RefreshCw, Store, Unplug, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { ShopeePedidos } from "@/components/shopee/ShopeePedidos";
 
 /**
  * Shopee — lojas conectadas (27/nov/2026, beta, ainda sem item no menu).
@@ -79,7 +80,7 @@ export default function ShopeeLojas() {
 
   return (
     <PageContainer title="Shopee" subtitle="Conecte suas lojas da Shopee ao MKTP Fácil (beta)">
-      <div className="p-4 lg:p-6 space-y-4 max-w-3xl">
+      <div className="p-4 lg:p-6 space-y-4 max-w-5xl">
         {trocando && (
           <Alert><Loader2 className="h-4 w-4 animate-spin" /><AlertDescription>Finalizando a conexão com a Shopee…</AlertDescription></Alert>
         )}
@@ -129,6 +130,9 @@ export default function ShopeeLojas() {
             )}
           </CardContent>
         </Card>
+
+        {/* Pedidos e etiquetas (27/nov/2026) */}
+        <ShopeePedidos lojas={lojas} />
       </div>
     </PageContainer>
   );

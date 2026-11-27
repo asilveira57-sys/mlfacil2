@@ -76,3 +76,15 @@ export async function tokenValido(supabase: any, conta: any): Promise<string | n
   }).eq('id', conta.id);
   return r.data.access_token;
 }
+
+/** Igual a chamarShopee, mas devolve o arquivo (PDF da etiqueta). Se vier JSON é erro. */
+export async function baixarShopee(path: string, body: unknown, accessToken: string, shopId: number | string) {
+  const url = await urlAssinada(path, {}, accessToken, shopId);
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const tipo = r.headers.get('content-type') || '';
+  if (tipo.includes('json')) {
+    const data = await r.json().catch(() => ({}));
+    return { ok: false, erro: data?.message || data?.error || `HTTP ${r.status}`, bytes: null as Uint8Array | null, tipo };
+  }
+  return { ok: r.ok, erro: r.ok ? null : `HTTP ${r.status}`, bytes: new Uint8Array(await r.arrayBuffer()), tipo };
+}
