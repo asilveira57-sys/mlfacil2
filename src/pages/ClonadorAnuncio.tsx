@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -56,6 +57,7 @@ export default function ClonadorAnuncio() {
   const [estoque, setEstoque] = useState<string>("");
   const [tipo, setTipo] = useState<string>("");
   const [variacaoId, setVariacaoId] = useState<string>("");
+  const [todasVariacoes, setTodasVariacoes] = useState(false);
 
   const [enviando, setEnviando] = useState<"validar" | "clonar" | null>(null);
   const [resultado, setResultado] = useState<any>(null);
@@ -92,7 +94,7 @@ export default function ClonadorAnuncio() {
       setPreview(p); setDestinoUP(data.destinoUP ?? null); setAvisos(data.avisos || []);
       setTitulo(p.familyName || p.titulo); setTipo(p.tipo);
       const v0 = p.variacoes?.[0];
-      setVariacaoId(v0?.id || "");
+      setVariacaoId(v0?.id || ""); setTodasVariacoes(false);
       setPreco(String(v0?.preco ?? p.preco)); setEstoque(String((v0 ? v0.estoque : p.estoque) || 1));
     } catch (e: any) {
       toast.error(e?.message || String(e));
@@ -111,7 +113,7 @@ export default function ClonadorAnuncio() {
         body: {
           action: "clone", originSellerId: origem, destSellerId: destino, codigo: preview.id, validar,
           recadastrar: modoRecadastro,
-          overrides: { titulo, preco: Number(preco.replace(",", ".")), estoque: Number(estoque), tipo, variacaoId: variacaoId || undefined },
+          overrides: { titulo, preco: Number(preco.replace(",", ".")), estoque: Number(estoque), tipo, variacaoId: variacaoId || undefined, todasVariacoes },
         },
       });
       if (error) throw error;
@@ -220,7 +222,18 @@ export default function ClonadorAnuncio() {
             )}
 
             {preview.variacoes && preview.variacoes.length > 0 && (
-              <div>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <Checkbox checked={todasVariacoes} onCheckedChange={(v) => setTodasVariacoes(!!v)} />
+                  Criar um anúncio para cada variação ({preview.variacoes.length} anúncios)
+                </label>
+                {todasVariacoes ? (
+                  <p className="text-xs text-muted-foreground">
+                    Cada variação vira um anúncio próprio, com a foto, o preço, o estoque e o SKU dela, todos com o mesmo
+                    nome do produto. Os campos de preço e estoque abaixo não se aplicam.
+                    {modoRecadastro && " No recadastro, o antigo só é finalizado se todas forem criadas."}
+                  </p>
+                ) : (<>
                 <label className="text-sm font-medium block mb-1">Variação que vira o anúncio novo</label>
                 <Select value={variacaoId} onValueChange={(v) => {
                   setVariacaoId(v);
@@ -238,6 +251,7 @@ export default function ClonadorAnuncio() {
                   Não é possível duplicar as variações. O novo anúncio é criado sem variação, com a foto, o preço e o
                   estoque da variação escolhida.
                 </p>
+                </>)}
               </div>
             )}
 
@@ -317,8 +331,25 @@ export default function ClonadorAnuncio() {
               <Alert variant={resultado.ok ? "default" : "destructive"}>
                 {resultado.ok ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
                 <AlertDescription className="space-y-1">
-                  {resultado.ok && resultado.validar && <p><strong>Validado.</strong> O Mercado Livre aceitaria este anúncio. Nada foi publicado.</p>}
-                  {resultado.ok && !resultado.validar && resultado.recadastro && (
+                  {resultado.porVariacao && (
+                    <div className="space-y-1">
+                      <p><strong>{resultado.validacao ? "Validação" : "Criação"} por variação: {resultado.criados} de {resultado.total} {resultado.validacao ? "aceitas" : "criadas"}.</strong></p>
+                      <ul className="text-sm space-y-0.5">
+                        {resultado.resultados?.map((r: any) => (
+                          <li key={r.variacao}>
+                            {r.ok ? "✔" : "✖"} {r.variacao}
+                            {r.novoId && <> → {r.permalink ? <a className="underline" href={r.permalink} target="_blank" rel="noreferrer">{r.novoId}</a> : r.novoId}</>}
+                            {r.error && <span className="opacity-80"> — {r.error}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                      {resultado.recadastro && !resultado.validacao && (
+                        <p>Antigo {resultado.antigoId}: {resultado.antigoFinalizado ? "finalizado ✔" : "mantido (nem todas as variações foram criadas)"}</p>
+                      )}
+                    </div>
+                  )}
+                  {!resultado.porVariacao && resultado.ok && resultado.validar && <p><strong>Validado.</strong> O Mercado Livre aceitaria este anúncio. Nada foi publicado.</p>}
+                  {!resultado.porVariacao && resultado.ok && !resultado.validar && resultado.recadastro && (
                     <div className="space-y-1">
                       <p><strong>Novo anúncio: {resultado.novoId}</strong>
                         {resultado.permalink && <> · <a className="underline" href={resultado.permalink} target="_blank" rel="noreferrer">abrir</a></>}</p>
@@ -328,14 +359,14 @@ export default function ClonadorAnuncio() {
                       {resultado.descricaoOk === false && <p>A descrição não foi copiada.</p>}
                     </div>
                   )}
-                  {resultado.ok && !resultado.validar && !resultado.recadastro && (
+                  {!resultado.porVariacao && resultado.ok && !resultado.validar && !resultado.recadastro && (
                     <p>
                       <strong>Clonado: {resultado.novoId}</strong>
                       {resultado.permalink && <> · <a className="underline" href={resultado.permalink} target="_blank" rel="noreferrer">abrir anúncio</a></>}
                       {resultado.descricaoOk === false && " · a descrição não foi copiada"}
                     </p>
                   )}
-                  {!resultado.ok && <p><strong>Recusado:</strong> {resultado.error}</p>}
+                  {!resultado.ok && !resultado.porVariacao && <p><strong>Recusado:</strong> {resultado.error}</p>}
                   {resultado.ok && !resultado.validar && (resultado.avisoVariacao || resultado.avisoCatalogo) && (
                     <p className="text-sm">⚠ {[resultado.avisoVariacao, resultado.avisoCatalogo].filter(Boolean).join(" ")}</p>
                   )}

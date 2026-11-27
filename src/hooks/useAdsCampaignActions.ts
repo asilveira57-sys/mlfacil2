@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 
-type CampaignAction = 'pause_campaign' | 'activate_campaign' | 'pause_ad' | 'activate_ad' | 'add_ad' | 'remove_ad';
+type CampaignAction = 'pause_campaign' | 'activate_campaign' | 'pause_ad' | 'activate_ad' | 'add_ad' | 'move_ad' | 'remove_ad';
 
 interface ActionResult {
   success: boolean;

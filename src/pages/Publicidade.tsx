@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { AdsWritePermissionTest } from "@/components/ads/AdsWritePermissionTest";
 import { useNavigate } from 'react-router-dom';
 import { format, subDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
@@ -291,6 +292,7 @@ export default function Publicidade() {
         soft
       >
       <div className="p-4 lg:p-6 space-y-6">
+        <AdsWritePermissionTest sellerId={sellerId} />
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="flex items-center justify-between flex-wrap gap-4">
             <TabsList className="flex w-full max-w-4xl overflow-x-auto">

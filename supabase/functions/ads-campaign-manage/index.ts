@@ -67,7 +67,7 @@ async function fetchDiagnostics(accessToken: string, mlUserId?: string): Promise
       result.pads_http_method = 'GET';
       result.pads_request_params = padsParams;
       const padsResp = await fetch(padsUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: { Authorization: `Bearer ${accessToken}`, 'Api-Version': '1' },
       });
       result.pads_advertisers_status = padsResp.status;
       if (padsResp.ok) {
@@ -131,7 +131,8 @@ async function refreshToken(supabase: any, sellerId: string, userId: string, ref
   } catch { return null; }
 }
 
-type Action = 'pause_campaign' | 'activate_campaign' | 'pause_ad' | 'activate_ad' | 'add_ad' | 'remove_ad';
+type Action = 'pause_campaign' | 'activate_campaign' | 'update_campaign' | 'create_campaign' | 'list_campaigns'
+  | 'pause_ad' | 'activate_ad' | 'add_ad' | 'move_ad' | 'remove_ad' | 'bulk_ads' | 'test_write';
 
 /**
  * Build error response for frontend with PADS-specific guidance.
@@ -176,6 +177,9 @@ function buildErrorResponse(mlStatus: number, mlError: string, responseText: str
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
+  }
+  if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
+    return new Response(JSON.stringify({ fn: 'ads-campaign-manage', version: 'ads-v2-api' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   try {
@@ -271,164 +275,160 @@ Deno.serve(async (req) => {
       pads_request_params: diag.pads_request_params,
     };
 
-    let mlResponse: Response;
     let result: any;
 
-    switch (action) {
-      case 'pause_campaign':
-      case 'activate_campaign': {
-        if (!campaign_id) {
-          return new Response(JSON.stringify({ error: 'campaign_id required' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-        const newStatus = action === 'pause_campaign' ? 'paused' : 'active';
-        const url = `https://api.mercadolibre.com/advertising/product_ads/campaigns/${campaign_id}`;
-        console.log(`[ads-campaign-manage] ${action}: PUT ${url} -> status=${newStatus}`);
-        
-        mlResponse = await fetchWithRetry(url, {
-          method: 'PUT',
-          headers: mlHeaders,
-          body: JSON.stringify({ status: newStatus }),
+    // ═══════════ API NOVA do Product Ads (a antiga foi desligada em 06/06/2025) ═══════════
+    // Header api-version: 2. Base /marketplace/advertising/{SITE}. Leitura testada em 26/nov.
+    const SITE = diag.site_id || 'MLB';
+    const ADS = `https://api.mercadolibre.com/marketplace/advertising/${SITE}`;
+    const advertiserId = diag.pads_advertisers_sample?.[0]?.advertiser_id ?? null;
+    const h2 = { ...mlHeaders, 'api-version': '2' };
+    const ok = (o: unknown) => new Response(JSON.stringify(o), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    const chamar = async (method: string, url: string, payload?: unknown) => {
+      const r = await fetchWithRetry(url, { method, headers: h2, body: payload === undefined ? undefined : JSON.stringify(payload) });
+      const text = await r.text();
+      let data: any = null; try { data = JSON.parse(text); } catch { /* texto */ }
+      console.log(`[ads-campaign-manage] ${action}: ${method} ${url} -> ${r.status} ${text.substring(0, 300)}`);
+      return { ok: r.ok, status: r.status, text, data };
+    };
+    const falha = async (res: { status: number; text: string; data: any }) => {
+      const mlError = res.data?.message || res.data?.error || res.text;
+      await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false,
+        message: `ML API ${res.status}: ${mlError}`, meta: { ...baseMeta, api: 'v2', ml_status: res.status, ml_error_body: res.text.substring(0, 1000) } });
+      return ok(buildErrorResponse(res.status, mlError, res.text, diag));
+    };
+    const registrar = (message: string, meta: Record<string, unknown> = {}) =>
+      auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message, meta: { ...baseMeta, api: 'v2', ...meta } });
+    const precisaAnunciante = () => ok({
+      error: 'advertiser_not_found', error_code: 'PADS_NOT_ENABLED',
+      details: 'Esta conta não tem Mercado Ads (Product Ads) ativo. Ative em Mercado Livre > Publicidade.',
+    });
+    const exigir = (campos: Record<string, unknown>) => {
+      const faltando = Object.entries(campos).filter(([, v]) => v === undefined || v === null || v === '').map(([k]) => k);
+      return faltando.length ? new Response(JSON.stringify({ error: `${faltando.join(', ')} required` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }) : null;
+    };
+    const listarCampanhas = async () => {
+      const todas: any[] = [];
+      for (let offset = 0; offset < 2000; offset += 50) {
+        const r = await chamar('GET', `${ADS}/advertisers/${advertiserId}/product_ads/campaigns/search?limit=50&offset=${offset}`);
+        if (!r.ok) return { erro: r, todas };
+        const lote: any[] = r.data?.results || [];
+        todas.push(...lote);
+        if (lote.length < 50) break;
+      }
+      return { erro: null, todas };
+    };
+
+    const { name, budget, acos_target, strategy, status, item_ids } = body as any;
+
+    switch (action as string) {
+      // Escrita sem efeito: manda para uma campanha o MESMO status que ela já tem.
+      case 'test_write': {
+        if (!advertiserId) return precisaAnunciante();
+        const r = await chamar('GET', `${ADS}/advertisers/${advertiserId}/product_ads/campaigns/search?limit=1`);
+        if (!r.ok) return falha(r);
+        const c = r.data?.results?.[0];
+        if (!c) return ok({ success: true, permissao_escrita: null, details: 'Conta sem campanhas para testar.' });
+        const w = await chamar('PUT', `${ADS}/product_ads/campaigns/${c.id}`, { status: c.status });
+        await auditLog(supabase, { level: w.ok ? 'info' : 'error', area: 'ads_manage', action, userId: user.id, success: w.ok,
+          message: `Teste de escrita (sem efeito) na campanha ${c.id}: HTTP ${w.status}`, meta: { ...baseMeta, api: 'v2', ml_error_body: w.text.substring(0, 1000) } });
+        return ok({
+          success: true, permissao_escrita: w.ok, ml_status: w.status,
+          campanha_testada: { id: c.id, name: c.name, status: c.status },
+          details: w.ok ? 'O Mercado Livre aceitou o comando de escrita. A publicidade pode ser gerenciada pelo sistema.'
+            : `O Mercado Livre recusou (HTTP ${w.status}): ${w.data?.message || w.text.substring(0, 200)}`,
         });
+      }
 
-        const responseText = await mlResponse.text();
-        console.log(`[ads-campaign-manage] ML response ${mlResponse.status}: ${responseText.substring(0, 500)}`);
+      case 'list_campaigns': {
+        if (!advertiserId) return precisaAnunciante();
+        const { erro, todas } = await listarCampanhas();
+        if (erro) return falha(erro);
+        return ok({ success: true, advertiser_id: advertiserId, campaigns: todas });
+      }
 
-        if (!mlResponse.ok) {
-          let mlError = responseText;
-          try { const parsed = JSON.parse(responseText); mlError = parsed.message || parsed.error || responseText; } catch {}
-          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { ...baseMeta, ml_status: mlResponse.status, ml_error_body: responseText } });
-          const errBody = buildErrorResponse(mlResponse.status, mlError, responseText, diag);
-          return new Response(JSON.stringify(errBody), {
-            status: 200, 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
+      case 'create_campaign': {
+        if (!advertiserId) return precisaAnunciante();
+        const e = exigir({ name, budget, strategy }); if (e) return e;
+        const payload: Record<string, unknown> = {
+          name, budget: Number(budget), strategy, status: status || 'active', channel: 'marketplace',
+        };
+        if (acos_target !== undefined && acos_target !== null && acos_target !== '') payload.acos_target = Number(acos_target);
+        const r = await chamar('POST', `${ADS}/advertisers/${advertiserId}/product_ads/campaigns`, payload);
+        if (!r.ok) return falha(r);
+        await registrar(`Campanha criada: ${name}`, { payload });
+        return ok({ success: true, action, campaign: r.data });
+      }
+
+      case 'pause_campaign':
+      case 'activate_campaign':
+      case 'update_campaign': {
+        const e = exigir({ campaign_id }); if (e) return e;
+        const payload: Record<string, unknown> = {};
+        if (action === 'pause_campaign') payload.status = 'paused';
+        else if (action === 'activate_campaign') payload.status = 'active';
+        else {
+          if (name) payload.name = name;
+          if (budget !== undefined && budget !== '') payload.budget = Number(budget);
+          if (acos_target !== undefined && acos_target !== '') payload.acos_target = Number(acos_target);
+          if (strategy) payload.strategy = strategy;
+          if (status) payload.status = status;
+          if (!Object.keys(payload).length) return ok({ error: 'Nada para alterar' });
         }
-
-        await supabase
-          .from('ads_campaigns')
-          .update({ status: newStatus, updated_at: new Date().toISOString() })
-          .eq('ml_campaign_id', campaign_id)
-          .eq('seller_id', seller_id);
-
-        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Campanha ${campaign_id} -> ${newStatus}`, meta: { ...baseMeta, new_status: newStatus } });
-        result = { success: true, action, campaign_id, new_status: newStatus, ml_response: JSON.parse(responseText || '{}') };
+        const r = await chamar('PUT', `${ADS}/product_ads/campaigns/${campaign_id}`, payload);
+        if (!r.ok) return falha(r);
+        const local: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (payload.status) local.status = payload.status;
+        if (payload.name) local.name = payload.name;
+        await supabase.from('ads_campaigns').update(local).eq('ml_campaign_id', campaign_id).eq('seller_id', seller_id);
+        await registrar(`Campanha ${campaign_id} alterada`, { payload });
+        result = { success: true, action, campaign_id, new_status: payload.status, changes: payload };
         break;
       }
 
       case 'pause_ad':
-      case 'activate_ad': {
-        if (!item_id) {
-          return new Response(JSON.stringify({ error: 'item_id required' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-        const newStatus = action === 'pause_ad' ? 'paused' : 'active';
-        const url = `https://api.mercadolibre.com/advertising/product_ads/ads/${item_id}`;
-        console.log(`[ads-campaign-manage] ${action}: PUT ${url} -> status=${newStatus}`);
-
-        mlResponse = await fetchWithRetry(url, {
-          method: 'PUT',
-          headers: mlHeaders,
-          body: JSON.stringify({ status: newStatus }),
-        });
-
-        const adText = await mlResponse.text();
-        console.log(`[ads-campaign-manage] ML response ${mlResponse.status}: ${adText.substring(0, 500)}`);
-
-        if (!mlResponse.ok) {
-          let mlError = adText;
-          try { const parsed = JSON.parse(adText); mlError = parsed.message || parsed.error || adText; } catch {}
-          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { ...baseMeta, ml_status: mlResponse.status, ml_error_body: adText } });
-          const errBody = buildErrorResponse(mlResponse.status, mlError, adText, diag);
-          return new Response(JSON.stringify(errBody), {
-            status: 200,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-
-        await supabase
-          .from('ads_items')
-          .update({ status: newStatus, updated_at: new Date().toISOString() })
-          .eq('item_id', item_id)
-          .eq('seller_id', seller_id);
-
-        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} -> ${newStatus}`, meta: { ...baseMeta, new_status: newStatus } });
-        result = { success: true, action, item_id, new_status: newStatus };
-        break;
-      }
-
-      case 'add_ad': {
-        if (!campaign_id || !item_id) {
-          return new Response(JSON.stringify({ error: 'campaign_id and item_id required' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-        const url = `https://api.mercadolibre.com/advertising/product_ads/ads`;
-        console.log(`[ads-campaign-manage] add_ad: POST ${url} campaign=${campaign_id} item=${item_id}`);
-
-        mlResponse = await fetchWithRetry(url, {
-          method: 'POST',
-          headers: mlHeaders,
-          body: JSON.stringify({ campaign_id: Number(campaign_id), item_id }),
-        });
-
-        const addText = await mlResponse.text();
-        console.log(`[ads-campaign-manage] ML response ${mlResponse.status}: ${addText.substring(0, 500)}`);
-
-        if (!mlResponse.ok) {
-          let mlError = addText;
-          try { const parsed = JSON.parse(addText); mlError = parsed.message || parsed.error || addText; } catch {}
-          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { ...baseMeta, ml_status: mlResponse.status, ml_error_body: addText } });
-          const errBody = buildErrorResponse(mlResponse.status, mlError, addText, diag);
-          return new Response(JSON.stringify(errBody), {
-            status: 200,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-
-        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} adicionado à campanha ${campaign_id}`, meta: { ...baseMeta } });
-        result = { success: true, action, campaign_id, item_id };
-        break;
-      }
-
+      case 'activate_ad':
+      case 'add_ad':
+      case 'move_ad':
       case 'remove_ad': {
-        if (!item_id) {
-          return new Response(JSON.stringify({ error: 'item_id required' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
+        const e = exigir({ item_id }); if (e) return e;
+        let payload: Record<string, unknown>;
+        if (action === 'pause_ad') payload = { status: 'paused' };
+        else if (action === 'activate_ad') payload = { status: 'active' };
+        else if (action === 'remove_ad') payload = { campaign_id: 0 }; // tira da campanha (fica ocioso)
+        else {
+          const e2 = exigir({ campaign_id }); if (e2) return e2;
+          payload = { campaign_id: Number(campaign_id) };
         }
-        const url = `https://api.mercadolibre.com/advertising/product_ads/ads/${item_id}`;
-        console.log(`[ads-campaign-manage] remove_ad: DELETE ${url}`);
-
-        mlResponse = await fetchWithRetry(url, {
-          method: 'DELETE',
-          headers: mlHeaders,
-        });
-
-        const delText = await mlResponse.text();
-        console.log(`[ads-campaign-manage] ML response ${mlResponse.status}: ${delText.substring(0, 500)}`);
-
-        if (!mlResponse.ok && mlResponse.status !== 404) {
-          let mlError = delText;
-          try { const parsed = JSON.parse(delText); mlError = parsed.message || parsed.error || delText; } catch {}
-          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { ...baseMeta, ml_status: mlResponse.status, ml_error_body: delText } });
-          const errBody = buildErrorResponse(mlResponse.status, mlError, delText, diag);
-          return new Response(JSON.stringify(errBody), {
-            status: 200,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
+        const r = await chamar('PUT', `${ADS}/product_ads/ads/${item_id}?channel=marketplace`, payload);
+        if (!r.ok) return falha(r);
+        if (action === 'remove_ad') {
+          await supabase.from('ads_items').delete().eq('item_id', item_id).eq('seller_id', seller_id);
+        } else if (payload.status) {
+          await supabase.from('ads_items').update({ status: payload.status, updated_at: new Date().toISOString() })
+            .eq('item_id', item_id).eq('seller_id', seller_id);
         }
+        await registrar(`Anúncio ${item_id}: ${JSON.stringify(payload)}`, { payload });
+        result = { success: true, action, item_id, campaign_id, new_status: payload.status };
+        break;
+      }
 
-        await supabase
-          .from('ads_items')
-          .delete()
-          .eq('item_id', item_id)
-          .eq('seller_id', seller_id);
-
-        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} removido`, meta: { ...baseMeta } });
-        result = { success: true, action, item_id };
+      // Em lote: até 10.000 anúncios; {status} ou {campaign_id} (0 = tirar da campanha)
+      case 'bulk_ads': {
+        if (!advertiserId) return precisaAnunciante();
+        if (!Array.isArray(item_ids) || !item_ids.length) return ok({ error: 'item_ids required' });
+        const payload: Record<string, unknown> = {};
+        if (status) payload.status = status;
+        if (campaign_id !== undefined && campaign_id !== null && campaign_id !== '') payload.campaign_id = Number(campaign_id);
+        if (payload.campaign_id === 0) delete payload.status; // a API não aceita os dois juntos
+        if (!Object.keys(payload).length) return ok({ error: 'status ou campaign_id required' });
+        const r = await chamar('PUT', `${ADS}/advertisers/${advertiserId}/product_ads/ads?channel=marketplace`,
+          { target: item_ids.slice(0, 10000), payload });
+        if (!r.ok) return falha(r);
+        await registrar(`Lote de ${item_ids.length} anúncio(s): ${JSON.stringify(payload)}`, { payload, total: item_ids.length });
+        result = { success: true, action, total: item_ids.length, payload, ml_response: r.data };
         break;
       }
 

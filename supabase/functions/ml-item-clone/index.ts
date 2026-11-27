@@ -17,7 +17,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const VERSION = 'item-clone-v3';
+const VERSION = 'item-clone-v4';
 const ML = 'https://api.mercadolibre.com';
 
 const corsHeaders = {
@@ -206,53 +206,53 @@ serve(async (req) => {
       catch (e) { return json({ ok: false, error: (e as Error).message }); }
       const destinoUP = await ehUserProductSeller(destSellerId, destToken);
 
-      // ── Monta o anúncio novo a partir da origem ──
-      const atributos = (item.attributes || [])
-        .filter((a: any) => !ATRIBUTOS_IGNORADOS.has(a.id) && (a.value_id || a.value_name))
-        .map(termo);
-      if (variacao) {
-        // A combinação da variação (ex.: Cor) e o SKU dela viram atributos do anúncio novo
-        for (const a of [...(variacao.attribute_combinations || []), ...(variacao.attributes || [])]) {
-          if (!a?.id || ATRIBUTOS_IGNORADOS.has(a.id) || !(a.value_id || a.value_name)) continue;
-          const i = atributos.findIndex((x: any) => x.id === a.id);
-          if (i >= 0) atributos[i] = termo(a); else atributos.push(termo(a));
-        }
-      }
-      // Fotos: as da variação primeiro; se não tiver, todas
-      const fotosVar = variacao?.picture_ids?.length
-        ? (item.pictures || []).filter((p: any) => variacao.picture_ids.includes(p.id))
-        : [];
-      const fotos = (fotosVar.length ? fotosVar : (item.pictures || [])).map((p: any) => ({ source: p.secure_url || p.url }));
-      const precoBase = variacao?.price ?? item.price;
-      const estoqueBase = variacao ? variacao.available_quantity : item.available_quantity;
-
-      const saleTerms = (item.sale_terms || []).map(termo);
-
+      // ── Monta o anúncio novo a partir da origem (e, se houver, de UMA variação) ──
       const nome = String(overrides.titulo || '').trim();
-      const payload: Record<string, unknown> = {
-        category_id: item.category_id,
-        price: Number(overrides.preco) > 0 ? Number(overrides.preco) : precoBase,
-        currency_id: item.currency_id || 'BRL',
-        available_quantity: Number.isInteger(Number(overrides.estoque)) && Number(overrides.estoque) > 0
-          ? Number(overrides.estoque) : Math.max(1, estoqueBase || 1),
-        buying_mode: item.buying_mode || 'buy_it_now',
-        listing_type_id: overrides.tipo || item.listing_type_id,
-        condition: item.condition || 'new',
-        pictures: fotos,
-        attributes: atributos,
-        sale_terms: saleTerms,
-        shipping: {
-          mode: 'me2',
-          local_pick_up: !!item.shipping?.local_pick_up,
-          free_shipping: !!item.shipping?.free_shipping,
-        },
+      const saleTerms = (item.sale_terms || []).map(termo);
+      const montar = (v: any, usarOverrides: boolean): Record<string, unknown> => {
+        const atributos = (item.attributes || [])
+          .filter((a: any) => !ATRIBUTOS_IGNORADOS.has(a.id) && (a.value_id || a.value_name))
+          .map(termo);
+        if (v) {
+          // A combinação da variação (ex.: Cor) e o SKU dela viram atributos do anúncio novo
+          for (const a of [...(v.attribute_combinations || []), ...(v.attributes || [])]) {
+            if (!a?.id || ATRIBUTOS_IGNORADOS.has(a.id) || !(a.value_id || a.value_name)) continue;
+            const i = atributos.findIndex((x: any) => x.id === a.id);
+            if (i >= 0) atributos[i] = termo(a); else atributos.push(termo(a));
+          }
+        }
+        // Fotos: as da variação primeiro; se não tiver, todas
+        const fotosVar = v?.picture_ids?.length
+          ? (item.pictures || []).filter((p: any) => v.picture_ids.includes(p.id)) : [];
+        const fotos = (fotosVar.length ? fotosVar : (item.pictures || [])).map((p: any) => ({ source: p.secure_url || p.url }));
+        const precoBase = v?.price ?? item.price;
+        const estoqueBase = v ? v.available_quantity : item.available_quantity;
+        const p: Record<string, unknown> = {
+          category_id: item.category_id,
+          price: usarOverrides && Number(overrides.preco) > 0 ? Number(overrides.preco) : precoBase,
+          currency_id: item.currency_id || 'BRL',
+          available_quantity: usarOverrides && Number.isInteger(Number(overrides.estoque)) && Number(overrides.estoque) > 0
+            ? Number(overrides.estoque) : Math.max(1, estoqueBase || 1),
+          buying_mode: item.buying_mode || 'buy_it_now',
+          listing_type_id: overrides.tipo || item.listing_type_id,
+          condition: item.condition || 'new',
+          pictures: fotos,
+          attributes: atributos,
+          sale_terms: saleTerms,
+          shipping: { mode: 'me2', local_pick_up: !!item.shipping?.local_pick_up, free_shipping: !!item.shipping?.free_shipping },
+        };
+        if (item.video_id) p.video_id = item.video_id;
+        if (Array.isArray(item.channels) && item.channels.length) p.channels = item.channels;
+        // Modelo User Products: family_name (o ML monta o título com a cor/tamanho). Modelo antigo: title.
+        if (destinoUP) p.family_name = nome || item.family_name || item.title;
+        else {
+          const base = nome || item.title;
+          const extra = v ? (v.attribute_combinations || []).map((c: any) => c.value_name).filter(Boolean).join(' ') : '';
+          p.title = (extra && !base.toLowerCase().includes(extra.toLowerCase()) ? `${base} ${extra}` : base).slice(0, 60);
+        }
+        return p;
       };
-      if (item.video_id) payload.video_id = item.video_id;
-      if (Array.isArray(item.channels) && item.channels.length) payload.channels = item.channels;
-
-      // Modelo User Products: family_name, sem title. Modelo antigo: title.
-      if (destinoUP) payload.family_name = nome || item.family_name || item.title;
-      else payload.title = nome || item.title;
+      const payload = montar(variacao, true);
 
       // validar = true → /items/validate: confere tudo sem publicar
       const postar = async (p: Record<string, unknown>) => {
@@ -267,6 +267,68 @@ serve(async (req) => {
           causas(data).length > 0 && causas(data).every((c: any) => c.type === 'warning');
         return { status: r.status, ok: r.ok || soAvisos, data };
       };
+
+      // ════ Um anúncio por variação ════
+      // Cada variação vira um anúncio próprio (foto, preço, estoque, SKU e cor dela), todos com o
+      // mesmo nome do produto — no modelo User Products o ML agrupa como uma família.
+      if (overrides.todasVariacoes && variacoes.length > 1) {
+        const resultados: any[] = [];
+        const mudarStatusT = async (id: string, st: string) => (await fetch(`${ML}/items/${id}`, {
+          method: 'PUT', headers: { Authorization: `Bearer ${destToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: st }),
+        })).ok;
+        let antigoPausadoT = false;
+        for (const v of variacoes.slice(0, 50)) {
+          const p = montar(v, false);
+          let r = await postar(p);
+          if (!r.ok && /\[title\] are invalid|family_name/i.test(JSON.stringify(r.data || {})) && p.title) {
+            delete p.title; p.family_name = nome || item.family_name || item.title; r = await postar(p);
+          }
+          if (recadastrar && !validar && !r.ok && !antigoPausadoT && item.status === 'active'
+              && /duplicat|already exist|ya existe|similar/i.test(JSON.stringify(r.data || {}))) {
+            antigoPausadoT = await mudarStatusT(item.id, 'paused');
+            if (antigoPausadoT) { await new Promise((x) => setTimeout(x, 1500)); r = await postar(p); }
+          }
+          let descOk: boolean | null = null;
+          const nid = !validar && r.ok ? r.data?.id : null;
+          if (nid && descricao) {
+            descOk = (await fetch(`${ML}/items/${nid}/description`, {
+              method: 'POST', headers: { Authorization: `Bearer ${destToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ plain_text: descricao }),
+            })).ok;
+          }
+          const erros = causas(r.data).filter((c: any) => c.type !== 'warning').map((c: any) => c.message);
+          resultados.push({
+            variacao: nomeVariacao(v), ok: r.ok, novoId: nid, permalink: r.data?.permalink ?? null, descricaoOk: descOk,
+            error: r.ok ? null : (erros.join(' · ') || r.data?.message || `HTTP ${r.status}`),
+          });
+          if (!validar) {
+            await supabaseAdmin.from('ml_clone_logs').insert({
+              user_id: userId, origin_seller_id: String(originSellerId), dest_seller_id: String(destSellerId),
+              source_item_id: item.id, new_item_id: nid, status: r.ok ? 'ok' : 'erro',
+              modo: `${recadastrar ? 'recadastro/' : ''}por-variacao: ${nomeVariacao(v)}`,
+              request_payload: p, response_status: r.status, response_body: r.data, description_ok: descOk,
+              recadastro: !!recadastrar, old_user_product_id: item.user_product_id ?? null,
+            });
+          }
+        }
+        const criados = resultados.filter((x) => x.ok).length;
+        // Recadastro: só finaliza o antigo se TODAS as variações foram criadas
+        let antigoFinalizadoT: boolean | null = null;
+        if (recadastrar && !validar) {
+          if (criados === resultados.length) antigoFinalizadoT = await mudarStatusT(item.id, 'closed');
+          else if (antigoPausadoT) { await mudarStatusT(item.id, 'active'); antigoFinalizadoT = false; }
+          else antigoFinalizadoT = false;
+        }
+        return json({
+          ok: criados > 0, porVariacao: true, validacao: !!validar, total: resultados.length, criados, resultados,
+          recadastro: !!recadastrar, antigoId: item.id, antigoFinalizado: antigoFinalizadoT,
+          avisoCatalogo: item.catalog_listing ? 'A origem era de catálogo; os novos foram criados como anúncios comuns.' : null,
+          error: criados === resultados.length ? undefined
+            : `${resultados.length - criados} de ${resultados.length} variação(ões) recusada(s)` +
+              (recadastrar && !validar ? ' — o anúncio antigo foi mantido.' : '.'),
+        });
+      }
 
       let modo = (recadastrar ? 'recadastro/' : '') + (destinoUP ? 'family_name' : 'title');
       let res = await postar(payload);
