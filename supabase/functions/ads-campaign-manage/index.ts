@@ -179,7 +179,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
   if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
-    return new Response(JSON.stringify({ fn: 'ads-campaign-manage', version: 'ads-v2-api' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ fn: 'ads-campaign-manage', version: 'ads-v3-recs' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   try {
@@ -430,6 +430,126 @@ Deno.serve(async (req) => {
         await registrar(`Lote de ${item_ids.length} anúncio(s): ${JSON.stringify(payload)}`, { payload, total: item_ids.length });
         result = { success: true, action, total: item_ids.length, payload, ml_response: r.data };
         break;
+      }
+
+      // Só leitura: lê campanhas e anúncios com métricas na API nova e monta recomendações.
+      // Não altera nada no Mercado Livre.
+      case 'recommendations': {
+        if (!advertiserId) return precisaAnunciante();
+        const dias = Math.min(Math.max(Number(body.days) || 30, 7), 90);
+        const fim = new Date(Date.now() - 86400000); // até ontem (o dia de hoje vem incompleto)
+        const ini = new Date(fim.getTime() - (dias - 1) * 86400000);
+        const d = (x: Date) => x.toISOString().slice(0, 10);
+        const periodo = `date_from=${d(ini)}&date_to=${d(fim)}`;
+        const METRICAS = 'clicks,prints,cost,acos,units_quantity,total_amount,organic_units_quantity,organic_units_amount';
+
+        // Campanhas
+        const campanhas: any[] = [];
+        for (let offset = 0; offset < 1000; offset += 50) {
+          const r = await chamar('GET', `${ADS}/advertisers/${advertiserId}/product_ads/campaigns/search?limit=50&offset=${offset}&${periodo}&metrics=${METRICAS},roas`);
+          if (!r.ok) return falha(r);
+          const lote: any[] = r.data?.results || [];
+          campanhas.push(...lote);
+          if (lote.length < 50) break;
+        }
+        // Anúncios (inclui os que estão fora de campanha)
+        const anuncios: any[] = [];
+        let totalAnuncios = 0;
+        for (let offset = 0; offset < 3000; offset += 50) {
+          const r = await chamar('GET', `${ADS}/advertisers/${advertiserId}/product_ads/ads/search?limit=50&offset=${offset}&${periodo}&metrics=${METRICAS}`);
+          if (!r.ok) { if (offset === 0) return falha(r); break; }
+          totalAnuncios = r.data?.paging?.total ?? totalAnuncios;
+          const lote: any[] = r.data?.results || [];
+          anuncios.push(...lote);
+          if (lote.length < 50) break;
+        }
+
+        const num = (v: any) => Number(v) || 0;
+        const porId = new Map(campanhas.map((c) => [String(c.id), c]));
+        const ativas = campanhas.filter((c) => c.status === 'active');
+        // Campanha "de escala": ativa, com o maior ACOS objetivo (mais espaço para investir)
+        const escala = [...ativas].sort((a, b) => num(b.acos_target) - num(a.acos_target))[0] || null;
+        const recs: any[] = [];
+        const add = (r: any) => recs.push(r);
+        const brl = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
+
+        for (const c of campanhas) {
+          if (c.status !== 'active') continue;
+          const m = c.metrics || {};
+          const custo = num(m.cost), vendas = num(m.units_quantity), acos = num(m.acos), alvo = num(c.acos_target);
+          const orcDia = num(c.daily_budget || c.budget);
+          const base = { alvo_tipo: 'campanha', campaign_id: c.id, campanha: c.name, metricas: m, acos_objetivo: alvo, orcamento_dia: orcDia };
+          if (custo >= 20 && vendas === 0) {
+            add({ ...base, tipo: 'campanha_sem_venda', gravidade: 'alta', titulo: `Campanha "${c.name}" gastou ${brl(custo)} sem vender`,
+              motivo: `${num(m.clicks)} cliques e nenhuma venda em ${dias} dias.`,
+              sugestao: 'Pausar a campanha ou revisar os anúncios dela (preço, fotos, estoque).',
+              comando: { action: 'pause_campaign', campaign_id: c.id } });
+          } else if (alvo > 0 && acos > alvo * 1.3 && custo >= 30) {
+            add({ ...base, tipo: 'acos_acima', gravidade: 'alta', titulo: `ACOS de "${c.name}" está em ${acos.toFixed(1)}% (objetivo ${alvo}%)`,
+              motivo: `Gastou ${brl(custo)} para vender ${brl(num(m.total_amount))}. O ACOS real passou o objetivo em mais de 30%.`,
+              sugestao: `Baixar o ACOS objetivo ou tirar da campanha os anúncios que gastam sem vender.`,
+              comando: { action: 'update_campaign', campaign_id: c.id, acos_target: Math.max(3, Math.round(alvo * 0.85 * 100) / 100) } });
+          } else if (alvo > 0 && vendas >= 3 && acos > 0 && acos <= alvo * 0.6 && orcDia > 0 && custo / dias >= orcDia * 0.85) {
+            add({ ...base, tipo: 'orcamento_curto', gravidade: 'oportunidade', titulo: `"${c.name}" vende bem e está usando quase todo o orçamento`,
+              motivo: `ACOS ${acos.toFixed(1)}% (objetivo ${alvo}%), ${vendas} vendas. Gasto médio ${brl(custo / dias)}/dia para orçamento de ${brl(orcDia)}/dia.`,
+              sugestao: `Aumentar o orçamento diário (sugestão: ${brl(Math.ceil(orcDia * 1.3))}).`,
+              comando: { action: 'update_campaign', campaign_id: c.id, budget: Math.ceil(orcDia * 1.3) } });
+          } else if (num(m.prints) < 300) {
+            add({ ...base, tipo: 'sem_impressao', gravidade: 'media', titulo: `"${c.name}" quase não aparece (${num(m.prints)} impressões)`,
+              motivo: `Em ${dias} dias a campanha teve poucas impressões. Costuma ser ACOS objetivo baixo demais, anúncios sem estoque ou poucos anúncios.`,
+              sugestao: alvo ? `Subir o ACOS objetivo (sugestão: ${Math.round(alvo * 1.3 * 100) / 100}%) ou conferir estoque dos anúncios.` : 'Conferir estoque e anúncios da campanha.',
+              comando: alvo ? { action: 'update_campaign', campaign_id: c.id, acos_target: Math.min(500, Math.round(alvo * 1.3 * 100) / 100) } : null });
+          }
+        }
+
+        for (const a of anuncios) {
+          const m = a.metrics || {};
+          const custo = num(m.cost), vendas = num(m.units_quantity), cliques = num(m.clicks), acos = num(m.acos);
+          const camp = porId.get(String(a.campaign_id));
+          const alvo = num(camp?.acos_target);
+          const base = { alvo_tipo: 'anuncio', item_id: a.item_id, titulo_anuncio: a.title, thumbnail: a.thumbnail, permalink: a.permalink,
+            campaign_id: a.campaign_id || null, campanha: camp?.name || null, metricas: m, acos_objetivo: alvo || null, status_anuncio: a.status };
+          const naCampanha = a.campaign_id && Number(a.campaign_id) !== 0;
+          if (a.status === 'active' && naCampanha && custo >= 15 && vendas === 0 && cliques >= 15) {
+            add({ ...base, tipo: 'anuncio_sem_venda', gravidade: 'alta', titulo: `Anúncio gastou ${brl(custo)} sem vender`,
+              motivo: `${cliques} cliques e nenhuma venda em ${dias} dias${camp ? ` na campanha "${camp.name}"` : ''}.`,
+              sugestao: 'Pausar o anúncio na publicidade e revisar preço, fotos e título.',
+              comando: { action: 'pause_ad', item_id: a.item_id } });
+          } else if (a.status === 'active' && naCampanha && alvo > 0 && acos > alvo * 2 && custo >= 20) {
+            add({ ...base, tipo: 'anuncio_acos_alto', gravidade: 'media', titulo: `Anúncio com ACOS ${acos.toFixed(1)}%, o dobro do objetivo (${alvo}%)`,
+              motivo: `Gastou ${brl(custo)} e vendeu ${brl(num(m.total_amount))} em ${dias} dias.`,
+              sugestao: 'Pausar o anúncio na publicidade ou tirá-lo da campanha.',
+              comando: { action: 'pause_ad', item_id: a.item_id } });
+          } else if (a.status === 'active' && naCampanha && escala && String(a.campaign_id) !== String(escala.id)
+            && vendas >= 3 && alvo > 0 && acos > 0 && acos <= alvo * 0.5 && num(m.prints) < 2000) {
+            add({ ...base, tipo: 'mover_escala', gravidade: 'oportunidade', titulo: `Anúncio vende barato e pode ganhar mais exposição`,
+              motivo: `ACOS ${acos.toFixed(1)}% com ${vendas} vendas, mas só ${num(m.prints)} impressões.`,
+              sugestao: `Mover para a campanha "${escala.name}" (ACOS objetivo ${escala.acos_target}%).`,
+              campanha_destino: { id: escala.id, name: escala.name },
+              comando: { action: 'move_ad', item_id: a.item_id, campaign_id: escala.id } });
+          } else if (!naCampanha && num(m.organic_units_quantity) >= 5 && escala) {
+            add({ ...base, tipo: 'fora_de_campanha', gravidade: 'oportunidade', titulo: `Anúncio vende sozinho e está fora da publicidade`,
+              motivo: `${num(m.organic_units_quantity)} vendas orgânicas em ${dias} dias, sem campanha.`,
+              sugestao: `Adicionar à campanha "${escala.name}".`,
+              campanha_destino: { id: escala.id, name: escala.name },
+              comando: { action: 'add_ad', item_id: a.item_id, campaign_id: escala.id } });
+          }
+        }
+
+        const ordem: Record<string, number> = { alta: 0, media: 1, oportunidade: 2 };
+        recs.sort((x, y) => (ordem[x.gravidade] - ordem[y.gravidade]) || (num(y.metricas?.cost) - num(x.metricas?.cost)));
+        const soma = (k: string) => campanhas.reduce((s, c) => s + num(c.metrics?.[k]), 0);
+        return ok({
+          success: true, advertiser_id: advertiserId, periodo: { de: d(ini), ate: d(fim), dias },
+          resumo: {
+            campanhas: campanhas.length, campanhas_ativas: ativas.length,
+            anuncios_lidos: anuncios.length, anuncios_total: totalAnuncios,
+            custo: soma('cost'), vendas_ads: soma('total_amount'), unidades_ads: soma('units_quantity'),
+          },
+          campanhas: campanhas.map((c) => ({ id: c.id, name: c.name, status: c.status, acos_target: c.acos_target,
+            budget: c.daily_budget || c.budget, strategy: c.strategy, metrics: c.metrics })),
+          recomendacoes: recs,
+        });
       }
 
       default:

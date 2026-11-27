@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { AdsWritePermissionTest } from "@/components/ads/AdsWritePermissionTest";
+import { AdsRecommendationsPanel } from "@/components/ads/AdsRecommendationsPanel";
 import { useNavigate } from 'react-router-dom';
 import { format, subDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
@@ -51,6 +52,7 @@ import {
   Brain,
   Link2,
   CalendarIcon,
+  Lightbulb,
 } from 'lucide-react';
 import { AdsBudgetSimulator } from '@/components/ads/AdsBudgetSimulator';
 import { AdsAiConsultant } from '@/components/ads/AdsAiConsultant';
@@ -299,6 +301,10 @@ export default function Publicidade() {
               <TabsTrigger value="dashboard" className="flex items-center gap-2">
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Dashboard</span>
+              </TabsTrigger>
+              <TabsTrigger value="recommendations" className="flex items-center gap-2">
+                <Lightbulb className="h-4 w-4" />
+                <span className="hidden sm:inline">Recomendações</span>
               </TabsTrigger>
               <TabsTrigger value="campaigns" className="flex items-center gap-2">
                 <List className="h-4 w-4" />
@@ -599,6 +605,11 @@ export default function Publicidade() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Recommendations Tab */}
+          <TabsContent value="recommendations" className="space-y-6 mt-6">
+            <AdsRecommendationsPanel sellerId={sellerId} />
           </TabsContent>
 
           {/* AI Consultant Tab */}
