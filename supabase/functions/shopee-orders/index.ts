@@ -4,11 +4,14 @@
 //   ship_params    {account_id, order_sn}  mostra como a Shopee aceita o envio (drop-off / coleta)
 //   ship           {account_id, order_sn, modo:'dropoff'|'pickup', address_id?, pickup_time_id?}
 //                  "Programar envio" — muda o pedido na Shopee para PROCESSED (gera rastreio)
+//   create_test_item {account_id}  SÓ no ambiente de teste: cria um anúncio de teste pela API
+//                  (o upload de foto pelo Seller Center do sandbox está quebrado). Base para, no futuro,
+//                  levar anúncios do Mercado Livre para a Shopee.
 //   labels         {account_id, order_sns[]} gera e devolve o PDF das etiquetas (base64). Nada é gravado:
 //                  a etiqueta tem o endereço do comprador (política de dados da Shopee, 90 dias).
 // Sem dados pessoais no banco: ver migração 20261127004000_shopee_orders.sql.
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { baixarShopee, chamarShopee, shopeeConfigurada, tokenValido } from '../_shared/shopee.ts';
+import { baixarShopee, chamarShopee, shopeeConfigurada, SHOPEE_AMBIENTE, tokenValido, urlAssinada } from '../_shared/shopee.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -21,7 +24,7 @@ const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
   if (req.method === 'GET' && new URL(req.url).searchParams.has('version')) {
-    return json({ fn: 'shopee-orders', version: 'shopee-orders-v1' });
+    return json({ fn: 'shopee-orders', version: 'shopee-orders-v2' });
   }
   try {
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -116,6 +119,61 @@ Deno.serve(async (req) => {
         await supabase.from('shopee_orders').update({ order_status: 'PROCESSED', tracking_number: rastreio })
           .eq('shop_id', shopId).eq('order_sn', body.order_sn);
         return json({ success: true, tracking_number: rastreio });
+      }
+
+      case 'create_test_item': {
+        if (SHOPEE_AMBIENTE !== 'teste') return json({ error: 'Só disponível no ambiente de teste' }, 400);
+        const log: unknown[] = [];
+        // 1) Foto: envia o logo do site pela API de mídia (sem passar pelo navegador)
+        const img = await fetch('https://www.mktpfacil.com/favicon-512.png');
+        if (!img.ok) return json({ error: 'falha_imagem_origem', details: `HTTP ${img.status}` });
+        const fd = new FormData();
+        fd.append('image', new Blob([await img.arrayBuffer()], { type: 'image/png' }), 'produto-teste.png');
+        const up = await fetch(await urlAssinada('/api/v2/media_space/upload_image'), { method: 'POST', body: fd });
+        const upJson: any = await up.json().catch(() => ({}));
+        const imageId = upJson?.response?.image_info?.image_id
+          || upJson?.response?.image_info_list?.[0]?.image_info?.image_id;
+        if (!imageId) return json({ error: 'falha_upload_imagem', details: upJson?.message || upJson?.error || up.status });
+        log.push({ imagem: imageId });
+
+        // 2) Canais de envio habilitados na loja
+        const ch = await loja('GET', '/api/v2/logistics/get_channel_list');
+        const canais = (ch.data?.response?.logistics_channel_list || []).filter((c: any) => c.enabled);
+        const logistic_info = canais.slice(0, 5).map((c: any) => ({ logistic_id: c.logistics_channel_id, enabled: true }));
+        log.push({ canais: canais.map((c: any) => `${c.logistics_channel_id} ${c.logistics_channel_name}`) });
+        if (!logistic_info.length) return json({ error: 'sem_canal_envio', details: 'A loja de teste não tem canal de envio habilitado.', log });
+
+        // 3) Categoria folha: prioriza papelaria/etiqueta; tenta algumas até a Shopee aceitar
+        const cat = await loja('GET', '/api/v2/product/get_category', { query: { language: 'pt-BR' } });
+        const folhas = (cat.data?.response?.category_list || []).filter((c: any) => !c.has_children);
+        const pref = folhas.filter((c: any) => /etiqueta|adesiv|papel|escrit/i.test(c.display_category_name || c.original_category_name || ''));
+        const candidatas = [...pref, ...folhas.filter((c: any) => !pref.includes(c))].slice(0, 6);
+
+        const base: Record<string, unknown> = {
+          item_name: 'Etiqueta Adesiva Teste MKTP Facil 40x40 Rolo 1000 Unidades',
+          description: 'Produto de teste criado pelo MKTP Facil no ambiente sandbox da Shopee para validar pedidos e etiquetas. Nao comprar.',
+          original_price: 25.9,
+          seller_stock: [{ stock: 100 }],
+          weight: 0.3,
+          dimension: { package_length: 12, package_width: 12, package_height: 6 },
+          condition: 'NEW',
+          item_status: 'NORMAL',
+          image: { image_id_list: [imageId] },
+          brand: { brand_id: 0, original_brand_name: 'NoBrand' },
+          logistic_info,
+        };
+        const fiscal = { tax_info: { ncm: '48211000', same_state_cfop: '5102', diff_state_cfop: '6102', csosn: '102', origin: '0', measure_unit: 'UN' } };
+        for (const c of candidatas) {
+          for (const extra of [{}, fiscal]) {
+            const r = await loja('POST', '/api/v2/product/add_item', { body: { ...base, ...extra, category_id: c.category_id } });
+            log.push({ categoria: `${c.category_id} ${c.display_category_name}`, fiscal: !!(extra as any).tax_info, erro: r.erro });
+            if (r.ok && r.data?.response?.item_id) {
+              return json({ success: true, item_id: r.data.response.item_id, categoria: c.display_category_name, log });
+            }
+            if (!/tax|ncm|cfop|fiscal|invoice/i.test(String(r.erro))) break; // fiscal não resolve: próxima categoria
+          }
+        }
+        return json({ error: 'falha_criar_item', details: 'A Shopee recusou o anúncio de teste em todas as categorias tentadas.', log });
       }
 
       case 'labels': {

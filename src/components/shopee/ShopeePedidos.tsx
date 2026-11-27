@@ -14,7 +14,7 @@ import { toast } from "sonner";
  * shopee-orders para sincronizar, programar envio e gerar etiquetas. A etiqueta vem em PDF e é aberta
  * direto no navegador — não fica gravada no sistema (política de dados da Shopee).
  */
-type Loja = { id: string; shop_id: number; shop_name: string | null; status: string };
+type Loja = { id: string; shop_id: number; shop_name: string | null; status: string; ambiente?: string };
 type Pedido = {
   id: string; order_sn: string; order_status: string; create_time: string; total_amount: number | null;
   shipping_carrier: string | null; tracking_number: string | null; etiqueta_baixada_em: string | null;
@@ -95,6 +95,19 @@ export function ShopeePedidos({ lojas }: { lojas: Loja[] }) {
     } catch (e: any) { toast.error(e.message); } finally { setProgramando(false); }
   };
 
+  // Só no ambiente de teste: cria um anúncio pela API (o upload de foto do Seller Center de teste não funciona)
+  const [criandoItem, setCriandoItem] = useState(false);
+  const criarItemTeste = async () => {
+    setCriandoItem(true);
+    try {
+      const { data } = await supabase.functions.invoke("shopee-orders", { body: { account_id: conta, action: "create_test_item" } });
+      console.log("[shopee] create_test_item", data);
+      if (data?.success) toast.success(`Produto de teste criado (item ${data.item_id}). Agora crie pedidos em Console › Test Order.`);
+      else toast.error(`${data?.details || data?.error || "Falhou"} — detalhes no console do navegador.`, { duration: 10000 });
+    } catch (e: any) { toast.error(e.message); } finally { setCriandoItem(false); }
+  };
+  const lojaAtual = conectadas.find((l) => l.id === conta);
+
   const imprimir = async () => {
     setImprimindo(true);
     try {
@@ -156,6 +169,11 @@ export function ShopeePedidos({ lojas }: { lojas: Loja[] }) {
             {imprimindo ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Printer className="h-4 w-4 mr-2" />}
             Imprimir etiquetas ({imprimiveisSel.length})
           </Button>
+          {lojaAtual?.ambiente === "teste" && (
+            <Button variant="ghost" onClick={criarItemTeste} disabled={criandoItem}>
+              {criandoItem && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Criar produto de teste
+            </Button>
+          )}
         </div>
 
         {visiveis.length === 0 ? (
