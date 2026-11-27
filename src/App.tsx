@@ -148,6 +148,7 @@ const ConsultantLibrary = lazyRetry(() => import("./pages/ConsultantLibrary"));
 const PublicTipPage = lazyRetry(() => import("./pages/PublicTipPage"));
 const AjustePreco = lazyRetry(() => import("./pages/AjustePreco"));
 const TempoDisponibilidade = lazyRetry(() => import("./pages/TempoDisponibilidade"));
+const ShopeeLojas = lazyRetry(() => import("./pages/ShopeeLojas")); // Shopee beta (27/nov/2026)
 const AcoesEmLote = lazyRetry(() => import("./pages/AcoesEmLote"));
 const ClonadorAnuncio = lazyRetry(() => import("./pages/ClonadorAnuncio"));
 const Atacado = lazyRetry(() => import("./pages/Atacado"));
@@ -322,6 +323,8 @@ const App = () => {
                   <Route path="/anuncios/clonar" element={<ClonadorAnuncio />} />
                   <Route path="/ajuste-preco" element={<AjustePreco />} />
                   <Route path="/tempo-disponibilidade" element={<TempoDisponibilidade />} />
+                  <Route path="/shopee" element={<ShopeeLojas />} />
+                  <Route path="/shopee/callback" element={<ShopeeLojas />} />
                   <Route path="/acoes-em-lote" element={<AcoesEmLote />} />
                   <Route path="/atacado" element={<Atacado />} />
                   <Route path="/seed" element={<Seed />} />
