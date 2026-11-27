@@ -22,6 +22,7 @@ interface Preview {
   preco: number; moeda: string; estoque: number; categoria: string; tipo: string; condicao: string;
   status: string; permalink: string; fotos: string[]; atributos: number; temVariacoes: boolean;
   freteGratis: boolean; garantia: string | null; temDescricao: boolean;
+  variacoes?: { id: string; nome: string; preco: number; estoque: number }[];
 }
 
 interface LogClone {
@@ -54,6 +55,7 @@ export default function ClonadorAnuncio() {
   const [preco, setPreco] = useState<string>("");
   const [estoque, setEstoque] = useState<string>("");
   const [tipo, setTipo] = useState<string>("");
+  const [variacaoId, setVariacaoId] = useState<string>("");
 
   const [enviando, setEnviando] = useState<"validar" | "clonar" | null>(null);
   const [resultado, setResultado] = useState<any>(null);
@@ -88,8 +90,10 @@ export default function ClonadorAnuncio() {
       if (!data?.ok) throw new Error(data?.error || "Falha ao carregar");
       const p: Preview = data.preview;
       setPreview(p); setDestinoUP(data.destinoUP ?? null); setAvisos(data.avisos || []);
-      setTitulo(p.familyName || p.titulo); setPreco(String(p.preco)); setEstoque(String(p.estoque || 1));
-      setTipo(p.tipo);
+      setTitulo(p.familyName || p.titulo); setTipo(p.tipo);
+      const v0 = p.variacoes?.[0];
+      setVariacaoId(v0?.id || "");
+      setPreco(String(v0?.preco ?? p.preco)); setEstoque(String((v0 ? v0.estoque : p.estoque) || 1));
     } catch (e: any) {
       toast.error(e?.message || String(e));
     } finally {
@@ -107,7 +111,7 @@ export default function ClonadorAnuncio() {
         body: {
           action: "clone", originSellerId: origem, destSellerId: destino, codigo: preview.id, validar,
           recadastrar: modoRecadastro,
-          overrides: { titulo, preco: Number(preco.replace(",", ".")), estoque: Number(estoque), tipo },
+          overrides: { titulo, preco: Number(preco.replace(",", ".")), estoque: Number(estoque), tipo, variacaoId: variacaoId || undefined },
         },
       });
       if (error) throw error;
@@ -215,6 +219,28 @@ export default function ClonadorAnuncio() {
               </Alert>
             )}
 
+            {preview.variacoes && preview.variacoes.length > 0 && (
+              <div>
+                <label className="text-sm font-medium block mb-1">Variação que vira o anúncio novo</label>
+                <Select value={variacaoId} onValueChange={(v) => {
+                  setVariacaoId(v);
+                  const x = preview.variacoes!.find((y) => y.id === v);
+                  if (x) { setPreco(String(x.preco)); setEstoque(String(x.estoque || 1)); }
+                }}>
+                  <SelectTrigger className="max-w-md"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {preview.variacoes.map((v) => (
+                      <SelectItem key={v.id} value={v.id}>{v.nome} — {brl(v.preco)} · {v.estoque} un.</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Não é possível duplicar as variações. O novo anúncio é criado sem variação, com a foto, o preço e o
+                  estoque da variação escolhida.
+                </p>
+              </div>
+            )}
+
             <div className="grid gap-4 md:grid-cols-[1fr_140px_120px_160px]">
               <div>
                 <label className="text-sm font-medium block mb-1">
@@ -251,12 +277,12 @@ export default function ClonadorAnuncio() {
             )}
 
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => enviar(true)} disabled={!!enviando || preview.temVariacoes || !destino}>
+              <Button variant="outline" onClick={() => enviar(true)} disabled={!!enviando || !destino}>
                 {enviando === "validar" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
                 Validar (não publica)
               </Button>
               <Button onClick={() => (modoRecadastro ? setConfirmarRecadastro(true) : enviar(false))}
-                disabled={!!enviando || preview.temVariacoes || !destino}
+                disabled={!!enviando || !destino}
                 variant={modoRecadastro ? "destructive" : "default"}>
                 {enviando === "clonar" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ArrowRight className="h-4 w-4 mr-2" />}
                 {modoRecadastro ? "Recadastrar (cria o novo e finaliza o antigo)" : <>Clonar para {destino ? nomeConta(destino) : "…"}</>}
@@ -310,6 +336,9 @@ export default function ClonadorAnuncio() {
                     </p>
                   )}
                   {!resultado.ok && <p><strong>Recusado:</strong> {resultado.error}</p>}
+                  {resultado.ok && !resultado.validar && (resultado.avisoVariacao || resultado.avisoCatalogo) && (
+                    <p className="text-sm">⚠ {[resultado.avisoVariacao, resultado.avisoCatalogo].filter(Boolean).join(" ")}</p>
+                  )}
                   {resultado.avisos?.length > 0 && (
                     <p className="text-xs opacity-80">Avisos do ML: {resultado.avisos.join(" · ")}</p>
                   )}

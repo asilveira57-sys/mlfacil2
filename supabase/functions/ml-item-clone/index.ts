@@ -17,7 +17,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const VERSION = 'item-clone-v2';
+const VERSION = 'item-clone-v3';
 const ML = 'https://api.mercadolibre.com';
 
 const corsHeaders = {
@@ -38,6 +38,10 @@ const ATRIBUTOS_IGNORADOS = new Set([
 
 // Manda value_id E value_name: valores personalizados da conta (marca, modelo,
 // cor) têm value_id que não resolve em outro anúncio — sem o nome, o ML recusa.
+// Variação → "Cor: Branco · Tamanho: G"
+const nomeVariacao = (v: any) =>
+  (v.attribute_combinations || []).map((c: any) => `${c.name}: ${c.value_name}`).join(' · ') || `Variação ${v.id}`;
+
 const termo = (a: any) => {
   const o: Record<string, unknown> = { id: a.id };
   if (a.value_id) o.value_id = a.value_id;
@@ -141,12 +145,12 @@ serve(async (req) => {
         }
         const avisos: string[] = [];
         if (Array.isArray(item.variations) && item.variations.length > 0) {
-          avisos.push(`Tem ${item.variations.length} variações. Nesta versão o clonador copia anúncios sem variação.`);
+          avisos.push(`Tem ${item.variations.length} variações. Não é possível duplicar as variações: o novo anúncio é criado sem variação, a partir da variação escolhida.`);
         }
         if (item.shipping?.logistic_type === 'fulfillment') {
           avisos.push('A origem está no Full. O clone nasce como Mercado Envios normal (o Full é por conta).');
         }
-        if (item.catalog_listing) avisos.push('A origem é de catálogo. O clone nasce como anúncio comum.');
+        if (item.catalog_listing) avisos.push('A origem é de catálogo. O novo é criado como anúncio comum, na mesma categoria, sem catálogo.');
         return json({
           ok: true,
           preview: {
@@ -157,6 +161,9 @@ serve(async (req) => {
             fotos: (item.pictures || []).map((p: any) => p.secure_url || p.url),
             atributos: (item.attributes || []).filter((a: any) => a.value_name).length,
             temVariacoes: Array.isArray(item.variations) && item.variations.length > 0,
+            variacoes: (item.variations || []).map((v: any) => ({
+              id: String(v.id), nome: nomeVariacao(v), preco: v.price, estoque: v.available_quantity,
+            })),
             freteGratis: !!item.shipping?.free_shipping, garantia: (item.sale_terms || [])
               .find((t: any) => t.id === 'WARRANTY_TIME')?.value_name ?? null,
             temDescricao: descricao.length > 0,
@@ -180,14 +187,15 @@ serve(async (req) => {
       let item: any; let descricao = '';
       try { ({ item, descricao } = await lerOrigem(originSellerId, codigo)); }
       catch (e) { return json({ ok: false, error: (e as Error).message }); }
-      if (Array.isArray(item.variations) && item.variations.length > 0) {
-        return json({ ok: false, error: 'Anúncio com variações ainda não é suportado nesta versão.' });
-      }
+      // Variações: não dá para duplicar; o novo nasce SEM variação, a partir da escolhida (padrão: a 1ª)
+      const variacoes: any[] = Array.isArray(item.variations) ? item.variations : [];
+      const variacao: any = variacoes.length
+        ? (variacoes.find((v) => String(v.id) === String(overrides.variacaoId)) || variacoes[0])
+        : null;
       if (recadastrar) {
         if (item.shipping?.logistic_type === 'fulfillment' || item.inventory_id) {
           return json({ ok: false, error: 'Anúncio no Full: o estoque está preso a este anúncio. Recadastro bloqueado.' });
         }
-        if (item.catalog_listing) return json({ ok: false, error: 'Anúncio de catálogo: recadastro bloqueado.' });
         if (!['active', 'paused'].includes(item.status)) {
           return json({ ok: false, error: `O anúncio está "${item.status}". Só dá para recadastrar ativo ou pausado.` });
         }
@@ -202,20 +210,35 @@ serve(async (req) => {
       const atributos = (item.attributes || [])
         .filter((a: any) => !ATRIBUTOS_IGNORADOS.has(a.id) && (a.value_id || a.value_name))
         .map(termo);
+      if (variacao) {
+        // A combinação da variação (ex.: Cor) e o SKU dela viram atributos do anúncio novo
+        for (const a of [...(variacao.attribute_combinations || []), ...(variacao.attributes || [])]) {
+          if (!a?.id || ATRIBUTOS_IGNORADOS.has(a.id) || !(a.value_id || a.value_name)) continue;
+          const i = atributos.findIndex((x: any) => x.id === a.id);
+          if (i >= 0) atributos[i] = termo(a); else atributos.push(termo(a));
+        }
+      }
+      // Fotos: as da variação primeiro; se não tiver, todas
+      const fotosVar = variacao?.picture_ids?.length
+        ? (item.pictures || []).filter((p: any) => variacao.picture_ids.includes(p.id))
+        : [];
+      const fotos = (fotosVar.length ? fotosVar : (item.pictures || [])).map((p: any) => ({ source: p.secure_url || p.url }));
+      const precoBase = variacao?.price ?? item.price;
+      const estoqueBase = variacao ? variacao.available_quantity : item.available_quantity;
 
       const saleTerms = (item.sale_terms || []).map(termo);
 
       const nome = String(overrides.titulo || '').trim();
       const payload: Record<string, unknown> = {
         category_id: item.category_id,
-        price: Number(overrides.preco) > 0 ? Number(overrides.preco) : item.price,
+        price: Number(overrides.preco) > 0 ? Number(overrides.preco) : precoBase,
         currency_id: item.currency_id || 'BRL',
         available_quantity: Number.isInteger(Number(overrides.estoque)) && Number(overrides.estoque) > 0
-          ? Number(overrides.estoque) : Math.max(1, item.available_quantity || 1),
+          ? Number(overrides.estoque) : Math.max(1, estoqueBase || 1),
         buying_mode: item.buying_mode || 'buy_it_now',
         listing_type_id: overrides.tipo || item.listing_type_id,
         condition: item.condition || 'new',
-        pictures: (item.pictures || []).map((p: any) => ({ source: p.secure_url || p.url })),
+        pictures: fotos,
         attributes: atributos,
         sale_terms: saleTerms,
         shipping: {
@@ -331,6 +354,10 @@ serve(async (req) => {
         ok: true, novoId, permalink: res.data?.permalink, status: res.data?.status,
         titulo: res.data?.title, descricaoOk, modo, avisos,
         recadastro: !!recadastrar, antigoId: item.id, antigoFinalizado,
+        avisoVariacao: variacao
+          ? `Não é possível duplicar as variações. O anúncio foi criado sem variação, a partir de: ${nomeVariacao(variacao)}.`
+          : null,
+        avisoCatalogo: item.catalog_listing ? 'A origem era de catálogo; o novo foi criado como anúncio comum.' : null,
         upAntigo: item.user_product_id ?? null, upNovo,
         mesmoMLBU: !!(upNovo && item.user_product_id && upNovo === item.user_product_id),
       });
