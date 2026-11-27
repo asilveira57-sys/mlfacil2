@@ -17105,6 +17105,71 @@ export type Database = {
         }
         Relationships: []
       }
+      shopee_orders: {
+        Row: {
+          create_time: string | null
+          currency: string | null
+          etiqueta_baixada_em: string | null
+          id: string
+          itens: Json
+          order_sn: string
+          order_status: string | null
+          package_number: string | null
+          shipping_carrier: string | null
+          shop_id: number
+          shopee_account_id: string
+          synced_at: string
+          total_amount: number | null
+          tracking_number: string | null
+          update_time: string | null
+          user_id: string
+        }
+        Insert: {
+          create_time?: string | null
+          currency?: string | null
+          etiqueta_baixada_em?: string | null
+          id?: string
+          itens?: Json
+          order_sn: string
+          order_status?: string | null
+          package_number?: string | null
+          shipping_carrier?: string | null
+          shop_id: number
+          shopee_account_id: string
+          synced_at?: string
+          total_amount?: number | null
+          tracking_number?: string | null
+          update_time?: string | null
+          user_id: string
+        }
+        Update: {
+          create_time?: string | null
+          currency?: string | null
+          etiqueta_baixada_em?: string | null
+          id?: string
+          itens?: Json
+          order_sn?: string
+          order_status?: string | null
+          package_number?: string | null
+          shipping_carrier?: string | null
+          shop_id?: number
+          shopee_account_id?: string
+          synced_at?: string
+          total_amount?: number | null
+          tracking_number?: string | null
+          update_time?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopee_orders_shopee_account_id_fkey"
+            columns: ["shopee_account_id"]
+            isOneToOne: false
+            referencedRelation: "shopee_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       site_content: {
         Row: {
           chave: string
