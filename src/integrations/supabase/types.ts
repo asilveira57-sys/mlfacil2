@@ -17054,6 +17054,57 @@ export type Database = {
         }
         Relationships: []
       }
+      shopee_accounts: {
+        Row: {
+          access_token: string | null
+          ambiente: string
+          created_at: string
+          id: string
+          refresh_expires_at: string | null
+          refresh_token: string | null
+          region: string | null
+          shop_id: number
+          shop_name: string | null
+          status: string
+          token_expires_at: string | null
+          ultimo_erro: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token?: string | null
+          ambiente?: string
+          created_at?: string
+          id?: string
+          refresh_expires_at?: string | null
+          refresh_token?: string | null
+          region?: string | null
+          shop_id: number
+          shop_name?: string | null
+          status?: string
+          token_expires_at?: string | null
+          ultimo_erro?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string | null
+          ambiente?: string
+          created_at?: string
+          id?: string
+          refresh_expires_at?: string | null
+          refresh_token?: string | null
+          region?: string | null
+          shop_id?: number
+          shop_name?: string | null
+          status?: string
+          token_expires_at?: string | null
+          ultimo_erro?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       site_content: {
         Row: {
           chave: string
