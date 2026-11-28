@@ -8194,6 +8194,54 @@ export type Database = {
         }
         Relationships: []
       }
+      magalu_accounts: {
+        Row: {
+          access_token: string | null
+          ambiente: string
+          created_at: string
+          id: string
+          refresh_token: string | null
+          scopes: string | null
+          seller_name: string | null
+          status: string
+          tenant_id: string
+          token_expires_at: string | null
+          ultimo_erro: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token?: string | null
+          ambiente?: string
+          created_at?: string
+          id?: string
+          refresh_token?: string | null
+          scopes?: string | null
+          seller_name?: string | null
+          status?: string
+          tenant_id: string
+          token_expires_at?: string | null
+          ultimo_erro?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string | null
+          ambiente?: string
+          created_at?: string
+          id?: string
+          refresh_token?: string | null
+          scopes?: string | null
+          seller_name?: string | null
+          status?: string
+          tenant_id?: string
+          token_expires_at?: string | null
+          ultimo_erro?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       market_keywords_cache: {
         Row: {
           category_id: string
