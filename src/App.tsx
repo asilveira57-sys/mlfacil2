@@ -149,6 +149,7 @@ const PublicTipPage = lazyRetry(() => import("./pages/PublicTipPage"));
 const AjustePreco = lazyRetry(() => import("./pages/AjustePreco"));
 const TempoDisponibilidade = lazyRetry(() => import("./pages/TempoDisponibilidade"));
 const ShopeeLojas = lazyRetry(() => import("./pages/ShopeeLojas")); // Shopee beta (27/nov/2026)
+const MagaluLojas = lazyRetry(() => import("./pages/MagaluLojas")); // Magalu beta (28/nov/2026): conexão de lojas via ID Magalu
 const AcoesEmLote = lazyRetry(() => import("./pages/AcoesEmLote"));
 const ClonadorAnuncio = lazyRetry(() => import("./pages/ClonadorAnuncio"));
 const Atacado = lazyRetry(() => import("./pages/Atacado"));
@@ -325,6 +326,8 @@ const App = () => {
                   <Route path="/tempo-disponibilidade" element={<TempoDisponibilidade />} />
                   <Route path="/shopee" element={<ShopeeLojas />} />
                   <Route path="/shopee/callback" element={<ShopeeLojas />} />
+                  <Route path="/magalu" element={<MagaluLojas />} />
+                  <Route path="/magalu/callback" element={<MagaluLojas />} />
                   <Route path="/acoes-em-lote" element={<AcoesEmLote />} />
                   <Route path="/atacado" element={<Atacado />} />
                   <Route path="/seed" element={<Seed />} />

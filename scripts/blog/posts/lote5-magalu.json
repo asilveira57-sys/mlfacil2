@@ -1,0 +1,24 @@
+[
+ {
+  "titulo": "MKTP Fácil vai integrar com a Magalu: o que vem por aí",
+  "slug": "mktp-facil-integracao-magalu",
+  "resumo": "Estamos desenvolvendo a integração com a Magalu: conexão da loja, pedidos e etiquetas no mesmo lugar que o Mercado Livre e a Shopee.",
+  "conteudo_principal": "<p>O MKTP Fácil começou no Mercado Livre e vai ganhar mais um marketplace: <strong>estamos desenvolvendo a integração com a Magalu</strong>. A ideia é simples. Quem vende no Mercado Livre, na Shopee e na Magalu vai acompanhar pedidos e imprimir etiquetas no mesmo lugar, sem pular de painel em painel.</p>\n\n<p>Este post conta o que já está pronto, o que vem primeiro e como vai funcionar a conexão da sua loja.</p>\n\n<h2>Por que a Magalu</h2>\n<p>Muitos clientes do MKTP Fácil já vendem em mais de um canal. O dia deles costuma ter a mesma cena: abrir o painel do Mercado Livre, depois o da Shopee, depois o do Magalu, conferir pedido por pedido e imprimir cada etiqueta separada. Cada troca de tela é uma chance de esquecer um envio ou atrasar um pedido, e atraso pesa na reputação em qualquer marketplace.</p>\n<p>A Magalu lançou uma API nova para integradores, a Open API, que substitui a integração antiga. Foi essa porta que abriu caminho para o MKTP Fácil se conectar direto à loja do vendedor.</p>\n\n<h2>O que vem primeiro</h2>\n<p>A integração entra em etapas, na mesma ordem que estamos seguindo com a Shopee:</p>\n<ol>\n<li><strong>Conectar a loja.</strong> Você autoriza o MKTP Fácil a acessar a sua loja Magalu, e a conexão aparece no sistema com o nome da loja.</li>\n<li><strong>Pedidos.</strong> Os pedidos da Magalu entram numa lista junto com os dos outros canais, com status e prazo de envio.</li>\n<li><strong>Etiquetas.</strong> A impressão das etiquetas da Magalu passa a usar a mesma fila de impressão que você já usa para o Mercado Livre.</li>\n</ol>\n<p>Depois disso vêm os anúncios: consulta de preço e estoque e, mais à frente, ajustes feitos pelo próprio MKTP Fácil.</p>\n\n<h2>Como vai funcionar a conexão</h2>\n<p>Você não vai precisar passar senha para ninguém. Ao clicar em conectar, o MKTP Fácil leva você para a tela de login do ID Magalu, o mesmo login que você usa no Portal do Seller. Lá você entra com a conta da loja, escolhe qual loja quer conectar e vê exatamente quais permissões o sistema está pedindo. Ao aprovar, volta para o MKTP Fácil com a loja conectada.</p>\n<p>A autorização fica guardada só no servidor, nunca no navegador. E se um dia quiser desligar, basta desconectar a loja no MKTP Fácil ou remover o consentimento na sua conta do ID Magalu.</p>\n<p>Um detalhe que vale saber desde já: o Magalu Marketplace trabalha com lojas com CNPJ, então a conexão é feita com o login da empresa, não com uma conta pessoal.</p>\n\n<h2>E a Shopee?</h2>\n<p>A integração com a Shopee está mais adiantada. A conexão de lojas já funciona em ambiente de teste, e os pedidos e etiquetas estão sendo montados agora. A Magalu vai seguir o mesmo caminho, aproveitando o que já foi construído.</p>\n\n<h2>Quer ser dos primeiros a testar?</h2>\n<p>Se você vende na Magalu e quer usar a integração assim que ela abrir para testes, <a href=\"/contato\">fale com a gente</a> e diga que tem loja Magalu. Vamos chamar primeiro quem já está esperando. E se ainda não conhece o sistema, dá para começar hoje com o Mercado Livre: <a href=\"/planos\">veja os planos do MKTP Fácil</a>.</p>\n",
+  "imagem_capa": "https://www.mktpfacil.com/blog/mktp-facil-integracao-magalu.png",
+  "imagem_capa_alt": "MKTP Fácil vai integrar com a Magalu",
+  "categoria_id": "dfc8dd6c-ba4e-4985-9a45-5504cdf6d29c",
+  "tags": [
+   "Magalu",
+   "Integração",
+   "MKTP Fácil",
+   "Etiquetas",
+   "Novidades"
+  ],
+  "meta_title": "MKTP Fácil e Magalu: integração em desenvolvimento",
+  "meta_description": "O MKTP Fácil vai integrar com a Magalu: conexão da loja pelo ID Magalu, pedidos e etiquetas junto com Mercado Livre e Shopee. Veja o que vem primeiro.",
+  "meta_keywords": "integração magalu, magalu marketplace, etiquetas magalu",
+  "canonical_url": "https://www.mktpfacil.com/blog/mktp-facil-integracao-magalu",
+  "tempo_leitura_min": 3,
+  "offset_min": 0
+ }
+]
